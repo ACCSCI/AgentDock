@@ -43,7 +43,7 @@ export default defineConfig({
       // session mutates those files, which would otherwise trigger a Vite
       // full page reload and abort the in-flight create/delete SSE stream
       // (surfacing as "network error" in the UI). Ignore the whole dir.
-      ignored: ["**/.agentdock/**"],
+      ignored: ["**/.agentdock/**", "**/.claude/**"],
     },
   },
 });
