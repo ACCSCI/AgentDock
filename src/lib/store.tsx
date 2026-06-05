@@ -15,13 +15,14 @@ export interface TerminalInfo {
 interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
-  activeTerminalId: string | null;
+  activeTerminals: Map<string, string>; // sessionId → terminalId
 }
 
 interface StoreContextValue extends UIState {
   setActiveProject: (projectId: string | null) => void;
   setActiveSession: (sessionId: string | null) => void;
-  setActiveTerminal: (terminalId: string | null) => void;
+  setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
+  getActiveTerminal: (sessionId: string) => string | null;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -30,20 +31,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<UIState>({
     activeProjectId: null,
     activeSessionId: null,
-    activeTerminalId: null,
+    activeTerminals: new Map(),
   });
 
   const setActiveProject = useCallback((projectId: string | null) => {
-    setState((prev) => ({ ...prev, activeProjectId: projectId, activeSessionId: null, activeTerminalId: null }));
+    setState((prev) => ({ ...prev, activeProjectId: projectId, activeSessionId: null }));
   }, []);
 
   const setActiveSession = useCallback((sessionId: string | null) => {
-    setState((prev) => ({ ...prev, activeSessionId: sessionId, activeTerminalId: null }));
+    setState((prev) => ({ ...prev, activeSessionId: sessionId }));
   }, []);
 
-  const setActiveTerminal = useCallback((terminalId: string | null) => {
-    setState((prev) => ({ ...prev, activeTerminalId: terminalId }));
+  const setActiveTerminal = useCallback((sessionId: string, terminalId: string | null) => {
+    setState((prev) => {
+      const next = new Map(prev.activeTerminals);
+      if (terminalId === null) {
+        next.delete(sessionId);
+      } else {
+        next.set(sessionId, terminalId);
+      }
+      return { ...prev, activeTerminals: next };
+    });
   }, []);
+
+  const getActiveTerminal = useCallback((sessionId: string): string | null => {
+    return state.activeTerminals.get(sessionId) ?? null;
+  }, [state.activeTerminals]);
 
   return (
     <StoreContext.Provider
@@ -52,6 +65,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setActiveProject,
         setActiveSession,
         setActiveTerminal,
+        getActiveTerminal,
       }}
     >
       {children}

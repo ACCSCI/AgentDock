@@ -24,7 +24,7 @@ export interface TerminalInstance {
   buffer: string[];
 }
 
-const MAX_BUFFER_LINES = 5000;
+const MAX_BUFFER_LINES = 50000;
 
 export class TerminalManager {
   private terminals = new Map<string, TerminalInstance>();

@@ -9,7 +9,8 @@ interface TerminalManagerProps {
 }
 
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
-  const { activeTerminalId, setActiveTerminal } = useStore();
+  const { setActiveTerminal, getActiveTerminal } = useStore();
+  const activeTerminalId = getActiveTerminal(sessionId);
   const [terminals, setTerminals] = useState<TerminalData[]>([]);
   const [loading, setLoading] = useState(false);
   const createTerminal = useCreateTerminal();
@@ -24,7 +25,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         setTerminals(data.terminals);
         // If active terminal no longer exists, clear it
         if (activeTerminalId && !data.terminals.find((t: TerminalData) => t.terminalId === activeTerminalId)) {
-          setActiveTerminal(null);
+          setActiveTerminal(sessionId, null);
         }
       }
     } catch {
@@ -46,16 +47,16 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   useEffect(() => {
     if (!activeTerminalId && terminals.length > 0) {
       const first = terminals.find((t) => t.status !== "exited") ?? terminals[0];
-      setActiveTerminal(first.terminalId);
+      setActiveTerminal(sessionId, first.terminalId);
     }
-  }, [activeTerminalId, terminals, setActiveTerminal]);
+  }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
 
   const handleNewTerminal = async () => {
     setLoading(true);
     try {
       const terminal = await createTerminal.mutateAsync({ sessionId });
       setTerminals((prev) => [...prev, terminal]);
-      setActiveTerminal(terminal.terminalId);
+      setActiveTerminal(sessionId, terminal.terminalId);
     } catch (err) {
       alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -70,7 +71,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       setTerminals((prev) => prev.filter((t) => t.terminalId !== terminalId));
       if (activeTerminalId === terminalId) {
         const remaining = terminals.filter((t) => t.terminalId !== terminalId && t.status !== "exited");
-        setActiveTerminal(remaining.length > 0 ? remaining[0].terminalId : null);
+        setActiveTerminal(sessionId, remaining.length > 0 ? remaining[0].terminalId : null);
       }
     } catch {
       // ignore
@@ -78,7 +79,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   };
 
   const handleTabClick = (terminalId: string) => {
-    setActiveTerminal(terminalId);
+    setActiveTerminal(sessionId, terminalId);
   };
 
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
