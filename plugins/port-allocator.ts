@@ -25,6 +25,7 @@ const LOCK_FILE = "ports.lock";
 
 const LOCK_RETRY_MS = 10;
 const LOCK_MAX_RETRIES = 500; // 5 seconds total
+const LOCK_STALE_MS = 30_000; // a lock older than this is considered stale
 
 // ============================================================
 // PortAllocator Interface
@@ -130,15 +131,83 @@ export class FilePortAllocator implements PortAllocator {
   // --- File locking ---
 
   /**
+   * Decide whether an existing lock file is stale and safe to break.
+   *
+   * The lock content is JSON `{ pid, ts }`. A lock is considered stale when:
+   *  - its content cannot be parsed or carries no usable pid (legacy/corrupt), OR
+   *  - the recorded pid no longer corresponds to a live process, OR
+   *  - the lock is older than LOCK_STALE_MS.
+   *
+   * A lock held by a live process that is younger than LOCK_STALE_MS is NOT
+   * stale and must not be broken (doing so would let two processes enter the
+   * critical section and hand out duplicate ports).
+   */
+  private isLockStale(): boolean {
+    let raw: string;
+    try {
+      raw = readFileSync(this.lockPath, "utf-8");
+    } catch {
+      // Lock vanished — treat as breakable so the caller can retry acquisition.
+      return true;
+    }
+
+    let pid: number | undefined;
+    let ts: number | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { pid?: unknown; ts?: unknown };
+      if (typeof parsed.pid === "number") pid = parsed.pid;
+      if (typeof parsed.ts === "number") ts = parsed.ts;
+    } catch {
+      // Legacy/corrupt lock content (e.g. empty or non-JSON) — break it.
+      return true;
+    }
+
+    // No usable pid recorded — fall back to age-based decision only.
+    if (pid === undefined) {
+      return true;
+    }
+
+    // Age check: an old lock is stale regardless of liveness.
+    if (ts !== undefined && Date.now() - ts > LOCK_STALE_MS) {
+      return true;
+    }
+
+    // Liveness check: signal 0 probes existence without affecting the process.
+    try {
+      process.kill(pid, 0);
+      // Process is alive and the lock is fresh — NOT stale.
+      return false;
+    } catch (err: any) {
+      // ESRCH: no such process → dead holder → stale.
+      // EPERM: process exists but owned by another user → treat as alive.
+      if (err?.code === "EPERM") {
+        return false;
+      }
+      return true;
+    }
+  }
+
+  /**
    * Execute `fn` under an exclusive file lock.
    * Uses O_EXCL for atomic lock acquisition.
-   * Retries with backoff when the lock is held by another process.
+   * Retries with backoff when the lock is held by another process, and only
+   * force-breaks the lock when it is provably stale (dead holder or aged out).
    */
   private async withLock<T>(fn: () => Promise<T>): Promise<T> {
     for (let attempt = 0; attempt <= LOCK_MAX_RETRIES; attempt++) {
       try {
         // Atomic lock: O_CREAT | O_EXCL fails if file already exists
         const fd = openSync(this.lockPath, "wx");
+        // Record holder identity so others can assess liveness/age.
+        try {
+          writeFileSync(
+            this.lockPath,
+            JSON.stringify({ pid: process.pid, ts: Date.now() }),
+            "utf-8",
+          );
+        } catch {
+          // Best-effort metadata; lock is already held atomically.
+        }
         closeSync(fd);
 
         try {
@@ -153,19 +222,22 @@ export class FilePortAllocator implements PortAllocator {
         }
       } catch (err: any) {
         if (err.code === "EEXIST") {
-          // Lock held by another process — wait and retry
+          // Lock held — if it is stale, break it and retry immediately.
+          if (this.isLockStale()) {
+            try {
+              unlinkSync(this.lockPath);
+            } catch {
+              // Someone else cleaned it up; just retry.
+            }
+            continue;
+          }
+          // Lock is alive and fresh — wait and retry.
           if (attempt < LOCK_MAX_RETRIES) {
             await sleep(LOCK_RETRY_MS);
             continue;
           }
-          // Force-break stale lock after max retries
-          try {
-            unlinkSync(this.lockPath);
-          } catch {
-            // ignore
-          }
           throw new Error(
-            `FilePortAllocator: Could not acquire lock after ${LOCK_MAX_RETRIES} retries`,
+            `FilePortAllocator: Could not acquire lock after ${LOCK_MAX_RETRIES} retries (held by a live process)`,
           );
         }
         throw err;

@@ -438,6 +438,27 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: all;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-session-ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.workspace-port-badge {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary);
+  background: var(--color-bg, #fff);
+  border: 1px solid var(--color-session-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  white-space: nowrap;
+  user-select: all;
 }
 
 /* Session Card — Creating State */
@@ -660,4 +681,39 @@ body {
   color: var(--color-text-secondary);
   font-size: 14px;
   gap: 4px;
+}
+
+/* Session Card — Initializing State (background hook running) */
+.session-card-initializing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: not-allowed;
+  opacity: 0.65;
+  background: #f0f9ff;
+  border-left: 3px solid #3b82f6;
+}
+
+.session-card-initializing:hover {
+  background: #f0f9ff;
+}
+
+.initializing-hint {
+  font-size: 12px;
+  color: #3b82f6;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.initializing-hint::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #3b82f6;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }

@@ -29,6 +29,7 @@ export const HookDefinitionSchema = z.object({
   required: z.boolean().default(false),
   timeout: z.number().default(30000),
   cwd: z.enum(["worktree", "project"]).default("worktree"),
+  async: z.boolean().default(false),
 });
 export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
 

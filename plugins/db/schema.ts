@@ -1,4 +1,4 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+﻿import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -17,7 +17,8 @@ export const sessions = sqliteTable("sessions", {
   name: text("name").notNull(),
   branch: text("branch").notNull(),
   worktreePath: text("worktree_path").notNull(),
-  ports: text("ports"), // JSON-serialized SessionPorts | null
+  ports: text("ports"),
+  backgroundHookStatus: text("background_hook_status"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

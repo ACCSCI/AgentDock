@@ -9,6 +9,8 @@ import {
   isRegisteredWorktree,
   listWorktrees,
   removeWorktree,
+  renameWorktree,
+  validateBranchName,
 } from "../worktree.js";
 
 let projectDir: string;
@@ -169,5 +171,78 @@ describe("removeWorktree", () => {
     const removed = await removeWorktree(projectDir, "s9", true);
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
+  });
+});
+
+// ============================================================
+// validateBranchName — command/ref injection safety (#4)
+// ============================================================
+describe("validateBranchName", () => {
+  it("WB1: 合法分支名通过", () => {
+    expect(() => validateBranchName("agentdock/feature-1")).not.toThrow();
+    expect(() => validateBranchName("main")).not.toThrow();
+    expect(() => validateBranchName("release_2.0")).not.toThrow();
+  });
+
+  const evilNames = [
+    'x"; rm -rf / #',
+    "x$(touch pwned)",
+    "x`touch pwned`",
+    "x; calc",
+    "x | whoami",
+    "x & echo hi",
+    "branch with space",
+    "tilde~name",
+    "caret^name",
+    "colon:name",
+    "question?name",
+    "star*name",
+    "open[bracket",
+    "-leadingdash",
+    "x\nnewline",
+  ];
+
+  for (const name of evilNames) {
+    it(`WB2: 拒绝非法/危险分支名 ${JSON.stringify(name)}`, () => {
+      expect(() => validateBranchName(name)).toThrow();
+    });
+  }
+});
+
+// ============================================================
+// createWorktree / renameWorktree — injection cannot execute (#4)
+// ============================================================
+describe("createWorktree baseBranch injection safety", () => {
+  it("WI1: baseBranch 含 shell 元字符 → 拒绝（不创建注入文件）", () => {
+    const marker = path.join(projectDir, "INJECTED.txt");
+    expect(() =>
+      createWorktree(projectDir, "inj1", 'main"; echo x > INJECTED.txt; "'),
+    ).toThrow();
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("WI2: baseBranch 含 $() → 拒绝", () => {
+    expect(() => createWorktree(projectDir, "inj2", "$(touch hacked)")).toThrow();
+    expect(existsSync(path.join(projectDir, "hacked"))).toBe(false);
+  });
+
+  it("WI3: 合法 baseBranch 仍可正常创建（回归）", () => {
+    const result = createWorktree(projectDir, "okbase", "master");
+    expect(existsSync(result.worktreePath)).toBe(true);
+  });
+});
+
+describe("renameWorktree newName injection safety", () => {
+  it("WR1: newName 含双引号/反引号 → 拒绝", () => {
+    createWorktree(projectDir, "rn1");
+    expect(() => renameWorktree(projectDir, "rn1", 'x`touch pwned`')).toThrow();
+    expect(() => renameWorktree(projectDir, "rn1", 'x"; echo y; "')).toThrow();
+    expect(existsSync(path.join(projectDir, "pwned"))).toBe(false);
+  });
+
+  it("WR2: 合法 newName 正常重命名（回归）", () => {
+    createWorktree(projectDir, "rn2");
+    const result = renameWorktree(projectDir, "rn2", "renamed2");
+    expect(result.newBranch).toBe("agentdock/renamed2");
   });
 });

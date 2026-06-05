@@ -8,6 +8,7 @@
         "@tanstack/react-query": "^5.101.0",
         "@tanstack/react-router": "^1.120.3",
         "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^5.5.0",
         "ai": "^6.0.195",
         "better-sqlite3": "^12.10.0",
         "drizzle-orm": "^0.45.2",
@@ -16,7 +17,6 @@
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
         "ws": "^8.21.0",
-        "xterm": "^5.3.0",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
       },
@@ -307,6 +307,8 @@
 
     "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "https://repo.huaweicloud.com/repository/npm/@xterm/addon-fit/-/addon-fit-0.11.0.tgz", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
 
+    "@xterm/xterm": ["@xterm/xterm@5.5.0", "https://repo.huaweicloud.com/repository/npm/@xterm/xterm/-/xterm-5.5.0.tgz", {}, "sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A=="],
+
     "ai": ["ai@6.0.195", "https://repo.huaweicloud.com/repository/npm/ai/-/ai-6.0.195.tgz", { "dependencies": { "@ai-sdk/gateway": "3.0.123", "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.27", "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-IYZpuVz0boWbpIQYyinfWFrvQ1N0dG+EVB63it45B2YAU/MxxCnwz4zBswjYnPtHnJBedpMPNrwVbeczbl2GKg=="],
 
     "ansis": ["ansis@4.3.1", "https://repo.huaweicloud.com/repository/npm/ansis/-/ansis-4.3.1.tgz", {}, "sha512-BJ8/l4R5LRE7hW9WdSuGYrLSHi2ynxeFpDFbH0K/CgNeY/tyhk+vO6TYxXC5r5CpUhNVX310xzPsN/H9lCdfOA=="],
@@ -560,8 +562,6 @@
     "wrappy": ["wrappy@1.0.2", "https://repo.huaweicloud.com/repository/npm/wrappy/-/wrappy-1.0.2.tgz", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
 
     "ws": ["ws@8.21.0", "https://repo.huaweicloud.com/repository/npm/ws/-/ws-8.21.0.tgz", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
-
-    "xterm": ["xterm@5.3.0", "https://repo.huaweicloud.com/repository/npm/xterm/-/xterm-5.3.0.tgz", {}, "sha512-8QqjlekLUFTrU6x7xck1MsPzPA571K5zNqWm0M0oroYEWVOptZ0+ubQSkQ3uxIEhcIHRujJy6emDWX4A7qyFzg=="],
 
     "yallist": ["yallist@3.1.1", "https://repo.huaweicloud.com/repository/npm/yallist/-/yallist-3.1.1.tgz", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
 

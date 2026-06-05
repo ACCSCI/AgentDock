@@ -20,5 +20,13 @@ export default defineConfig({
       return p;
     })(),
     strictPort: true,
+    watch: {
+      // Worktrees live under .agentdock/worktrees and contain their own
+      // index.html / tsconfig.json / vite.config.ts. Creating or deleting a
+      // session mutates those files, which would otherwise trigger a Vite
+      // full page reload and abort the in-flight create/delete SSE stream
+      // (surfacing as "network error" in the UI). Ignore the whole dir.
+      ignored: ["**/.agentdock/**"],
+    },
   },
 });

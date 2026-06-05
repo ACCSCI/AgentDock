@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 // Types matching the DB schema
 export interface ProjectData {
@@ -25,6 +26,7 @@ export interface SessionData {
   worktreePath: string;
   ports: SessionPorts | null;
   createdAt: string;
+  backgroundHookStatus?: string | null;
 }
 
 // --- SSE step event types ---
@@ -425,4 +427,54 @@ export function useDeleteTerminal() {
       if (!data.success) throw new Error(data.error);
     },
   });
+}
+// GET /api/sessions/:id/background-hook-status
+export function useBackgroundHookStatus(sessionId: string | null, enabled = true) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ["backgroundHookStatus", sessionId] as const,
+    queryFn: async (): Promise<string | null> => {
+      if (!sessionId) return null;
+      const res = await fetch(`/api/sessions/${sessionId}/background-hook-status`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.status;
+    },
+    enabled: enabled && !!sessionId,
+    refetchInterval: (query) => {
+      const status = query.state.data;
+      if (status === "completed" || status === "failed" || status === null) return false;
+      return 2000;
+    },
+  });
+
+  // When the background hook reaches a terminal state, write it back into the
+  // projects cache so the session card leaves the "环境初始化中" state. The SSE
+  // stream that created the session has already closed (it returns as soon as
+  // the async hook starts), so polling is the only signal the UI receives.
+  const status = query.data;
+  useEffect(() => {
+    if (!sessionId) return;
+    if (status !== "completed" && status !== "failed") return;
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      let changed = false;
+      const next = old.map((p) => ({
+        ...p,
+        sessions: p.sessions.map((s) => {
+          if (s.id !== sessionId || s.backgroundHookStatus === status) return s;
+          changed = true;
+          return { ...s, backgroundHookStatus: status };
+        }),
+      }));
+      return changed ? next : old;
+    });
+  }, [sessionId, status, queryClient]);
+
+  return query;
+}
+
+/** Check if a session has an async background hook still running */
+export function isBackgroundHookRunning(s: SessionData | CreatingSession | DeletingSession): boolean {
+  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
 }

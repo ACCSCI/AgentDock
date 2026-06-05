@@ -1,4 +1,4 @@
-import { exec, execSync } from "node:child_process";
+import { exec, execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -48,6 +48,83 @@ export function validateSessionId(sessionId: string): void {
   }
 }
 
+/**
+ * Validate a git branch / ref name before passing it to git.
+ *
+ * Even though all git commands are now invoked via execFileSync (no shell),
+ * a value beginning with "-" could still be interpreted by git as an option,
+ * and git itself rejects many characters in refnames. We reject anything that
+ * is not a conservative, safe subset and anything git's own rules forbid.
+ *
+ * Allowed: ASCII letters, digits, and  . _ - /  (plus the leading-dash guard).
+ */
+export function validateBranchName(name: string): void {
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error("Invalid branch name: empty");
+  }
+  // Reject leading dash (would be parsed as a git option).
+  if (name.startsWith("-")) {
+    throw new Error("Invalid branch name: must not start with '-'");
+  }
+  // Reject git-illegal sequences / characters and shell metacharacters.
+  // Disallow: whitespace, control chars, and  ~ ^ : ? * [ \ and any char
+  // outside the safe allowlist below.
+  if (!/^[A-Za-z0-9._/-]+$/.test(name)) {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
+  // Git-specific rules: no "..", no leading/trailing "/", no "//",
+  // no trailing ".", no "@{", no ".lock" suffix.
+  if (
+    name.includes("..") ||
+    name.startsWith("/") ||
+    name.endsWith("/") ||
+    name.includes("//") ||
+    name.endsWith(".") ||
+    name.endsWith(".lock")
+  ) {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
+}
+
+/**
+ * Best-effort termination of any process whose executable lives under `dirPath`.
+ *
+ * Session worktrees may contain their own node_modules with long-lived binaries
+ * (e.g. @biomejs/.../biome.exe started by background hooks). On Windows these
+ * processes hold an open handle to their own .exe, which makes the file
+ * impossible to unlink — fs.rm then fails with EPERM no matter how many times
+ * it retries. We terminate those processes before deleting the directory.
+ */
+export async function killProcessesUnderPath(dirPath: string): Promise<void> {
+  const normalized = path.resolve(dirPath);
+  try {
+    if (process.platform === "win32") {
+      // Query processes whose ExecutablePath is inside the worktree dir, then kill them.
+      const escaped = normalized.replace(/\\/g, "\\\\").replace(/'/g, "''");
+      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`, {
+        encoding: "utf-8",
+      });
+    } else {
+      // lsof lists processes with open files under the dir; kill their PIDs.
+      const { stdout } = await execAsync(`lsof -t +D "${normalized}" 2>/dev/null || true`, {
+        encoding: "utf-8",
+        shell: "/bin/sh",
+      });
+      const pids = [...new Set(stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
+      for (const pid of pids) {
+        try {
+          process.kill(Number(pid), "SIGKILL");
+        } catch {
+          // process may already be gone
+        }
+      }
+    }
+  } catch {
+    // Best-effort: if we can't enumerate/kill, fall through to fs.rm which will retry.
+  }
+}
+
 export async function isRegisteredWorktree(projectPath: string, worktreePath: string): Promise<boolean> {
   try {
     const { stdout } = await execAsync("git worktree list --porcelain", {
@@ -78,6 +155,11 @@ export function createWorktree(
   const worktreePath = getWorktreePath(projectPath, sessionId);
   const base = baseBranch || getCurrentBranch(projectPath);
 
+  // branch is derived from a validated sessionId, but validate explicitly;
+  // base comes from the caller (HTTP body) and MUST be validated.
+  validateBranchName(branch);
+  validateBranchName(base);
+
   if (existsSync(worktreePath)) {
     throw new Error(`Worktree path already exists: ${worktreePath}`);
   }
@@ -87,7 +169,7 @@ export function createWorktree(
     mkdirSync(baseDir, { recursive: true });
   }
 
-  execSync(`git worktree add "${worktreePath}" -b "${branch}" "${base}"`, {
+  execFileSync("git", ["worktree", "add", worktreePath, "-b", branch, base], {
     cwd: projectPath,
     encoding: "utf-8",
     stdio: "pipe",
@@ -151,7 +233,13 @@ export async function removeWorktree(
 
   // Always ensure directory is removed (handles git failure or non-worktree directories)
   if (existsSync(worktreePath)) {
-    await rm(worktreePath, { recursive: true, force: true });
+    // Terminate any long-lived process (e.g. biome.exe started by hooks) that
+    // holds a handle to a file inside the worktree, otherwise unlink fails with
+    // EPERM/EBUSY on Windows and the retries below would never succeed.
+    await killProcessesUnderPath(worktreePath);
+    // On Windows, files may still be transiently locked right after the holder
+    // exits; maxRetries + retryDelay make fs.rm retry those transient failures.
+    await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   return { removed: worktreePath };
@@ -211,9 +299,14 @@ export function renameWorktree(
   const oldBranch = `agentdock/${sessionId}`;
   const newBranch = `agentdock/${newName}`;
 
+  // oldBranch derives from validated sessionId; newBranch derives from caller
+  // input and MUST be validated before reaching git.
+  validateBranchName(oldBranch);
+  validateBranchName(newBranch);
+
   // Check if new branch name already exists
   try {
-    execSync(`git rev-parse --verify "${newBranch}"`, {
+    execFileSync("git", ["rev-parse", "--verify", newBranch], {
       cwd: projectPath,
       encoding: "utf-8",
       stdio: "pipe",
@@ -227,7 +320,7 @@ export function renameWorktree(
   }
 
   // Rename the branch
-  execSync(`git branch -m "${oldBranch}" "${newBranch}"`, {
+  execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
     cwd: worktreePath,
     encoding: "utf-8",
     stdio: "pipe",
