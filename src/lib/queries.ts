@@ -401,18 +401,21 @@ export interface TerminalData {
   createdAt: string;
 }
 
+export async function fetchSessionTerminals(sessionId: string): Promise<TerminalData[]> {
+  const res = await fetch(`/api/sessions/${sessionId}/terminals`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.terminals;
+}
+
 // GET /api/sessions/:id/terminals
 export function useSessionTerminals(sessionId: string) {
   return useQuery({
     queryKey: queryKeys.terminals(sessionId),
-    queryFn: async (): Promise<TerminalData[]> => {
-      const res = await fetch(`/api/sessions/${sessionId}/terminals`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.terminals;
-    },
+    queryFn: () => fetchSessionTerminals(sessionId),
     enabled: !!sessionId,
     refetchInterval: 3000,
+    staleTime: 5000,
   });
 }
 

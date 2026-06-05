@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { SessionCard } from "./SessionCard";
 
@@ -71,12 +71,8 @@ export function SessionSidebar() {
   const prefetchTerminals = (sessionId: string) => {
     queryClient.prefetchQuery({
       queryKey: queryKeys.terminals(sessionId),
-      queryFn: async () => {
-        const res = await fetch(`/api/sessions/${sessionId}/terminals`);
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-        return data.terminals;
-      },
+      queryFn: () => fetchSessionTerminals(sessionId),
+      staleTime: 5000,
     });
   };
 
