@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { isCreatingSession, isDeletingSession, type CreatingSession, type DeletingSession, type SessionData, type SessionStep } from "../lib/queries";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionStep } from "../lib/queries";
 
 const CREATE_STEP_LABELS: Record<string, string> = {
   beforeCreateSession: "前置检查",
@@ -82,6 +82,13 @@ export function SessionCard({
   const [editValue, setEditValue] = useState(session.name);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Poll the background hook status while an async afterCreateSession hook
+  // (e.g. `bun install`) is still running. The create SSE stream closes as soon
+  // as the async hook starts, so polling is how the card learns the hook
+  // finished and can leave the "环境初始化中" state. The hook writes the
+  // terminal status back into the projects cache itself.
+  useBackgroundHookStatus(session.id, isBackgroundHookRunning(session));
 
   useEffect(() => {
     if (!menuPos) return;
@@ -188,6 +195,19 @@ export function SessionCard({
           <span className="session-name">{deleting.name}</span>
         </div>
         <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={DELETE_STEP_LABELS} />
+      </div>
+    );
+  }
+
+  // Initializing state — async background hook running, not clickable
+  if (isBackgroundHookRunning(session)) {
+    return (
+      <div className="session-card session-card-initializing">
+        <div className="session-card-header">
+          <span className="step-spinner" />
+          <span className="session-name">{session.name}</span>
+        </div>
+        <div className="initializing-hint">环境初始化中...</div>
       </div>
     );
   }

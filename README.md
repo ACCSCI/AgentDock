@@ -360,15 +360,31 @@ hooks:
 
 ---
 
+## 安全
+
+AgentDock 在执行外部命令、git 操作、文件访问与本地服务通信时遵循以下加固措施：
+
+| 领域 | 加固 |
+|------|------|
+| 文件浏览器 | 打开目录使用参数化调用，不经 shell 拼接，避免命令注入 |
+| Git Worktree | 分支名经 `validateBranchName` 校验（拒绝 `--`、控制字符、`..` 等），防止 git 参数注入 |
+| 项目路径 | `validateProjectPath` 要求绝对路径且为已存在目录，拒绝非法/不存在路径 |
+| Daemon HTTP | 仅绑定 `127.0.0.1`；移除通配 CORS，非 GET 且携带 `Origin` 头的请求返回 403，防止跨站请求伪造（CSRF/DNS rebinding） |
+| 端口锁 | 锁文件记录 `{pid, ts}`；仅当持有进程已退出、锁超过 30s 或内容损坏时才破锁，避免误删存活进程的锁导致端口重复分配 |
+| 数据库 | 每项目 SQLite 通过 `PRAGMA user_version` 进行版本化迁移，迁移幂等且包裹在事务中，兼容旧库且不丢数据 |
+
+---
+
 ## 测试
 
 ```bash
 bun run test
 ```
 
-共 171 个测试，覆盖：
+覆盖：
 - 配置解析（Zod schema + YAML loader）
 - 资源同步（文件/目录、三种策略、skipIfMissing）
 - Hook 引擎（注册、执行、超时、required 中断）
 - Session 生命周期（编排器、rollback、执行顺序）
 - API 集成（HTTP 端到端）
+- 安全加固（命令注入、git 注入、路径校验、Daemon Origin、端口锁存活检测、DB 版本化迁移）

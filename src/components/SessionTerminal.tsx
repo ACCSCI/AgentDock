@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Terminal } from "xterm";
+import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import "xterm/css/xterm.css";
+import "@xterm/xterm/css/xterm.css";
 
 interface SessionTerminalProps {
   terminalId: string;
@@ -42,13 +42,26 @@ export function SessionTerminal({ terminalId }: SessionTerminalProps) {
   // ---- Debounced resize: single trigger source via ResizeObserver ----
   const debouncedResizeRef = useRef<ReturnType<typeof debounce> | null>(null);
 
+  // ---- Close a WebSocket safely (avoid "closed before established" warning) ----
+  const closeWs = useCallback((ws: WebSocket | null) => {
+    if (!ws) return;
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.onmessage = null;
+    if (ws.readyState === WebSocket.CONNECTING) {
+      // Closing a still-connecting socket triggers a browser warning.
+      // Defer the close until the handshake completes.
+      ws.onopen = () => ws.close();
+    } else {
+      ws.onopen = null;
+      ws.close();
+    }
+  }, []);
+
   // ---- WebSocket connection with auto-reconnect ----
   const connect = useCallback(() => {
     if (unmountedRef.current) return;
-    if (wsRef.current) {
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-    }
+    closeWs(wsRef.current);
 
     setStatus("connecting");
 
@@ -115,12 +128,17 @@ export function SessionTerminal({ terminalId }: SessionTerminalProps) {
     ws.onerror = () => {
       // onclose will handle reconnection
     };
-  }, [terminalId]);
+  }, [terminalId, closeWs]);
 
   // ---- Safe fit helper ----
   const safeFit = useCallback(() => {
     const fit = fitAddonRef.current;
-    if (!fit) return;
+    const term = terminalRef.current;
+    const container = containerRef.current;
+    if (!fit || !term || !container) return;
+    // Container with zero size means xterm's renderer is not ready yet;
+    // calling fit() would read `undefined.dimensions` inside RenderService.
+    if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
     try {
       fit.fit();
     } catch {
@@ -142,6 +160,7 @@ export function SessionTerminal({ terminalId }: SessionTerminalProps) {
       cursorStyle: "block",
       fontSize: 14,
       fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+      scrollback: 50000,
       allowProposedApi: true,
       theme: {
         background: "#1e1e1e",
@@ -234,18 +253,15 @@ export function SessionTerminal({ terminalId }: SessionTerminalProps) {
       sendResize.cancel();
       observer.disconnect();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      closeWs(wsRef.current);
+      wsRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
       resizeObserverRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [terminalId, connect]);
+  }, [terminalId, connect, closeWs]);
 
   return (
     <div className="session-terminal">

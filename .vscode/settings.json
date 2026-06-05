@@ -1,0 +1,15 @@
+{
+  // Session worktrees live under .agentdock/worktrees and contain their own
+  // node_modules (including @biomejs/.../biome.exe). If the Biome extension
+  // indexes these directories it launches a long-lived `biome.exe lsp-proxy`
+  // from inside each worktree that holds an open handle to its own executable.
+  // On Windows that lock makes deleting a session fail with EPERM. Excluding
+  // the worktrees dir from file watching/search stops the extension from
+  // spawning those processes so worktrees can be removed cleanly.
+  "files.watcherExclude": {
+    "**/.agentdock/**": true
+  },
+  "search.exclude": {
+    "**/.agentdock/**": true
+  }
+}

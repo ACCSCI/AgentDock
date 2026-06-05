@@ -11,6 +11,9 @@ import { getWorktreePath } from "../worktree.js";
 const isWin = process.platform === "win32";
 function echoCmd(msg: string) { return `echo ${msg}`; }
 function exitCmd(code: number) { return isWin ? `cmd /c exit ${code}` : `exit ${code}`; }
+function sleepCmd(seconds: number) {
+  return isWin ? `ping 127.0.0.1 -n ${seconds + 1} -w 1000 >nul` : `sleep ${seconds}`;
+}
 
 let projectDir: string;
 
@@ -621,5 +624,226 @@ describe("remove — hook 失败", () => {
     });
     expect(result.success).toBe(true);
     expect(existsSync(created.worktreePath)).toBe(false);
+  });
+});
+
+// ============================================================
+// D28–D35: create — async afterCreateSession (background hooks)
+// ============================================================
+describe("create — async afterCreateSession", () => {
+  it("D28: async hook 时 create() 立即返回，不等待 hook 完成", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: sleepCmd(3), // 3 seconds
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    const lifecycle = createSessionLifecycle();
+    const start = Date.now();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess28",
+      sessionName: "Test",
+      config,
+    });
+    const elapsed = Date.now() - start;
+
+    // Should return quickly (< 2s), not wait for 3s sleep
+    expect(elapsed).toBeLessThan(2000);
+    expect(result.sessionId).toBe("sess28");
+    expect(result.worktreePath).toContain("sess28");
+    expect(result.ports).toBeDefined();
+    expect(result.backgroundHookPromise).toBeDefined();
+
+    // Wait for background hook to complete
+    const bgReport = await result.backgroundHookPromise;
+    expect(bgReport.success).toBe(true);
+  });
+
+  it("D29: backgroundHookPromise 在 hook 完成后 resolve", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: echoCmd("bg-done"),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess29",
+      sessionName: "Test",
+      config,
+    });
+
+    const bgReport = await result.backgroundHookPromise;
+    expect(bgReport.success).toBe(true);
+    expect(bgReport.results).toHaveLength(1);
+    expect(bgReport.results[0].stdout).toContain("bg-done");
+  });
+
+  it("D30: onBackgroundHookComplete 在成功时被调用", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: echoCmd("completed"),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    let completedReport: any = null;
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess30",
+      sessionName: "Test",
+      config,
+      onBackgroundHookComplete: (report) => { completedReport = report; },
+    });
+
+    await result.backgroundHookPromise;
+    // Give a tick for the callback to fire
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(completedReport).not.toBeNull();
+    expect(completedReport.success).toBe(true);
+  });
+
+  it("D31: onBackgroundHookComplete 在失败时被调用", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: exitCmd(1),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    let completedReport: any = null;
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess31",
+      sessionName: "Test",
+      config,
+      onBackgroundHookComplete: (report) => { completedReport = report; },
+    });
+
+    const bgReport = await result.backgroundHookPromise;
+    // Individual hook result fails (exit code 1), but report.success is true
+    // because the hook is not required
+    expect(bgReport.results[0].success).toBe(false);
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(completedReport).not.toBeNull();
+    expect(completedReport.results[0].success).toBe(false);
+  });
+
+  it("D32: async hook 失败不回滚 session", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: exitCmd(1),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess32",
+      sessionName: "Test",
+      config,
+    });
+
+    await result.backgroundHookPromise;
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Individual hook failed but worktree and ports should still exist (no rollback)
+    expect(existsSync(result.worktreePath)).toBe(true);
+    expect(result.ports.FRONTEND_PORT).toBeGreaterThan(0);
+  });
+
+  it("D33: beforeCreateSession 仍同步阻塞", async () => {
+    const config = defaultConfig();
+    config.hooks.beforeCreateSession = [{
+      run: exitCmd(1),
+      required: true,
+      timeout: 10000,
+      cwd: "worktree",
+    }];
+    config.hooks.afterCreateSession = [{
+      run: echoCmd("should not run"),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    const lifecycle = createSessionLifecycle();
+    await expect(
+      lifecycle.create({
+        projectId: "proj1",
+        projectPath: projectDir,
+        sessionId: "sess33",
+        sessionName: "Test",
+        config,
+      }),
+    ).rejects.toThrow("beforeCreateSession hook failed");
+    expect(existsSync(getWorktreePath(projectDir, "sess33"))).toBe(false);
+  });
+
+  it("D34: 无 afterCreateSession hook 时 backgroundHookPromise 立即 resolve", async () => {
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess34",
+      sessionName: "Test",
+      config: defaultConfig(),
+    });
+
+    const bgReport = await result.backgroundHookPromise;
+    expect(bgReport.success).toBe(true);
+    expect(bgReport.results).toEqual([]);
+  });
+
+  it("D35: async=false 时仍同步等待（向后兼容）", async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: echoCmd("sync-done"),
+      required: false,
+      timeout: 10000,
+      cwd: "worktree",
+      async: false,
+    }];
+
+    const lifecycle = createSessionLifecycle();
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess35",
+      sessionName: "Test",
+      config,
+    });
+
+    const afterReport = result.hookReports.find((r) => r.event === "afterCreateSession");
+    expect(afterReport).toBeDefined();
+    expect(afterReport!.results[0].stdout).toContain("sync-done");
+    // backgroundHookPromise should resolve immediately with the same report
+    const bgReport = await result.backgroundHookPromise;
+    expect(bgReport).toBe(afterReport);
   });
 });

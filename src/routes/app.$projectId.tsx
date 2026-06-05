@@ -28,6 +28,21 @@ function ProjectWorkspace() {
         <h2>{project.name}</h2>
         <span className="workspace-path">{project.path}</span>
       </div>
+      {activeSession && (
+        <div className="workspace-session-info">
+          <span className="workspace-session-label">{activeSession.name}</span>
+          <span className="workspace-session-path">{activeSession.worktreePath}</span>
+          {activeSession.ports && (
+            <span className="workspace-session-ports">
+              {Object.entries(activeSession.ports).map(([key, value]) => (
+                <span key={key} className="workspace-port-badge" title={key}>
+                  {key.replace(/_PORT$/, "")}:{value}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      )}
       <div className="workspace-content">
         {project.sessions.length === 0 ? (
           <p className="workspace-hint">Click "+" in the sidebar to create a new session</p>

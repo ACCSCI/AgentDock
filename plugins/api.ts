@@ -1,4 +1,3 @@
-﻿import { exec } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -6,6 +5,7 @@ import type { Plugin } from "vite";
 import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
 import { isGitRepo, removeWorktree, renameWorktree, scanDiskWorktrees } from "./worktree.js";
+import { validateProjectPath } from "./path-validation.js";
 import { loadGlobalAllocatedPorts, releaseSessionPorts, reassignSessionPorts } from "./port-registry.js";
 import { loadConfig } from "./config.js";
 import { createSessionLifecycle } from "./session-lifecycle.js";
@@ -52,12 +52,12 @@ export function apiPlugin(): Plugin {
 
           // Register this directory with daemon
           await client.register(cwd, process.pid);
-          console.log(`  🔒 Registered directory: ${cwd} (PID: ${process.pid})`);
+          console.log(`  ?? Registered directory: ${cwd} (PID: ${process.pid})`);
 
           if (started) {
-            console.log(`  🚀 Port daemon started on port 20000`);
+            console.log(`  ?? Port daemon started on port 20000`);
           } else {
-            console.log(`  🔗 Connected to existing port daemon`);
+            console.log(`  ?? Connected to existing port daemon`);
           }
 
           // Unregister on exit
@@ -73,12 +73,12 @@ export function apiPlugin(): Plugin {
             process.exit(0);
           });
         } catch (err) {
-          console.warn(`  ⚠ Daemon unavailable: ${err instanceof Error ? err.message : err}`);
+          console.warn(`  ? Daemon unavailable: ${err instanceof Error ? err.message : err}`);
         }
       };
       initDaemon();
 
-      // 延迟初始化 Terminal WebSocket 服务（动态 import 避免 Vite config 加载时接触原生模块）
+      // �ӳٳ�ʼ�� Terminal WebSocket ���񣨶�̬ import ���� Vite config ����ʱ�Ӵ�ԭ��ģ�飩
       const initTerminal = async () => {
         if (_terminalInitialized || !server.httpServer) return;
         _terminalInitialized = true;
@@ -87,7 +87,7 @@ export function apiPlugin(): Plugin {
           const { terminalManager } = await import("./terminal-manager.js");
           createTerminalWebSocket(server.httpServer as any);
 
-          // 进程退出时清理所有 PTY
+          // �����˳�ʱ�������� PTY
           const cleanupTerminals = () => { terminalManager.killAll(); };
           process.on("exit", cleanupTerminals);
           process.on("SIGINT", () => { cleanupTerminals(); process.exit(0); });
@@ -96,7 +96,7 @@ export function apiPlugin(): Plugin {
           console.error("[api] Failed to initialize terminal:", err);
         }
       };
-      // 异步启动但不阻塞中间件
+      // �첽�������������м��
       initTerminal();
 
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
@@ -110,7 +110,10 @@ export function apiPlugin(): Plugin {
           const body = await parseBody(req);
           const { projectPath } = body as { projectPath?: string };
           if (!projectPath) { json(res, 400, { error: "projectPath is required" }); return; }
-          try { db = createDb(projectPath); json(res, 200, { success: true }); }
+          let safePath: string;
+          try { safePath = validateProjectPath(projectPath); }
+          catch (err) { json(res, 400, { error: err instanceof Error ? err.message : "Invalid projectPath" }); return; }
+          try { db = createDb(safePath); json(res, 200, { success: true }); }
           catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }
@@ -151,16 +154,19 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // POST /api/sync — manual sync for a specific project
+        // POST /api/sync �� manual sync for a specific project
         if (pathname === "/api/sync" && method === "POST") {
           const body = await parseBody(req);
           const { projectPath } = body as { projectPath?: string };
           if (!projectPath) { json(res, 400, { error: "projectPath is required" }); return; }
+          let safePath: string;
+          try { safePath = validateProjectPath(projectPath); }
+          catch (err) { json(res, 400, { error: err instanceof Error ? err.message : "Invalid projectPath" }); return; }
           try {
             const d = getDb();
-            const project = d.select().from(projects).where(eq(projects.path, projectPath)).get();
+            const project = d.select().from(projects).where(eq(projects.path, safePath)).get();
             if (!project) { json(res, 404, { error: "Project not found" }); return; }
-            const diskWts = scanDiskWorktrees(projectPath);
+            const diskWts = scanDiskWorktrees(safePath);
             const existingSessions = d.select().from(sessions).where(eq(sessions.projectId, project.id)).all();
             const existingIds = new Set(existingSessions.map((s) => s.id));
             let synced = 0;
@@ -186,9 +192,12 @@ export function apiPlugin(): Plugin {
           const body = await parseBody(req);
           const { name, path: projectPath } = body as { name?: string; path?: string };
           if (!name || !projectPath) { json(res, 400, { error: "name and path are required" }); return; }
+          let safePath: string;
+          try { safePath = validateProjectPath(projectPath); }
+          catch (err) { json(res, 400, { error: err instanceof Error ? err.message : "Invalid path" }); return; }
           try {
             const d = getDb(); const id = nanoid(8);
-            d.insert(projects).values({ id, name, path: projectPath }).run();
+            d.insert(projects).values({ id, name, path: safePath }).run();
             const project = d.select().from(projects).where(eq(projects.id, id)).get();
             json(res, 200, { success: true, project });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
@@ -271,11 +280,22 @@ export function apiPlugin(): Plugin {
             const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
 
             try {
+              // Set backgroundHookStatus to "running" if any afterCreateSession hook is async
+              const afterHooks = config.hooks.afterCreateSession ?? [];
+              const hasAsyncHook = afterHooks.some((h) => h.async);
+
               const result = await lifecycle.create({
                 projectId, projectPath: p.path, sessionId: id, sessionName, baseBranch, config,
                 onStep: (event) => sendSSE("step", event),
                 onWorktreeReady: (worktreePath, branch) => {
-                  d.insert(sessions).values({ id, projectId, name: sessionName, branch, worktreePath }).run();
+                  d.insert(sessions).values({
+                    id, projectId, name: sessionName, branch, worktreePath,
+                    backgroundHookStatus: hasAsyncHook ? "running" : null,
+                  }).run();
+                },
+                onBackgroundHookComplete: (report) => {
+                  const status = report.success ? "completed" : "failed";
+                  d.update(sessions).set({ backgroundHookStatus: status }).where(eq(sessions.id, id)).run();
                 },
               });
               d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
@@ -396,19 +416,35 @@ export function apiPlugin(): Plugin {
           return;
         }
 
+        // GET /api/sessions/:id/background-hook-status
+        const bgStatusMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/background-hook-status$/);
+        if (bgStatusMatch && method === "GET") {
+          const id = bgStatusMatch[1];
+          try {
+            const d = getDb();
+            const s = d.select().from(sessions).where(eq(sessions.id, id)).get();
+            if (!s) { json(res, 404, { error: "Session not found" }); return; }
+            json(res, 200, { success: true, status: s.backgroundHookStatus ?? null });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
         // POST /api/open-explorer
         if (pathname === "/api/open-explorer" && method === "POST") {
           const body = await parseBody(req);
           const { path: dirPath } = body as { path?: string };
           if (!dirPath) { json(res, 400, { error: "path is required" }); return; }
-          try { exec(`explorer "${dirPath}"`); json(res, 200, { success: true }); }
-          catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          try {
+            const { openInFileManager } = await import("./open-explorer.js");
+            await openInFileManager(dirPath);
+            json(res, 200, { success: true });
+          } catch (err) { json(res, 400, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }
 
         // ---- Terminal REST API ----
 
-        // POST /api/sessions/:id/terminals — Create a new terminal
+        // POST /api/sessions/:id/terminals �� Create a new terminal
         const termCreateMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/terminals$/);
         if (termCreateMatch && method === "POST") {
           const sessionId = termCreateMatch[1];
@@ -439,7 +475,7 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/sessions/:id/terminals — List terminals for a session
+        // GET /api/sessions/:id/terminals �� List terminals for a session
         if (termCreateMatch && method === "GET") {
           const sessionId = termCreateMatch[1];
           try {
@@ -457,7 +493,7 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // DELETE /api/terminals/:terminalId — Kill a terminal
+        // DELETE /api/terminals/:terminalId �� Kill a terminal
         const termKillMatch = pathname.match(/^\/api\/terminals\/([^/]+)$/);
         if (termKillMatch && method === "DELETE") {
           const terminalId = termKillMatch[1];

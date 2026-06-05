@@ -44,6 +44,8 @@ export interface CreateSessionInput {
   /** Called immediately after the worktree is created on disk, before slow hooks run.
    *  The API handler uses this to insert the DB row early, closing the auto-sync race window. */
   onWorktreeReady?: (worktreePath: string, branch: string) => void;
+  /** Called when an async background hook completes. */
+  onBackgroundHookComplete?: (report: HookReport) => void;
 }
 
 export interface CreateSessionResult {
@@ -54,6 +56,9 @@ export interface CreateSessionResult {
   syncReport: SyncReport;
   hookReports: HookReport[];
   duration: number;
+  /** Promise that resolves when async background hooks complete.
+   *  Resolves immediately if there are no async hooks. */
+  backgroundHookPromise: Promise<HookReport>;
 }
 
 export interface DeleteSessionInput {
@@ -110,7 +115,7 @@ export function createSessionLifecycle(deps?: {
 
   async function create(input: CreateSessionInput): Promise<CreateSessionResult> {
     const start = Date.now();
-    const { projectId, projectPath, sessionId, sessionName, baseBranch, config, onStep, onWorktreeReady } = input;
+    const { projectId, projectPath, sessionId, sessionName, baseBranch, config, onStep, onWorktreeReady, onBackgroundHookComplete } = input;
     const hookReports: HookReport[] = [];
 
     hookRegistry.loadFromConfig(config.hooks as Record<string, import("./config.js").HookDefinition[]>);
@@ -163,9 +168,40 @@ export function createSessionLifecycle(deps?: {
       emit(onStep, { step: "allocatePorts", status: "done", duration: portsDuration });
 
       // Step 5: AfterCreateSession hooks
+      // Determine if afterCreateSession should run async (background)
+      const afterHooks = hookRegistry.getHooks("afterCreateSession");
+      const hasAsyncHook = afterHooks.some((h) => h.async);
+
       emit(onStep, { step: "afterCreateSession", status: "running" });
       const afterStepStart = Date.now();
       const afterCtx = buildHookContext("afterCreateSession", { projectId, sessionId, projectPath, worktreePath: wt.worktreePath });
+
+      if (hasAsyncHook) {
+        // Async mode: fire-and-forget, don't block the response
+        log(sessionId, "afterCreateSession → async (non-blocking)");
+        const backgroundPromise = hookEngine.execute("afterCreateSession", afterCtx).then((report) => {
+          const duration = Date.now() - afterStepStart;
+          hookReports.push(report);
+          if (report.success) {
+            log(sessionId, `afterCreateSession ✓ ${duration}ms (background)`);
+            emit(onStep, { step: "afterCreateSession", status: "done", duration });
+          } else {
+            log(sessionId, `afterCreateSession ✗ FAILED (${duration}ms) (background)`);
+            emit(onStep, { step: "afterCreateSession", status: "error", duration, error: "hook failed" });
+          }
+          onBackgroundHookComplete?.(report);
+          return report;
+        });
+
+        const totalDuration = Date.now() - start;
+        log(sessionId, `create complete ✓ ${totalDuration}ms (hooks running in background)`);
+        return {
+          sessionId, worktreePath: wt.worktreePath, branch: wt.branch, ports, syncReport,
+          hookReports, duration: totalDuration, backgroundHookPromise: backgroundPromise,
+        };
+      }
+
+      // Sync mode: await the hook (backward compatible)
       const afterReport = await hookEngine.execute("afterCreateSession", afterCtx);
       hookReports.push(afterReport);
       const afterDuration = Date.now() - afterStepStart;
@@ -183,7 +219,10 @@ export function createSessionLifecycle(deps?: {
 
       const totalDuration = Date.now() - start;
       log(sessionId, `create complete ✓ ${totalDuration}ms`);
-      return { sessionId, worktreePath: wt.worktreePath, branch: wt.branch, ports, syncReport, hookReports, duration: totalDuration };
+      return {
+        sessionId, worktreePath: wt.worktreePath, branch: wt.branch, ports, syncReport,
+        hookReports, duration: totalDuration, backgroundHookPromise: Promise.resolve(afterReport),
+      };
     } catch (err) {
       log(sessionId, "ROLLBACK: removing worktree");
       try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }

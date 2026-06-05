@@ -148,14 +148,26 @@ export class AgentDockDaemon {
     const pathname = new URL(req.url || "/", `http://${req.headers.host}`).pathname;
     const method = req.method || "GET";
 
-    // CORS headers for local development
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // The daemon is a local-only IPC server bound to 127.0.0.1. Its legitimate
+    // clients (daemon-client.ts) use raw http.request and never send an Origin
+    // header. A browser performing a cross-site/drive-by request WILL send an
+    // Origin header. So: reject any state-changing (POST) request that carries
+    // an Origin header to prevent CSRF-style attacks from web pages. We also do
+    // NOT advertise a permissive CORS policy.
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     if (method === "OPTIONS") {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (method !== "GET" && req.headers.origin) {
+      this.json(res, 403, {
+        success: false,
+        error: "Forbidden: cross-origin requests are not allowed",
+      });
       return;
     }
 

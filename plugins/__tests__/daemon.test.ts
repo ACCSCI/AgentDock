@@ -53,6 +53,40 @@ function get(port: number, path: string): Promise<{ status: number; data: any }>
   });
 }
 
+function postWithHeaders(
+  port: number,
+  path: string,
+  body: unknown,
+  extraHeaders: Record<string, string>,
+): Promise<{ status: number; data: any }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          ...extraHeaders,
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", () => {
+          resolve({ status: res.statusCode!, data: JSON.parse(data) });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -209,5 +243,58 @@ describe("AgentDockDaemon", () => {
     expect(alloc2.status).toBe(200);
     // New allocation should not include still-held port[2]
     expect(alloc2.data.data.ports).not.toContain(ports[2]);
+  });
+
+  // --- Origin protection (browser CSRF / drive-by) ---
+
+  it("ORG1: 带 Origin 头的 /ports/allocate 被拒绝 403", async () => {
+    const res = await postWithHeaders(port, "/ports/allocate", { count: 1 }, { Origin: "http://evil.com" });
+    expect(res.status).toBe(403);
+    expect(res.data.success).toBe(false);
+  });
+
+  it("ORG2: 带 Origin 头的 /ports/release 被拒绝 403", async () => {
+    const res = await postWithHeaders(port, "/ports/release", { ports: [20001] }, { Origin: "http://evil.com" });
+    expect(res.status).toBe(403);
+  });
+
+  it("ORG3: 带 Origin 头的 /register 被拒绝 403", async () => {
+    const res = await postWithHeaders(port, "/register", { dir: "/tmp/x", pid: 1 }, { Origin: "http://evil.com" });
+    expect(res.status).toBe(403);
+  });
+
+  it("ORG4: 带 Origin 头的 /unregister 被拒绝 403", async () => {
+    const res = await postWithHeaders(port, "/unregister", { dir: "/tmp/x" }, { Origin: "http://evil.com" });
+    expect(res.status).toBe(403);
+  });
+
+  it("ORG5: 不带 Origin 头的写请求正常工作（合法客户端）", async () => {
+    const res = await post(port, "/ports/allocate", { count: 1 });
+    expect(res.status).toBe(200);
+    expect(res.data.success).toBe(true);
+  });
+
+  it("ORG6: 带 Origin 头的 GET /health 仍可访问（只读）", async () => {
+    const res = await postWithHeaders(port, "/health", {}, { Origin: "http://evil.com" });
+    // /health is GET-only; POST returns 404 — what matters is no 403 short-circuit for reads.
+    // Use a direct GET with Origin instead.
+    const g = await new Promise<{ status: number }>((resolve, reject) => {
+      http.get(
+        { hostname: "127.0.0.1", port, path: "/health", headers: { Origin: "http://evil.com" } },
+        (r) => { r.resume(); resolve({ status: r.statusCode! }); },
+      ).on("error", reject);
+    });
+    expect(g.status).toBe(200);
+    expect(res.status).not.toBe(200); // POST /health is not a valid route
+  });
+
+  it("ORG7: 不再返回通配 CORS 头 Access-Control-Allow-Origin: *", async () => {
+    const acao = await new Promise<string | undefined>((resolve, reject) => {
+      http.get(
+        { hostname: "127.0.0.1", port, path: "/health" },
+        (r) => { r.resume(); resolve(r.headers["access-control-allow-origin"] as string | undefined); },
+      ).on("error", reject);
+    });
+    expect(acao).not.toBe("*");
   });
 });

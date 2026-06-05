@@ -115,11 +115,25 @@ hooks:
     expect(config.hooks.afterDeleteSession).toHaveLength(1);
   });
 
-  it("A7: HookDefinition 默认值 — required=false, timeout=30000, cwd=worktree", () => {
+  it("A7: HookDefinition 默认值 — required=false, timeout=30000, cwd=worktree, async=false", () => {
     const result = HookDefinitionSchema.parse({ run: "echo hello" });
     expect(result.required).toBe(false);
     expect(result.timeout).toBe(30000);
     expect(result.cwd).toBe("worktree");
+    expect(result.async).toBe(false);
+  });
+
+  it("A7b: HookDefinition async=true 可正确解析", () => {
+    const result = HookDefinitionSchema.parse({
+      run: "bun install",
+      async: true,
+    });
+    expect(result.async).toBe(true);
+  });
+
+  it("A7c: HookDefinition 省略 async 时默认 false", () => {
+    const result = HookDefinitionSchema.parse({ run: "echo hello" });
+    expect(result.async).toBe(false);
   });
 
   it("A8: HookDefinition 自定义值", () => {
@@ -128,10 +142,32 @@ hooks:
       required: true,
       timeout: 5000,
       cwd: "project",
+      async: true,
     });
     expect(result.required).toBe(true);
     expect(result.timeout).toBe(5000);
     expect(result.cwd).toBe("project");
+    expect(result.async).toBe(true);
+  });
+
+  it("A8b: YAML 中 async: true 被正确解析", () => {
+    writeConfig(`
+version: "1"
+hooks:
+  afterCreateSession:
+    - run: "bun install"
+      required: true
+      timeout: 120000
+      async: true
+`);
+    const config = loadConfig(tmpDir);
+    expect(config.hooks.afterCreateSession).toHaveLength(1);
+    expect(config.hooks.afterCreateSession[0]).toMatchObject({
+      run: "bun install",
+      required: true,
+      timeout: 120000,
+      async: true,
+    });
   });
 
   it("A9: 非法 hook 生命周期事件拒绝 — 未知事件 key", () => {
