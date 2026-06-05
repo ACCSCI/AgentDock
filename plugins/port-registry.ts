@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { Mutex } from "./mutex.js";
 import { updateEnvFile } from "./env.js";
 import { allocatePorts } from "./port-pool.js";
+
+const registryMutex = new Mutex();
 
 const AGENTDOCK_DIR = ".agentdock";
 const REGISTRY_FILE = "port-registry.json";
@@ -90,12 +93,11 @@ function portsArray(ports: SessionPorts): number[] {
   return PORT_KEYS.map((k) => ports[k]);
 }
 
-/**
- * Assign 5 ports to a session. Idempotent — returns existing ports if already assigned.
- * Also writes the ports to the session's .env file.
- * @param globalExcludedPorts - Ports to exclude beyond the current project (cross-project).
- */
-export async function assignSessionPorts(
+// ============================================================
+// Internal unlocked helpers (called under mutex by public API)
+// ============================================================
+
+async function _assignPortsLocked(
   projectPath: string,
   sessionId: string,
   worktreePath: string,
@@ -104,7 +106,6 @@ export async function assignSessionPorts(
   const entries = loadRegistry(projectPath);
   const existing = entries.find((e) => e.sessionId === sessionId);
   if (existing) {
-    // Ensure .env is up to date
     writePortsToEnv(worktreePath, existing.ports);
     return existing.ports;
   }
@@ -130,29 +131,58 @@ export async function assignSessionPorts(
   return ports;
 }
 
-/**
- * Get ports for a specific session, or null if not found.
- */
-export function getSessionPorts(
-  projectPath: string,
-  sessionId: string,
-): SessionPorts | null {
-  const entries = loadRegistry(projectPath);
-  return entries.find((e) => e.sessionId === sessionId)?.ports ?? null;
-}
-
-/**
- * Release a session's ports from the registry.
- */
-export function releaseSessionPorts(
-  projectPath: string,
-  sessionId: string,
-): void {
+function _releasePortsLocked(projectPath: string, sessionId: string): void {
   const entries = loadRegistry(projectPath);
   const idx = entries.findIndex((e) => e.sessionId === sessionId);
   if (idx === -1) return;
   entries.splice(idx, 1);
   saveRegistry(projectPath, entries);
+}
+
+// ============================================================
+// Public API (mutex-protected)
+// ============================================================
+
+/**
+ * Assign 5 ports to a session. Idempotent — returns existing ports if already assigned.
+ * Also writes the ports to the session's .env file.
+ * @param globalExcludedPorts - Ports to exclude beyond the current project (cross-project).
+ */
+export async function assignSessionPorts(
+  projectPath: string,
+  sessionId: string,
+  worktreePath: string,
+  globalExcludedPorts?: Set<number>,
+): Promise<SessionPorts> {
+  return registryMutex.runExclusive(projectPath, () =>
+    _assignPortsLocked(projectPath, sessionId, worktreePath, globalExcludedPorts),
+  );
+}
+
+/**
+ * Get ports for a specific session, or null if not found.
+ * Mutex-protected to avoid reading stale data during concurrent writes.
+ */
+export async function getSessionPorts(
+  projectPath: string,
+  sessionId: string,
+): Promise<SessionPorts | null> {
+  return registryMutex.runExclusive(projectPath, () => {
+    const entries = loadRegistry(projectPath);
+    return entries.find((e) => e.sessionId === sessionId)?.ports ?? null;
+  });
+}
+
+/**
+ * Release a session's ports from the registry.
+ */
+export async function releaseSessionPorts(
+  projectPath: string,
+  sessionId: string,
+): Promise<void> {
+  await registryMutex.runExclusive(projectPath, () => {
+    _releasePortsLocked(projectPath, sessionId);
+  });
 }
 
 /**
@@ -165,42 +195,45 @@ export async function reassignSessionPorts(
   worktreePath: string,
   globalExcludedPorts?: Set<number>,
 ): Promise<SessionPorts> {
-  const oldPorts = getSessionPorts(projectPath, sessionId);
-  releaseSessionPorts(projectPath, sessionId);
+  return registryMutex.runExclusive(projectPath, async () => {
+    const entries = loadRegistry(projectPath);
+    const entry = entries.find((e) => e.sessionId === sessionId);
+    const oldPorts = entry?.ports ?? null;
+    _releasePortsLocked(projectPath, sessionId);
 
-  if (!oldPorts) {
-    return assignSessionPorts(projectPath, sessionId, worktreePath, globalExcludedPorts);
-  }
-
-  // Add old ports to the exclusion set so new allocation differs
-  const entries = loadRegistry(projectPath);
-  const excluded = new Set<number>(portsArray(oldPorts));
-  for (const entry of entries) {
-    for (const key of PORT_KEYS) {
-      excluded.add(entry.ports[key]);
+    if (!oldPorts) {
+      return _assignPortsLocked(projectPath, sessionId, worktreePath, globalExcludedPorts);
     }
-  }
-  // Merge with global excluded ports
-  if (globalExcludedPorts) {
-    for (const port of globalExcludedPorts) {
-      excluded.add(port);
+
+    // Re-read after release to build exclusion set
+    const freshEntries = loadRegistry(projectPath);
+    const excluded = new Set<number>(portsArray(oldPorts));
+    for (const e of freshEntries) {
+      for (const key of PORT_KEYS) {
+        excluded.add(e.ports[key]);
+      }
     }
-  }
+    if (globalExcludedPorts) {
+      for (const port of globalExcludedPorts) {
+        excluded.add(port);
+      }
+    }
 
-  const allocated = await allocatePorts(PORT_KEYS.length, excluded);
-  const ports: SessionPorts = {
-    FRONTEND_PORT: allocated[0],
-    BACKEND_PORT: allocated[1],
-    WS_PORT: allocated[2],
-    DEBUG_PORT: allocated[3],
-    PREVIEW_PORT: allocated[4],
-  };
+    const allocated = await allocatePorts(PORT_KEYS.length, excluded);
+    const ports: SessionPorts = {
+      FRONTEND_PORT: allocated[0],
+      BACKEND_PORT: allocated[1],
+      WS_PORT: allocated[2],
+      DEBUG_PORT: allocated[3],
+      PREVIEW_PORT: allocated[4],
+    };
 
-  entries.push({ sessionId, ports });
-  saveRegistry(projectPath, entries);
-  writePortsToEnv(worktreePath, ports);
+    freshEntries.push({ sessionId, ports });
+    saveRegistry(projectPath, freshEntries);
+    writePortsToEnv(worktreePath, ports);
 
-  return ports;
+    return ports;
+  });
 }
 
 function writePortsToEnv(worktreePath: string, ports: SessionPorts): void {

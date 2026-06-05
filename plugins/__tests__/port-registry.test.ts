@@ -143,15 +143,15 @@ describe("getSessionPorts", () => {
   beforeEach(() => { dir = tmpDir(); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  it("returns null for unknown session", () => {
-    expect(getSessionPorts(dir, "unknown")).toBeNull();
+  it("returns null for unknown session", async () => {
+    expect(await getSessionPorts(dir, "unknown")).toBeNull();
   });
 
   it("returns ports after assignment", async () => {
     const wt = path.join(dir, "wt");
     mkdirSync(wt, { recursive: true });
     const assigned = await assignSessionPorts(dir, "s1", wt);
-    expect(getSessionPorts(dir, "s1")).toEqual(assigned);
+    expect(await getSessionPorts(dir, "s1")).toEqual(assigned);
   });
 });
 
@@ -165,12 +165,12 @@ describe("releaseSessionPorts", () => {
     const wt = path.join(dir, "wt");
     mkdirSync(wt, { recursive: true });
     await assignSessionPorts(dir, "s1", wt);
-    releaseSessionPorts(dir, "s1");
-    expect(getSessionPorts(dir, "s1")).toBeNull();
+    await releaseSessionPorts(dir, "s1");
+    expect(await getSessionPorts(dir, "s1")).toBeNull();
   });
 
-  it("is safe to call on unknown session", () => {
-    releaseSessionPorts(dir, "unknown"); // should not throw
+  it("is safe to call on unknown session", async () => {
+    await releaseSessionPorts(dir, "unknown"); // should not throw
   });
 });
 

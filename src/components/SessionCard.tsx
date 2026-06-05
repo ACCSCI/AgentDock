@@ -1,5 +1,60 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SessionData } from "../lib/queries";
+import { isCreatingSession, isDeletingSession, type CreatingSession, type DeletingSession, type SessionData, type SessionStep } from "../lib/queries";
+
+const CREATE_STEP_LABELS: Record<string, string> = {
+  beforeCreateSession: "前置检查",
+  createWorktree: "创建工作区",
+  syncResources: "同步资源",
+  allocatePorts: "分配端口",
+  afterCreateSession: "初始化环境",
+};
+
+const DELETE_STEP_LABELS: Record<string, string> = {
+  beforeDeleteSession: "前置检查",
+  releasePorts: "释放端口",
+  removeWorktree: "清理工作区",
+  afterDeleteSession: "后置清理",
+};
+
+function StepIcon({ status }: { status: SessionStep["status"] }) {
+  if (status === "done") return <span className="step-icon step-icon-done">✓</span>;
+  if (status === "error") return <span className="step-icon step-icon-error">✗</span>;
+  return (
+    <span className="step-icon step-icon-running">
+      <span className="step-spinner" />
+    </span>
+  );
+}
+
+function LifecycleSteps({
+  steps,
+  stepOrder,
+  labels,
+}: { steps: SessionStep[]; stepOrder: string[]; labels: Record<string, string> }) {
+  const stepMap = new Map(steps.map((s) => [s.step, s]));
+  return (
+    <div className="creating-steps">
+      {stepOrder.map((stepName) => {
+        const step = stepMap.get(stepName);
+        if (!step && stepMap.size === 0) return null;
+        const label = labels[stepName] ?? stepName;
+        return (
+          <div key={stepName} className="step-item">
+            {step ? (
+              <StepIcon status={step.status} />
+            ) : (
+              <span className="step-icon step-icon-pending">○</span>
+            )}
+            <span className="step-label">{label}</span>
+            {step?.duration != null && step.duration > 0 && (
+              <span className="step-duration">{step.duration}ms</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 interface SessionCardProps {
   session: SessionData;
@@ -36,6 +91,23 @@ export function SessionCard({
     window.addEventListener("mousedown", handleClick);
     return () => window.removeEventListener("mousedown", handleClick);
   }, [menuPos]);
+
+  // Clamp context menu position to viewport
+  useEffect(() => {
+    if (!menuPos || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const x = Math.min(menuPos.x, window.innerWidth - rect.width - 4);
+    const y = Math.min(menuPos.y, window.innerHeight - rect.height - 4);
+    menuRef.current.style.left = `${Math.max(0, x)}px`;
+    menuRef.current.style.top = `${Math.max(0, y)}px`;
+  }, [menuPos]);
+
+  // Sync editValue with session.name when not editing
+  useEffect(() => {
+    if (!editing) {
+      setEditValue(session.name);
+    }
+  }, [session.name, editing]);
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -90,6 +162,34 @@ export function SessionCard({
     onReassignPorts(session.id);
   }, [session.id, onReassignPorts]);
 
+  // Creating state — show spinner + steps, no interaction
+  if (isCreatingSession(session)) {
+    const creating = session as CreatingSession;
+    return (
+      <div className="session-card session-card-creating">
+        <div className="session-card-header">
+          <span className="step-spinner" />
+          <span className="session-name">{creating.name}</span>
+        </div>
+        <LifecycleSteps steps={creating.steps} stepOrder={["beforeCreateSession", "createWorktree", "syncResources", "allocatePorts", "afterCreateSession"]} labels={CREATE_STEP_LABELS} />
+      </div>
+    );
+  }
+
+  // Deleting state — show spinner + steps, no interaction
+  if (isDeletingSession(session)) {
+    const deleting = session as DeletingSession;
+    return (
+      <div className="session-card session-card-deleting">
+        <div className="session-card-header">
+          <span className="step-spinner" />
+          <span className="session-name">{deleting.name}</span>
+        </div>
+        <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={DELETE_STEP_LABELS} />
+      </div>
+    );
+  }
+
   return (
     <>
       <div
@@ -115,7 +215,10 @@ export function SessionCard({
           <span className="session-name">{session.name}</span>
         )}
         {session.ports && (
-          <span className="session-ports" title={`FRONTEND:${session.ports.FRONTEND_PORT} BACKEND:${session.ports.BACKEND_PORT} WS:${session.ports.WS_PORT} DEBUG:${session.ports.DEBUG_PORT} PREVIEW:${session.ports.PREVIEW_PORT}`}>
+          <span
+            className="session-ports"
+            title={`FRONTEND:${session.ports.FRONTEND_PORT} BACKEND:${session.ports.BACKEND_PORT} WS:${session.ports.WS_PORT} DEBUG:${session.ports.DEBUG_PORT} PREVIEW:${session.ports.PREVIEW_PORT}`}
+          >
             :{session.ports.FRONTEND_PORT}
           </span>
         )}

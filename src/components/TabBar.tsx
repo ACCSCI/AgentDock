@@ -1,7 +1,9 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useCreateProject, useDeleteProject, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 
 export function TabBar() {
+  const navigate = useNavigate();
   const { activeProjectId, setActiveProject } = useStore();
   const { data: projects } = useProjects();
   const createProject = useCreateProject();
@@ -23,11 +25,13 @@ export function TabBar() {
       const existing = projects?.find((p) => p.name === name);
       if (existing) {
         setActiveProject(existing.id);
+        navigate({ to: "/app/$projectId", params: { projectId: existing.id } });
         return;
       }
 
       const project = await createProject.mutateAsync({ name, path });
       setActiveProject(project.id);
+      navigate({ to: "/app/$projectId", params: { projectId: project.id } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       alert(`打开目录失败: ${message}`);
@@ -51,8 +55,16 @@ export function TabBar() {
         <div
           key={project.id}
           className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
-          onClick={() => setActiveProject(project.id)}
-          onKeyDown={(e) => e.key === "Enter" && setActiveProject(project.id)}
+          onClick={() => {
+            setActiveProject(project.id);
+            navigate({ to: "/app/$projectId", params: { projectId: project.id } });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              setActiveProject(project.id);
+              navigate({ to: "/app/$projectId", params: { projectId: project.id } });
+            }
+          }}
           tabIndex={0}
           role="tab"
           aria-selected={project.id === activeProjectId}

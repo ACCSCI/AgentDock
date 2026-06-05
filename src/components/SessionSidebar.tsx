@@ -1,12 +1,12 @@
-import { useCreateSession, useDeleteSession, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
+import { useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession } = useStore();
   const { data: projects } = useProjects();
-  const createSession = useCreateSession();
-  const deleteSession = useDeleteSession();
+  const createSession = useCreateSessionSSE();
+  const deleteSession = useDeleteSessionSSE();
   const renameSession = useRenameSession();
   const reassignPorts = useReassignPorts();
 
@@ -15,11 +15,14 @@ export function SessionSidebar() {
   if (!activeProject) return null;
 
   const handleNewSession = async () => {
-    const count = activeProject.sessions.length + 1;
+    const existingNames = new Set(activeProject.sessions.map((s) => s.name));
+    let count = activeProject.sessions.length + 1;
+    while (existingNames.has(`Session ${count}`)) count++;
     try {
       await createSession.mutateAsync({
         projectId: activeProject.id,
         name: `Session ${count}`,
+        tempId: `temp-${Date.now()}`,
       });
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -27,9 +30,9 @@ export function SessionSidebar() {
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    if (!confirm("Delete this session and its worktree?")) return;
+    if (!activeProject) return;
     try {
-      await deleteSession.mutateAsync(sessionId);
+      await deleteSession.mutateAsync({ sessionId, projectId: activeProject.id });
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
