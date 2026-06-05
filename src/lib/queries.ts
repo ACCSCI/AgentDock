@@ -27,6 +27,32 @@ export interface SessionData {
   createdAt: string;
 }
 
+// --- SSE step event types ---
+export interface SessionStep {
+  step: string;
+  status: "running" | "done" | "error";
+  duration?: number;
+  error?: string;
+}
+
+export interface CreatingSession extends SessionData {
+  status: "creating";
+  steps: SessionStep[];
+}
+
+export function isCreatingSession(s: SessionData | CreatingSession | DeletingSession): s is CreatingSession {
+  return "status" in s && (s as CreatingSession).status === "creating";
+}
+
+export interface DeletingSession extends SessionData {
+  status: "deleting";
+  steps: SessionStep[];
+}
+
+export function isDeletingSession(s: SessionData | CreatingSession | DeletingSession): s is DeletingSession {
+  return "status" in s && (s as DeletingSession).status === "deleting";
+}
+
 // Query keys
 export const queryKeys = {
   projects: ["projects"] as const,
@@ -97,42 +123,230 @@ export function useDeleteProject() {
   });
 }
 
-// POST /api/projects/:id/sessions
-export function useCreateSession() {
+// SSE-based create session with optimistic update
+export function useCreateSessionSSE() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      projectId,
-      name,
-      baseBranch,
-    }: { projectId: string; name: string; baseBranch?: string }) => {
+  return useMutation<SessionData, Error, { projectId: string; name: string; baseBranch?: string; tempId?: string }, { prevProjects: ProjectData[] | undefined; tempId: string }>({
+    mutationFn: async ({ projectId, name, baseBranch, tempId }) => {
+      if (!tempId) throw new Error("tempId is required");
       const res = await fetch(`/api/projects/${projectId}/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
         body: JSON.stringify({ name, baseBranch }),
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.session as SessionData;
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream")) {
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        return data.session as SessionData;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let result: SessionData | null = null;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith("data: ")) {
+            const data = JSON.parse(line.slice(6));
+            if (currentEvent === "step") {
+              queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+                if (!old) return old;
+                return old.map((p) => {
+                  if (p.id !== projectId) return p;
+                  return {
+                    ...p,
+                    sessions: p.sessions.map((s) => {
+                      if (s.id !== tempId) return s;
+                      if (!isCreatingSession(s)) return s;
+                      const creating = s as CreatingSession;
+                      const existingIdx = creating.steps.findIndex((st) => st.step === data.step);
+                      const newSteps = [...creating.steps];
+                      if (existingIdx >= 0) {
+                        newSteps[existingIdx] = data;
+                      } else {
+                        newSteps.push(data);
+                      }
+                      return { ...creating, steps: newSteps };
+                    }),
+                  };
+                });
+              });
+            } else if (currentEvent === "complete") {
+              result = data.session;
+            } else if (currentEvent === "error") {
+              throw new Error(data.error);
+            }
+          }
+        }
+      }
+
+      if (!result) throw new Error("No complete event received");
+      return result;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    onMutate: async ({ projectId, name, tempId: inputTempId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prevProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+      const tempId = inputTempId ?? `temp-${Date.now()}`;
+
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          const tempSession: CreatingSession = {
+            id: tempId, projectId, name, branch: "", worktreePath: "", ports: null,
+            createdAt: new Date().toISOString(), status: "creating", steps: [],
+          };
+          return { ...p, sessions: [...p.sessions, tempSession] };
+        });
+      });
+
+      return { prevProjects, tempId };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.prevProjects) {
+        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
+      }
+    },
+    onSuccess: (session, { projectId, tempId }) => {
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          return {
+            ...p,
+            sessions: p.sessions.map((s) =>
+              s.id === tempId ? { ...session } : s,
+            ),
+          };
+        });
+      });
     },
   });
 }
 
 // DELETE /api/sessions/:id
-export function useDeleteSession() {
+export function useDeleteSessionSSE() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (sessionId: string) => {
-      const res = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data;
+  return useMutation<void, Error, { sessionId: string; projectId: string }, { prevProjects: ProjectData[] | undefined }>({
+    mutationFn: async ({ sessionId, projectId }) => {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: { "Accept": "text/event-stream" },
+      });
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream")) {
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith("data: ")) {
+            const data = JSON.parse(line.slice(6));
+            if (currentEvent === "step") {
+              queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+                if (!old) return old;
+                return old.map((p) => {
+                  if (p.id !== projectId) return p;
+                  return {
+                    ...p,
+                    sessions: p.sessions.map((s) => {
+                      if (s.id !== sessionId) return s;
+                      if (!isDeletingSession(s)) return s;
+                      const deleting = s as DeletingSession;
+                      const existingIdx = deleting.steps.findIndex((st) => st.step === data.step);
+                      const newSteps = [...deleting.steps];
+                      if (existingIdx >= 0) {
+                        newSteps[existingIdx] = data;
+                      } else {
+                        newSteps.push(data);
+                      }
+                      return { ...deleting, steps: newSteps };
+                    }),
+                  };
+                });
+              });
+            } else if (currentEvent === "complete") {
+              return;
+            } else if (currentEvent === "error") {
+              throw new Error(data.error);
+            }
+          }
+        }
+      }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    onMutate: async ({ sessionId, projectId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prevProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          return {
+            ...p,
+            sessions: p.sessions.map((s) => {
+              if (s.id !== sessionId) return s;
+              // Don't overwrite if already in a transitional state
+              if (isCreatingSession(s) || isDeletingSession(s)) return s;
+              const deleting: DeletingSession = { ...s, status: "deleting", steps: [] };
+              return deleting;
+            }),
+          };
+        });
+      });
+
+      return { prevProjects };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.prevProjects) {
+        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
+      }
+    },
+    onSuccess: (_data, { sessionId, projectId }) => {
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          return {
+            ...p,
+            sessions: p.sessions.filter((s) => s.id !== sessionId),
+          };
+        });
+      });
     },
   });
 }

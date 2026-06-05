@@ -89,6 +89,13 @@ function startTestServer(port: number): Promise<void> {
           if (!s) { json(res, 404, { error: "Session not found" }); return; }
           const p = db.select().from(projects).where(eq(projects.id, s.projectId)).get();
           if (!p) { json(res, 404, { error: "Project not found" }); return; }
+
+          // ?delay=500 — simulate slow synchronous I/O (like big-repo git worktree remove)
+          const delayMs = Number(url.searchParams.get("delay")) || 0;
+          if (delayMs > 0) {
+            execSync(`node -e "const start=Date.now();while(Date.now()-start<${delayMs}){}"`);
+          }
+
           const config = loadConfig(p.path);
           const lifecycle = createSessionLifecycle();
           await lifecycle.remove({ sessionId: id, projectPath: p.path, worktreePath: s.worktreePath, config });
@@ -372,5 +379,72 @@ describe("端到端完整流程", () => {
     const row3 = db.select().from(sessions).where(eq(sessions.id, s3.data.session.id)).get();
     expect(row1).toBeDefined();
     expect(row3).toBeDefined();
+  });
+});
+
+// ============================================================
+// 并发请求 — execSync 阻塞事件循环
+// ============================================================
+describe("并发请求 — execSync 阻塞事件循环", () => {
+  it("RACE1: BUG 复现 — DELETE 中 execSync 同步阻塞导致并发 CREATE 响应延迟", async () => {
+    // 先创建一个 session，用于后续删除
+    const created = await api("POST", "/api/projects/testproj/sessions", { name: "To Delete" });
+    expect(created.status).toBe(200);
+    const sessionId = created.data.session.id;
+
+    const SYNC_DELAY = 800; // ms — 模拟大型仓库上 git worktree remove 的阻塞耗时
+
+    // 并发发起 DELETE（带同步阻塞延迟）和 CREATE
+    const start = Date.now();
+
+    const [deleteRes, createRes] = await Promise.all([
+      api("DELETE", `/api/sessions/${sessionId}?delay=${SYNC_DELAY}`),
+      api("POST", "/api/projects/testproj/sessions", { name: "Race Create" }),
+    ]);
+
+    const elapsed = Date.now() - start;
+
+    // 两个请求都必须成功
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.data.success).toBe(true);
+    expect(createRes.status).toBe(200);
+    expect(createRes.data.success).toBe(true);
+
+    // 关键断言：总耗时必须 >= sync_delay + create_time（约 800ms+）
+    // 如果事件循环没有被阻塞，两个请求应并发执行，总耗时 ≈ max(800, create_time) ≈ 800ms
+    // 如果 execSync 阻塞了事件循环，总耗时 ≈ 800 + create_time ≈ 1300ms+（前后串行）
+    //
+    // 创建时间通常在 300-500ms，所以 800 + 300 = 1100ms 为保守下限
+    expect(elapsed).toBeGreaterThanOrEqual(SYNC_DELAY + 200);
+
+    // 清理：删除通过并发创建出来的 session
+    if (createRes.data.session?.id) {
+      await api("DELETE", `/api/sessions/${createRes.data.session.id}`);
+    }
+  });
+
+  it("RACE2: 对照 — 无 execSync 阻塞时 CREATE 不受阻塞", async () => {
+    const created = await api("POST", "/api/projects/testproj/sessions", { name: "To Delete" });
+    const sessionId = created.data.session.id;
+
+    const [deleteRes, createRes] = await Promise.all([
+      api("DELETE", `/api/sessions/${sessionId}`), // 无 delay
+      api("POST", "/api/projects/testproj/sessions", { name: "Concurrent Create" }),
+    ]);
+
+    // 两个请求都应该成功
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.data.success).toBe(true);
+    expect(createRes.status).toBe(200);
+    expect(createRes.data.success).toBe(true);
+
+    // CREATE 的 session 应该有正常返回数据
+    expect(createRes.data.session).toBeDefined();
+    expect(createRes.data.session.id).toBeDefined();
+    expect(createRes.data.session.worktreePath).toBeDefined();
+
+    if (createRes.data.session?.id) {
+      await api("DELETE", `/api/sessions/${createRes.data.session.id}`);
+    }
   });
 });

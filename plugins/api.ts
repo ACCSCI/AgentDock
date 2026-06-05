@@ -6,7 +6,7 @@ import type { Plugin } from "vite";
 import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
 import { isGitRepo, removeWorktree, renameWorktree, scanDiskWorktrees } from "./worktree.js";
-import { loadGlobalAllocatedPorts, reassignSessionPorts } from "./port-registry.js";
+import { loadGlobalAllocatedPorts, releaseSessionPorts, reassignSessionPorts } from "./port-registry.js";
 import { acquireLock, openExistingUrl } from "./singleton.js";
 import { loadConfig } from "./config.js";
 import { createSessionLifecycle } from "./session-lifecycle.js";
@@ -19,12 +19,13 @@ function getDb(): DrizzleDb {
 }
 
 function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
     req.on("end", () => {
       try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); }
     });
+    req.on("error", (err) => reject(err));
   });
 }
 
@@ -155,9 +156,9 @@ export function apiPlugin(): Plugin {
             const d = getDb();
             const ps = d.select().from(sessions).where(eq(sessions.projectId, id)).all();
             const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (p) { for (const s of ps) { try { removeWorktree(p.path, s.id, true); } catch {} } }
+            if (p) { for (const s of ps) { try { await removeWorktree(p.path, s.id, true); } catch {} } }
             // Release all ports for this project's sessions
-            if (p) { for (const s of ps) { try { releaseSessionPorts(p.path, s.id); } catch {} } }
+            if (p) { for (const s of ps) { try { await releaseSessionPorts(p.path, s.id); } catch {} } }
             d.delete(sessions).where(eq(sessions.projectId, id)).run();
             d.delete(projects).where(eq(projects.id, id)).run();
             json(res, 200, { success: true });
@@ -177,22 +178,68 @@ export function apiPlugin(): Plugin {
             const p = d.select().from(projects).where(eq(projects.id, projectId)).get();
             if (!p) { json(res, 404, { error: "Project not found" }); return; }
             if (!isGitRepo(p.path)) { json(res, 400, { error: "Not a git repository" }); return; }
+
+            const acceptHeader = req.headers.accept ?? "";
+            const wantsSSE = acceptHeader.includes("text/event-stream");
+
+            if (!wantsSSE) {
+              // Fallback: non-SSE request (backward compatible)
+              const id = nanoid(8);
+              const allProjectPaths = d.select().from(projects).all().map((proj) => proj.path);
+              const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
+              const config = loadConfig(p.path);
+              const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
+              try {
+                const result = await lifecycle.create({
+                  projectId, projectPath: p.path, sessionId: id, sessionName, baseBranch, config,
+                  onWorktreeReady: (worktreePath, branch) => {
+                    d.insert(sessions).values({ id, projectId, name: sessionName, branch, worktreePath }).run();
+                  },
+                });
+                d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
+                const session = d.select().from(sessions).where(eq(sessions.id, id)).get();
+                json(res, 200, { success: true, session: { ...session, ports: result.ports }, syncReport: result.syncReport, hookReports: result.hookReports });
+              } catch (err) {
+                d.delete(sessions).where(eq(sessions.id, id)).run();
+                throw err;
+              }
+              return;
+            }
+
+            // SSE mode
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+            });
+
+            const sendSSE = (event: string, data: unknown) => {
+              res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+            };
+
             const id = nanoid(8);
             const allProjectPaths = d.select().from(projects).all().map((proj) => proj.path);
             const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
             const config = loadConfig(p.path);
             const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
-            const result = await lifecycle.create({
-              projectId,
-              projectPath: p.path,
-              sessionId: id,
-              sessionName,
-              baseBranch,
-              config,
-            });
-            d.insert(sessions).values({ id, projectId, name: sessionName, branch: result.branch, worktreePath: result.worktreePath, ports: JSON.stringify(result.ports) }).run();
-            const session = d.select().from(sessions).where(eq(sessions.id, id)).get();
-            json(res, 200, { success: true, session: { ...session, ports: result.ports }, syncReport: result.syncReport, hookReports: result.hookReports });
+
+            try {
+              const result = await lifecycle.create({
+                projectId, projectPath: p.path, sessionId: id, sessionName, baseBranch, config,
+                onStep: (event) => sendSSE("step", event),
+                onWorktreeReady: (worktreePath, branch) => {
+                  d.insert(sessions).values({ id, projectId, name: sessionName, branch, worktreePath }).run();
+                },
+              });
+              d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
+              const session = d.select().from(sessions).where(eq(sessions.id, id)).get();
+              sendSSE("complete", { session: { ...session, ports: result.ports }, syncReport: result.syncReport, hookReports: result.hookReports });
+            } catch (err) {
+              d.delete(sessions).where(eq(sessions.id, id)).run();
+              sendSSE("error", { error: err instanceof Error ? err.message : "Unknown error" });
+            } finally {
+              res.end();
+            }
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }
@@ -208,16 +255,52 @@ export function apiPlugin(): Plugin {
               if (!s) { json(res, 404, { error: "Session not found" }); return; }
               const p = d.select().from(projects).where(eq(projects.id, s.projectId)).get();
               if (!p) { json(res, 404, { error: "Project not found" }); return; }
-              const config = loadConfig(p.path);
-              const lifecycle = createSessionLifecycle();
-              await lifecycle.remove({
-                sessionId: id,
-                projectPath: p.path,
-                worktreePath: s.worktreePath,
-                config,
+
+              const acceptHeader = req.headers.accept ?? "";
+              const wantsSSE = acceptHeader.includes("text/event-stream");
+
+              if (!wantsSSE) {
+                const config = loadConfig(p.path);
+                const lifecycle = createSessionLifecycle();
+                await lifecycle.remove({
+                  sessionId: id,
+                  projectPath: p.path,
+                  worktreePath: s.worktreePath,
+                  config,
+                });
+                d.delete(sessions).where(eq(sessions.id, id)).run();
+                json(res, 200, { success: true });
+                return;
+              }
+
+              // SSE mode
+              res.writeHead(200, {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
               });
-              d.delete(sessions).where(eq(sessions.id, id)).run();
-              json(res, 200, { success: true });
+
+              const sendDelSSE = (event: string, data: unknown) => {
+                res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              };
+
+              try {
+                const config = loadConfig(p.path);
+                const lifecycle = createSessionLifecycle();
+                await lifecycle.remove({
+                  sessionId: id,
+                  projectPath: p.path,
+                  worktreePath: s.worktreePath,
+                  config,
+                  onStep: (event) => sendDelSSE("step", event),
+                });
+                d.delete(sessions).where(eq(sessions.id, id)).run();
+                sendDelSSE("complete", { success: true });
+              } catch (err) {
+                sendDelSSE("error", { error: err instanceof Error ? err.message : "Unknown error" });
+              } finally {
+                res.end();
+              }
             } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
             return;
           }

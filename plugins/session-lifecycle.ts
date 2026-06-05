@@ -21,6 +21,17 @@ import {
   removeWorktree,
 } from "./worktree.js";
 
+// --- Step event types ---
+export type StepName = "beforeCreateSession" | "createWorktree" | "syncResources" | "allocatePorts" | "afterCreateSession"
+  | "beforeDeleteSession" | "releasePorts" | "removeWorktree" | "afterDeleteSession";
+
+export interface StepEvent {
+  step: StepName;
+  status: "running" | "done" | "error";
+  duration?: number;
+  error?: string;
+}
+
 // --- Input/Output types ---
 export interface CreateSessionInput {
   projectId: string;
@@ -29,6 +40,10 @@ export interface CreateSessionInput {
   sessionName: string;
   baseBranch?: string;
   config: AgentDockConfig;
+  onStep?: (event: StepEvent) => void;
+  /** Called immediately after the worktree is created on disk, before slow hooks run.
+   *  The API handler uses this to insert the DB row early, closing the auto-sync race window. */
+  onWorktreeReady?: (worktreePath: string, branch: string) => void;
 }
 
 export interface CreateSessionResult {
@@ -46,6 +61,7 @@ export interface DeleteSessionInput {
   projectPath: string;
   worktreePath: string;
   config: AgentDockConfig;
+  onStep?: (event: StepEvent) => void;
 }
 
 export interface DeleteSessionResult {
@@ -84,109 +100,156 @@ export function createSessionLifecycle(deps?: {
     };
   }
 
+  function log(sessionId: string, msg: string) {
+    console.log(`[SessionLifecycle] ${sessionId} → ${msg}`);
+  }
+
+  function emit(onStep: ((e: StepEvent) => void) | undefined, event: StepEvent) {
+    onStep?.(event);
+  }
+
   async function create(input: CreateSessionInput): Promise<CreateSessionResult> {
     const start = Date.now();
-    const { projectId, projectPath, sessionId, sessionName, baseBranch, config } = input;
+    const { projectId, projectPath, sessionId, sessionName, baseBranch, config, onStep, onWorktreeReady } = input;
     const hookReports: HookReport[] = [];
 
-    // Load hooks from config
     hookRegistry.loadFromConfig(config.hooks as Record<string, import("./config.js").HookDefinition[]>);
-
     const worktreePath = getWorktreePath(projectPath, sessionId);
 
+    log(sessionId, `create "${sessionName}" (project: ${projectPath})`);
+
     // Step 1: BeforeCreateSession hooks
+    emit(onStep, { step: "beforeCreateSession", status: "running" });
+    const beforeStepStart = Date.now();
     const beforeCtx = buildHookContext("beforeCreateSession", { projectId, sessionId, projectPath, worktreePath });
     const beforeReport = await hookEngine.execute("beforeCreateSession", beforeCtx);
     hookReports.push(beforeReport);
+    const beforeDuration = Date.now() - beforeStepStart;
     if (!beforeReport.success) {
+      log(sessionId, `beforeCreateSession ✗ FAILED (${beforeDuration}ms)`);
+      emit(onStep, { step: "beforeCreateSession", status: "error", duration: beforeDuration, error: "hook failed (required)" });
       throw new Error("beforeCreateSession hook failed (required)");
     }
+    log(sessionId, `beforeCreateSession ✓ ${beforeDuration}ms`);
+    emit(onStep, { step: "beforeCreateSession", status: "done", duration: beforeDuration });
 
     // Step 2: CreateWorktree (Core)
+    emit(onStep, { step: "createWorktree", status: "running" });
+    const wtStepStart = Date.now();
     const wt = createWorktree(projectPath, sessionId, baseBranch);
+    const wtDuration = Date.now() - wtStepStart;
+    log(sessionId, `createWorktree ✓ ${wtDuration}ms (${wt.branch})`);
+    emit(onStep, { step: "createWorktree", status: "done", duration: wtDuration });
+
+    // Notify caller that the worktree exists on disk — allows early DB insert
+    // to prevent auto-sync from re-inserting the session during long hooks.
+    onWorktreeReady?.(wt.worktreePath, wt.branch);
 
     try {
       // Step 3: SyncResources (Core)
-      const syncReport = await resourceSyncService.syncAll(
-        projectPath,
-        wt.worktreePath,
-        config.resources.sync,
-      );
+      emit(onStep, { step: "syncResources", status: "running" });
+      const syncStepStart = Date.now();
+      const syncReport = await resourceSyncService.syncAll(projectPath, wt.worktreePath, config.resources.sync);
+      const syncDuration = Date.now() - syncStepStart;
+      log(sessionId, `syncResources ✓ ${syncDuration}ms (${syncReport.results.length} resources)`);
+      emit(onStep, { step: "syncResources", status: "done", duration: syncDuration });
 
-      // Step 4: AllocatePorts (Core) — also writes ports to .env (PatchRuntimeConfig)
-      const ports = await assignSessionPorts(
-        projectPath,
-        sessionId,
-        wt.worktreePath,
-        deps?.globalExcludedPorts,
-      );
+      // Step 4: AllocatePorts (Core)
+      emit(onStep, { step: "allocatePorts", status: "running" });
+      const portsStepStart = Date.now();
+      const ports = await assignSessionPorts(projectPath, sessionId, wt.worktreePath, deps?.globalExcludedPorts);
+      const portsDuration = Date.now() - portsStepStart;
+      log(sessionId, `allocatePorts ✓ ${portsDuration}ms (FRONTEND:${ports.FRONTEND_PORT})`);
+      emit(onStep, { step: "allocatePorts", status: "done", duration: portsDuration });
 
-      // Step 6: AfterCreateSession hooks
+      // Step 5: AfterCreateSession hooks
+      emit(onStep, { step: "afterCreateSession", status: "running" });
+      const afterStepStart = Date.now();
       const afterCtx = buildHookContext("afterCreateSession", { projectId, sessionId, projectPath, worktreePath: wt.worktreePath });
       const afterReport = await hookEngine.execute("afterCreateSession", afterCtx);
       hookReports.push(afterReport);
+      const afterDuration = Date.now() - afterStepStart;
 
       if (!afterReport.success) {
-        // Rollback: release ports + remove worktree
-        try { releaseSessionPorts(projectPath, sessionId); } catch {}
-        try { removeWorktree(projectPath, sessionId, true); } catch {}
+        log(sessionId, `afterCreateSession ✗ FAILED (${afterDuration}ms)`);
+        emit(onStep, { step: "afterCreateSession", status: "error", duration: afterDuration, error: "hook failed (required)" });
+        log(sessionId, "ROLLBACK: releasing ports + removing worktree");
+        try { releaseSessionPorts(projectPath, sessionId); } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
+        try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
         throw new Error("afterCreateSession hook failed (required)");
       }
+      log(sessionId, `afterCreateSession ✓ ${afterDuration}ms`);
+      emit(onStep, { step: "afterCreateSession", status: "done", duration: afterDuration });
 
-      return {
-        sessionId,
-        worktreePath: wt.worktreePath,
-        branch: wt.branch,
-        ports,
-        syncReport,
-        hookReports,
-        duration: Date.now() - start,
-      };
+      const totalDuration = Date.now() - start;
+      log(sessionId, `create complete ✓ ${totalDuration}ms`);
+      return { sessionId, worktreePath: wt.worktreePath, branch: wt.branch, ports, syncReport, hookReports, duration: totalDuration };
     } catch (err) {
-      // If anything fails after worktree creation, clean up the worktree
-      try { removeWorktree(projectPath, sessionId, true); } catch {}
+      log(sessionId, "ROLLBACK: removing worktree");
+      try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
       throw err;
     }
   }
 
   async function remove(input: DeleteSessionInput): Promise<DeleteSessionResult> {
-    const { sessionId, projectPath, worktreePath, config } = input;
+    const { sessionId, projectPath, worktreePath, config, onStep } = input;
     const hookReports: HookReport[] = [];
+    const start = Date.now();
 
-    // Load hooks from config
     hookRegistry.loadFromConfig(config.hooks as Record<string, import("./config.js").HookDefinition[]>);
 
+    log(sessionId, `remove (project: ${projectPath})`);
+
     // Step 1: BeforeDeleteSession hooks
-    const beforeCtx = buildHookContext("beforeDeleteSession", {
-      projectId: "", sessionId, projectPath, worktreePath,
-    });
+    emit(onStep, { step: "beforeDeleteSession", status: "running" });
+    const beforeStepStart = Date.now();
+    const beforeCtx = buildHookContext("beforeDeleteSession", { projectId: "", sessionId, projectPath, worktreePath });
     const beforeReport = await hookEngine.execute("beforeDeleteSession", beforeCtx);
     hookReports.push(beforeReport);
-
+    const beforeDuration = Date.now() - beforeStepStart;
     if (!beforeReport.success) {
+      log(sessionId, `beforeDeleteSession ✗ FAILED (${beforeDuration}ms)`);
+      emit(onStep, { step: "beforeDeleteSession", status: "error", duration: beforeDuration, error: "hook failed (required)" });
       throw new Error("beforeDeleteSession hook failed (required)");
     }
+    log(sessionId, `beforeDeleteSession ✓ ${beforeDuration}ms`);
+    emit(onStep, { step: "beforeDeleteSession", status: "done", duration: beforeDuration });
 
     // Step 2: ReleasePorts (Core)
-    releaseSessionPorts(projectPath, sessionId);
+    emit(onStep, { step: "releasePorts", status: "running" });
+    const portsStepStart = Date.now();
+    await releaseSessionPorts(projectPath, sessionId);
+    const portsDuration = Date.now() - portsStepStart;
+    log(sessionId, `releasePorts ✓ ${portsDuration}ms`);
+    emit(onStep, { step: "releasePorts", status: "done", duration: portsDuration });
 
     // Step 3: RemoveWorktree (Core)
+    emit(onStep, { step: "removeWorktree", status: "running" });
+    const wtStepStart = Date.now();
     if (existsSync(worktreePath)) {
-      removeWorktree(projectPath, sessionId, true);
+      await removeWorktree(projectPath, sessionId, true);
     }
+    const wtDuration = Date.now() - wtStepStart;
+    log(sessionId, `removeWorktree ✓ ${wtDuration}ms`);
+    emit(onStep, { step: "removeWorktree", status: "done", duration: wtDuration });
 
     // Step 4: AfterDeleteSession hooks — failure doesn't affect result
-    const afterCtx = buildHookContext("afterDeleteSession", {
-      projectId: "", sessionId, projectPath, worktreePath,
-    });
+    emit(onStep, { step: "afterDeleteSession", status: "running" });
+    const afterStepStart = Date.now();
+    const afterCtx = buildHookContext("afterDeleteSession", { projectId: "", sessionId, projectPath, worktreePath });
     const afterReport = await hookEngine.execute("afterDeleteSession", afterCtx);
     hookReports.push(afterReport);
+    const afterDuration = Date.now() - afterStepStart;
+    if (!afterReport.success) {
+      log(sessionId, `afterDeleteSession ✗ FAILED (${afterDuration}ms) — ignored`);
+    } else {
+      log(sessionId, `afterDeleteSession ✓ ${afterDuration}ms`);
+    }
+    emit(onStep, { step: "afterDeleteSession", status: afterReport.success ? "done" : "error", duration: afterDuration });
 
-    return {
-      sessionId,
-      hookReports,
-      success: true,
-    };
+    const totalDuration = Date.now() - start;
+    log(sessionId, `remove complete ✓ ${totalDuration}ms`);
+    return { sessionId, hookReports, success: true };
   }
 
   return { create, remove };

@@ -1,6 +1,10 @@
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
 
 const WORKTREE_DIR = ".agentdock/worktrees";
 
@@ -44,6 +48,25 @@ export function validateSessionId(sessionId: string): void {
   }
 }
 
+export async function isRegisteredWorktree(projectPath: string, worktreePath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: projectPath,
+      encoding: "utf-8",
+    });
+    const normalizedPath = worktreePath.replace(/\\/g, "/");
+    for (const block of stdout.split("\n\n")) {
+      const match = block.match(/^worktree (.+)$/m);
+      if (match && match[1].replace(/\\/g, "/") === normalizedPath) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function createWorktree(
   projectPath: string,
   sessionId: string,
@@ -73,11 +96,11 @@ export function createWorktree(
   return { worktreePath, branch };
 }
 
-export function removeWorktree(
+export async function removeWorktree(
   projectPath: string,
   sessionId: string,
   force = false,
-): { removed: string } {
+): Promise<{ removed: string }> {
   validateSessionId(sessionId);
 
   const worktreePath = getWorktreePath(projectPath, sessionId);
@@ -103,21 +126,32 @@ export function removeWorktree(
     }
   }
 
-  execSync(`git worktree remove ${force ? "--force " : ""}"${worktreePath}"`, {
-    cwd: projectPath,
-    encoding: "utf-8",
-    stdio: "pipe",
-  });
+  // Only attempt git worktree remove if this is a registered worktree
+  if (await isRegisteredWorktree(projectPath, worktreePath)) {
+    try {
+      await execAsync(`git worktree remove ${force ? "--force " : ""}"${worktreePath}"`, {
+        cwd: projectPath,
+        encoding: "utf-8",
+      });
+    } catch {
+      // git worktree remove may fail (e.g., "Directory not empty" on Windows
+      // when untracked files exist from hooks). Fall through to fs.rm below.
+    }
 
-  try {
-    const branch = `agentdock/${sessionId}`;
-    execSync(`git branch -D "${branch}"`, {
-      cwd: projectPath,
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-  } catch {
-    // Branch deletion is best-effort
+    try {
+      const branch = `agentdock/${sessionId}`;
+      await execAsync(`git branch -D "${branch}"`, {
+        cwd: projectPath,
+        encoding: "utf-8",
+      });
+    } catch {
+      // Branch deletion is best-effort
+    }
+  }
+
+  // Always ensure directory is removed (handles git failure or non-worktree directories)
+  if (existsSync(worktreePath)) {
+    await rm(worktreePath, { recursive: true, force: true });
   }
 
   return { removed: worktreePath };
