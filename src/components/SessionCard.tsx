@@ -64,6 +64,7 @@ interface SessionCardProps {
   onRename: (sessionId: string, newName: string) => void;
   onOpenInExplorer: (worktreePath: string) => void;
   onReassignPorts: (sessionId: string) => void;
+  onHover?: (sessionId: string) => void;
 }
 
 export function SessionCard({
@@ -74,6 +75,7 @@ export function SessionCard({
   onRename,
   onOpenInExplorer,
   onReassignPorts,
+  onHover,
 }: SessionCardProps) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -195,6 +197,7 @@ export function SessionCard({
       <div
         className={`session-card ${isActive ? "session-card-active" : ""}`}
         onClick={() => onSelect(session.id)}
+        onMouseEnter={() => onHover?.(session.id)}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleStartRename}
         onKeyDown={(e) => e.key === "Enter" && onSelect(session.id)}

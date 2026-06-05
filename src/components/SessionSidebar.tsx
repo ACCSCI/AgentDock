@@ -1,10 +1,12 @@
-import { useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession } = useStore();
   const { data: projects } = useProjects();
+  const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
   const deleteSession = useDeleteSessionSSE();
   const renameSession = useRenameSession();
@@ -66,6 +68,18 @@ export function SessionSidebar() {
     }
   };
 
+  const prefetchTerminals = (sessionId: string) => {
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.terminals(sessionId),
+      queryFn: async () => {
+        const res = await fetch(`/api/sessions/${sessionId}/terminals`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        return data.terminals;
+      },
+    });
+  };
+
   return (
     <div className="session-sidebar">
       <div className="session-list">
@@ -79,6 +93,7 @@ export function SessionSidebar() {
             onRename={handleRenameSession}
             onOpenInExplorer={handleOpenInExplorer}
             onReassignPorts={handleReassignPorts}
+            onHover={prefetchTerminals}
           />
         ))}
       </div>

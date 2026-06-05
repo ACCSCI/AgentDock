@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useCreateTerminal, useDeleteTerminal, type TerminalData } from "../lib/queries";
+import { useEffect, useState } from "react";
+import { useCreateTerminal, useDeleteTerminal, useSessionTerminals } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { SessionTerminal } from "./SessionTerminal";
 
@@ -10,37 +10,17 @@ interface TerminalManagerProps {
 
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
   const { activeTerminalId, setActiveTerminal } = useStore();
-  const [terminals, setTerminals] = useState<TerminalData[]>([]);
+  const { data: terminals = [] } = useSessionTerminals(sessionId);
   const [loading, setLoading] = useState(false);
   const createTerminal = useCreateTerminal();
   const deleteTerminal = useDeleteTerminal();
 
-  // Fetch terminal list for this session
-  const fetchTerminals = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/terminals`);
-      const data = await res.json();
-      if (data.success) {
-        setTerminals(data.terminals);
-        // If active terminal no longer exists, clear it
-        if (activeTerminalId && !data.terminals.find((t: TerminalData) => t.terminalId === activeTerminalId)) {
-          setActiveTerminal(null);
-        }
-      }
-    } catch {
-      // ignore
+  // If active terminal no longer exists, clear it
+  useEffect(() => {
+    if (activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
+      setActiveTerminal(null);
     }
-  }, [sessionId, activeTerminalId, setActiveTerminal]);
-
-  useEffect(() => {
-    fetchTerminals();
-  }, [fetchTerminals]);
-
-  // Poll terminal status every 3s (for exited detection)
-  useEffect(() => {
-    const timer = setInterval(fetchTerminals, 3000);
-    return () => clearInterval(timer);
-  }, [fetchTerminals]);
+  }, [activeTerminalId, terminals, setActiveTerminal]);
 
   // Auto-select first terminal if none selected
   useEffect(() => {
@@ -54,7 +34,6 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     setLoading(true);
     try {
       const terminal = await createTerminal.mutateAsync({ sessionId });
-      setTerminals((prev) => [...prev, terminal]);
       setActiveTerminal(terminal.terminalId);
     } catch (err) {
       alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -67,7 +46,6 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     e?.stopPropagation();
     try {
       await deleteTerminal.mutateAsync(terminalId);
-      setTerminals((prev) => prev.filter((t) => t.terminalId !== terminalId));
       if (activeTerminalId === terminalId) {
         const remaining = terminals.filter((t) => t.terminalId !== terminalId && t.status !== "exited");
         setActiveTerminal(remaining.length > 0 ? remaining[0].terminalId : null);

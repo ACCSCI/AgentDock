@@ -56,6 +56,7 @@ export function isDeletingSession(s: SessionData | CreatingSession | DeletingSes
 // Query keys
 export const queryKeys = {
   projects: ["projects"] as const,
+  terminals: (sessionId: string) => ["terminals", sessionId] as const,
 };
 
 // GET /api/projects
@@ -400,8 +401,24 @@ export interface TerminalData {
   createdAt: string;
 }
 
+// GET /api/sessions/:id/terminals
+export function useSessionTerminals(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.terminals(sessionId),
+    queryFn: async (): Promise<TerminalData[]> => {
+      const res = await fetch(`/api/sessions/${sessionId}/terminals`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.terminals;
+    },
+    enabled: !!sessionId,
+    refetchInterval: 3000,
+  });
+}
+
 // POST /api/sessions/:id/terminals
 export function useCreateTerminal() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ sessionId, shell }: { sessionId: string; shell?: string }) => {
       const res = await fetch(`/api/sessions/${sessionId}/terminals`, {
@@ -413,16 +430,23 @@ export function useCreateTerminal() {
       if (!data.success) throw new Error(data.error);
       return data.terminal as TerminalData;
     },
+    onSuccess: (_data, { sessionId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.terminals(sessionId) });
+    },
   });
 }
 
 // DELETE /api/terminals/:terminalId
 export function useDeleteTerminal() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (terminalId: string) => {
       const res = await fetch(`/api/terminals/${terminalId}`, { method: "DELETE" });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["terminals"] });
     },
   });
 }
