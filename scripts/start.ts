@@ -6,6 +6,22 @@
  * Requires FRONTEND_PORT to be set in .env or environment.
  */
 import { spawn } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Load .env file into process.env (file values take precedence)
+const envPath = resolve(import.meta.dir, "..", ".env");
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf-8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    process.env[key] = val;
+  }
+}
 
 const port = process.env.FRONTEND_PORT;
 if (!port) {

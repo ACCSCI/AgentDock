@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { mergeEnv, parseEnv, updateEnvFile, writeEnv } from "../env.js";
+import {
+  buildScopedChildEnv,
+  mergeEnv,
+  parseEnv,
+  readEnvFile,
+  readWorkspaceEnv,
+  updateEnvFile,
+  writeEnv,
+} from "../env.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -98,6 +105,80 @@ describe("writeEnv", () => {
   it("preserves order", () => {
     const result = writeEnv({ Z: "1", A: "2", M: "3" });
     expect(result).toBe("Z=1\nA=2\nM=3\n");
+  });
+});
+
+describe("buildScopedChildEnv", () => {
+  function createTmpDir(): string {
+    const dir = path.join(os.tmpdir(), `agentdock-env-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it("overrides inherited vars with workspace .env values", () => {
+    const dir = createTmpDir();
+    try {
+      writeFileSync(path.join(dir, ".env"), "FRONTEND_PORT=20091\nAPI_URL=http://local\n");
+      const env = buildScopedChildEnv(dir, { AGENTDOCK_SESSION_ID: "sess1" }, {
+        FRONTEND_PORT: "5175",
+        API_URL: "http://parent",
+        PATH: process.env.PATH,
+      });
+      expect(env.FRONTEND_PORT).toBe("20091");
+      expect(env.API_URL).toBe("http://local");
+      expect(env.AGENTDOCK_SESSION_ID).toBe("sess1");
+      expect(env.PATH).toBe(process.env.PATH);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("strips fallback port keys even when workspace .env does not define them", () => {
+    const dir = createTmpDir();
+    try {
+      writeFileSync(path.join(dir, ".env"), "API_URL=http://local\n");
+      const env = buildScopedChildEnv(dir, {}, {
+        FRONTEND_PORT: "5175",
+        PORT: "3000",
+        API_URL: "http://parent",
+      });
+      expect(env.FRONTEND_PORT).toBeUndefined();
+      expect(env.PORT).toBeUndefined();
+      expect(env.API_URL).toBe("http://local");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps safe inherited vars when no workspace override exists", () => {
+    const dir = createTmpDir();
+    try {
+      const env = buildScopedChildEnv(dir, {}, {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        CUSTOM_SAFE: "keep-me",
+      });
+      expect(env.PATH).toBe(process.env.PATH);
+      expect(env.HOME).toBe(process.env.HOME);
+      expect(env.CUSTOM_SAFE).toBe("keep-me");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets runtime vars win over workspace .env", () => {
+    const dir = createTmpDir();
+    try {
+      writeFileSync(path.join(dir, ".env"), "AGENTDOCK_SESSION_ID=from-file\nTERM=dumb\n");
+      const env = buildScopedChildEnv(dir, {
+        AGENTDOCK_SESSION_ID: "runtime-session",
+        TERM: "xterm-256color",
+      });
+      expect(env.AGENTDOCK_SESSION_ID).toBe("runtime-session");
+      expect(env.TERM).toBe("xterm-256color");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
