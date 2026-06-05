@@ -6,7 +6,7 @@ import { allocatePorts } from "./port-pool.js";
 
 const registryMutex = new Mutex();
 
-const AGENTDOCK_DIR = ".agentdock";
+const AGENTDOCK_DIR = ".data";
 const REGISTRY_FILE = "port-registry.json";
 
 export interface SessionPorts {

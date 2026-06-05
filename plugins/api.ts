@@ -7,9 +7,10 @@ import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
 import { isGitRepo, removeWorktree, renameWorktree, scanDiskWorktrees } from "./worktree.js";
 import { loadGlobalAllocatedPorts, releaseSessionPorts, reassignSessionPorts } from "./port-registry.js";
-import { acquireLock, openExistingUrl } from "./singleton.js";
 import { loadConfig } from "./config.js";
 import { createSessionLifecycle } from "./session-lifecycle.js";
+import { DaemonManager } from "./daemon-manager.js";
+import { setPortAllocator } from "./port-pool.js";
 
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
@@ -40,18 +41,43 @@ export function apiPlugin(): Plugin {
   return {
     name: "vite-plugin-agentdock-api",
     configureServer(server) {
-      // Singleton lock: check before Vite binds the port
       const port = server.config.server.port ?? 5173;
-      const lockResult = acquireLock(port);
-      if (!lockResult.acquired) {
-        const url = `http://localhost:${lockResult.existing.port}`;
-        console.log(`\n  ⚠ AgentDock 已在运行中 (PID: ${lockResult.existing.pid}, 端口: ${lockResult.existing.port})`);
-        console.log(`  → 正在打开: ${url}\n`);
-        openExistingUrl(lockResult.existing.port);
-        process.exit(0);
-      }
+      const cwd = process.cwd();
 
-      console.log(`  🔒 AgentDock 单例锁已获取 (PID: ${process.pid})`);
+      // Initialize daemon: detect or start, register directory
+      const initDaemon = async () => {
+        try {
+          const manager = new DaemonManager();
+          const { client, started } = await manager.init();
+          setPortAllocator(client);
+
+          // Register this directory with daemon
+          await client.register(cwd, process.pid);
+          console.log(`  🔒 Registered directory: ${cwd} (PID: ${process.pid})`);
+
+          if (started) {
+            console.log(`  🚀 Port daemon started on port 20000`);
+          } else {
+            console.log(`  🔗 Connected to existing port daemon`);
+          }
+
+          // Unregister on exit
+          process.on("exit", () => {
+            client.unregister(cwd, process.pid).catch(() => {});
+          });
+          process.on("SIGINT", () => {
+            client.unregister(cwd, process.pid).catch(() => {});
+            process.exit(0);
+          });
+          process.on("SIGTERM", () => {
+            client.unregister(cwd, process.pid).catch(() => {});
+            process.exit(0);
+          });
+        } catch (err) {
+          console.warn(`  ⚠ Daemon unavailable: ${err instanceof Error ? err.message : err}`);
+        }
+      };
+      initDaemon();
 
       // 延迟初始化 Terminal WebSocket 服务（动态 import 避免 Vite config 加载时接触原生模块）
       const initTerminal = async () => {

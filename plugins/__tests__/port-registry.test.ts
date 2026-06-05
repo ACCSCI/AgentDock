@@ -43,7 +43,7 @@ describe("loadRegistry", () => {
       const entries = [
         { sessionId: "abc", ports: { FRONTEND_PORT: 20000, BACKEND_PORT: 20001, WS_PORT: 20002, DEBUG_PORT: 20003, PREVIEW_PORT: 20004 } },
       ];
-      const filePath = path.join(dir, ".agentdock", "port-registry.json");
+      const filePath = path.join(dir, ".data", "port-registry.json");
       mkdirSync(path.dirname(filePath), { recursive: true });
       readFileSync; // just to confirm import
       require("node:fs").writeFileSync(filePath, JSON.stringify(entries));
@@ -59,7 +59,7 @@ describe("saveRegistry", () => {
     const dir = tmpDir();
     try {
       saveRegistry(dir, []);
-      const filePath = path.join(dir, ".agentdock", "port-registry.json");
+      const filePath = path.join(dir, ".data", "port-registry.json");
       expect(existsSync(filePath)).toBe(true);
       expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual([]);
     } finally {
@@ -74,7 +74,7 @@ describe("saveRegistry", () => {
         { sessionId: "s1", ports: { FRONTEND_PORT: 20000, BACKEND_PORT: 20001, WS_PORT: 20002, DEBUG_PORT: 20003, PREVIEW_PORT: 20004 } },
       ];
       saveRegistry(dir, entries);
-      const filePath = path.join(dir, ".agentdock", "port-registry.json");
+      const filePath = path.join(dir, ".data", "port-registry.json");
       expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual(entries);
     } finally {
       rmSync(dir, { recursive: true, force: true });
