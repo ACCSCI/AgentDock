@@ -12,6 +12,7 @@ import { loadConfig } from "./config.js";
 import { createSessionLifecycle } from "./session-lifecycle.js";
 
 let db: DrizzleDb | null = null;
+let _terminalInitialized = false;
 
 function getDb(): DrizzleDb {
   if (!db) { db = createDb(process.cwd()); }
@@ -51,6 +52,27 @@ export function apiPlugin(): Plugin {
       }
 
       console.log(`  🔒 AgentDock 单例锁已获取 (PID: ${process.pid})`);
+
+      // 延迟初始化 Terminal WebSocket 服务（动态 import 避免 Vite config 加载时接触原生模块）
+      const initTerminal = async () => {
+        if (_terminalInitialized || !server.httpServer) return;
+        _terminalInitialized = true;
+        try {
+          const { createTerminalWebSocket } = await import("./terminal-ws.js");
+          const { terminalManager } = await import("./terminal-manager.js");
+          createTerminalWebSocket(server.httpServer as any);
+
+          // 进程退出时清理所有 PTY
+          const cleanupTerminals = () => { terminalManager.killAll(); };
+          process.on("exit", cleanupTerminals);
+          process.on("SIGINT", () => { cleanupTerminals(); process.exit(0); });
+          process.on("SIGTERM", () => { cleanupTerminals(); process.exit(0); });
+        } catch (err) {
+          console.error("[api] Failed to initialize terminal:", err);
+        }
+      };
+      // 异步启动但不阻塞中间件
+      initTerminal();
 
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
         const pathname = new URL(req.url || "/", `http://${req.headers.host}`).pathname;
@@ -261,6 +283,10 @@ export function apiPlugin(): Plugin {
 
               if (!wantsSSE) {
                 const config = loadConfig(p.path);
+                // Kill all terminals for this session before removing worktree
+                // (releases file locks on Windows)
+                const { terminalManager: tm } = await import("./terminal-manager.js");
+                tm.killBySession(id);
                 const lifecycle = createSessionLifecycle();
                 await lifecycle.remove({
                   sessionId: id,
@@ -285,6 +311,9 @@ export function apiPlugin(): Plugin {
               };
 
               try {
+                // Kill all terminals for this session before removing worktree
+                const { terminalManager: tm } = await import("./terminal-manager.js");
+                tm.killBySession(id);
                 const config = loadConfig(p.path);
                 const lifecycle = createSessionLifecycle();
                 await lifecycle.remove({
@@ -349,6 +378,71 @@ export function apiPlugin(): Plugin {
           if (!dirPath) { json(res, 400, { error: "path is required" }); return; }
           try { exec(`explorer "${dirPath}"`); json(res, 200, { success: true }); }
           catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // ---- Terminal REST API ----
+
+        // POST /api/sessions/:id/terminals — Create a new terminal
+        const termCreateMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/terminals$/);
+        if (termCreateMatch && method === "POST") {
+          const sessionId = termCreateMatch[1];
+          try {
+            const d = getDb();
+            const s = d.select().from(sessions).where(eq(sessions.id, sessionId)).get();
+            if (!s) { json(res, 404, { error: "Session not found" }); return; }
+            const { terminalManager: tm } = await import("./terminal-manager.js");
+            const body = await parseBody(req);
+            const { shell } = body as { shell?: string };
+            const terminal = await tm.create({
+              sessionId,
+              worktreePath: s.worktreePath,
+              shell: shell ?? "default",
+            });
+            json(res, 200, {
+              success: true,
+              terminal: {
+                terminalId: terminal.terminalId,
+                sessionId: terminal.sessionId,
+                shell: terminal.shell,
+                status: terminal.status,
+                pid: terminal.pid,
+                createdAt: terminal.createdAt,
+              },
+            });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // GET /api/sessions/:id/terminals — List terminals for a session
+        if (termCreateMatch && method === "GET") {
+          const sessionId = termCreateMatch[1];
+          try {
+            const { terminalManager: tm } = await import("./terminal-manager.js");
+            const terminals = tm.listBySession(sessionId).map((t) => ({
+              terminalId: t.terminalId,
+              sessionId: t.sessionId,
+              shell: t.shell,
+              status: t.status,
+              pid: t.pid,
+              createdAt: t.createdAt,
+            }));
+            json(res, 200, { success: true, terminals });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // DELETE /api/terminals/:terminalId — Kill a terminal
+        const termKillMatch = pathname.match(/^\/api\/terminals\/([^/]+)$/);
+        if (termKillMatch && method === "DELETE") {
+          const terminalId = termKillMatch[1];
+          try {
+            const { terminalManager: tm } = await import("./terminal-manager.js");
+            const terminal = tm.get(terminalId);
+            if (!terminal) { json(res, 404, { error: "Terminal not found" }); return; }
+            tm.kill(terminalId);
+            json(res, 200, { success: true });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }
 

@@ -1,5 +1,5 @@
 import { exec, execSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -84,7 +84,7 @@ export function createWorktree(
 
   const baseDir = getWorktreeBase(projectPath);
   if (!existsSync(baseDir)) {
-    execSync(`mkdir -p "${baseDir}"`, { cwd: projectPath, stdio: "pipe" });
+    mkdirSync(baseDir, { recursive: true });
   }
 
   execSync(`git worktree add "${worktreePath}" -b "${branch}" "${base}"`, {
