@@ -1,4 +1,14 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const FALLBACK_STRIP_KEYS = new Set([
+  "FRONTEND_PORT",
+  "BACKEND_PORT",
+  "WS_PORT",
+  "DEBUG_PORT",
+  "PREVIEW_PORT",
+  "PORT",
+]);
 
 /**
  * Parse .env file content into key-value pairs.
@@ -35,6 +45,37 @@ export function parseEnv(content: string): Record<string, string> {
   }
 
   return result;
+}
+
+export function readEnvFile(filePath: string): Record<string, string> {
+  if (!existsSync(filePath)) return {};
+  return parseEnv(readFileSync(filePath, "utf-8"));
+}
+
+export function readWorkspaceEnv(workspacePath: string): Record<string, string> {
+  return readEnvFile(path.join(workspacePath, ".env"));
+}
+
+export function buildScopedChildEnv(
+  workspacePath: string,
+  runtimeEnv: Record<string, string> = {},
+  parentEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const workspaceEnv = readWorkspaceEnv(workspacePath);
+  const env: NodeJS.ProcessEnv = { ...parentEnv };
+
+  for (const key of FALLBACK_STRIP_KEYS) {
+    delete env[key];
+  }
+  for (const key of Object.keys(workspaceEnv)) {
+    delete env[key];
+  }
+
+  return {
+    ...env,
+    ...workspaceEnv,
+    ...runtimeEnv,
+  };
 }
 
 /**

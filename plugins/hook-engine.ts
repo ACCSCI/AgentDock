@@ -1,6 +1,6 @@
-import { exec, type ChildProcess } from "node:child_process";
-import process from "node:process";
+import { exec } from "node:child_process";
 import type { HookDefinition, HookLifecycleEvent } from "./config.js";
+import { buildScopedChildEnv } from "./env.js";
 
 // --- Hook 执行上下文 ---
 export interface HookContext {
@@ -106,12 +106,11 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
         hook.run,
         {
           cwd,
-          env: {
-            ...process.env,
+          env: buildScopedChildEnv(cwd, {
             AGENTDOCK_SESSION_ID: context.sessionId,
             AGENTDOCK_PROJECT_ID: context.projectId,
             AGENTDOCK_EVENT: context.event,
-          },
+          }),
         },
         (error, stdout, stderr) => {
           if (settled) return;

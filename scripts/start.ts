@@ -6,6 +6,12 @@
  * Requires FRONTEND_PORT to be set in .env or environment.
  */
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { readEnvFile } from "../plugins/env.js";
+
+// Load .env file into process.env (file values take precedence)
+const envPath = resolve(import.meta.dir, "..", ".env");
+Object.assign(process.env, readEnvFile(envPath));
 
 const port = process.env.FRONTEND_PORT;
 if (!port) {

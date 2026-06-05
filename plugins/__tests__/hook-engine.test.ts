@@ -249,6 +249,51 @@ describe("HookEngine.executeOne", () => {
     const result = await engine.executeOne(hook, ctx);
     expect(result.success).toBe(false);
   });
+  it("C21: worktree .env overrides inherited parent env", async () => {
+    const ctx = makeContext();
+    writeFileSync(path.join(ctx.worktreePath, ".env"), "FRONTEND_PORT=20091\nAPI_URL=http://local\n");
+    const originalFrontendPort = process.env.FRONTEND_PORT;
+    const originalApiUrl = process.env.API_URL;
+    process.env.FRONTEND_PORT = "5175";
+    process.env.API_URL = "http://parent";
+    try {
+      const hook = makeHook({ run: isWin ? "echo %FRONTEND_PORT% %API_URL%" : "printf '%s %s' \"$FRONTEND_PORT\" \"$API_URL\"" });
+      const result = await engine.executeOne(hook, ctx);
+      expect(result.success).toBe(true);
+      expect(result.stdout).toContain("20091");
+      expect(result.stdout).toContain("http://local");
+    } finally {
+      if (originalFrontendPort === undefined) delete process.env.FRONTEND_PORT;
+      else process.env.FRONTEND_PORT = originalFrontendPort;
+      if (originalApiUrl === undefined) delete process.env.API_URL;
+      else process.env.API_URL = originalApiUrl;
+    }
+  });
+
+  it("C22: fallback port keys are stripped when worktree .env does not define them", async () => {
+    const ctx = makeContext();
+    writeFileSync(path.join(ctx.worktreePath, ".env"), "API_URL=http://local\n");
+    const originalFrontendPort = process.env.FRONTEND_PORT;
+    process.env.FRONTEND_PORT = "5175";
+    try {
+      const hook = makeHook({ run: isWin ? "if defined FRONTEND_PORT (echo defined) else echo missing" : "if [ -n \"$FRONTEND_PORT\" ]; then echo defined; else echo missing; fi" });
+      const result = await engine.executeOne(hook, ctx);
+      expect(result.success).toBe(true);
+      expect(result.stdout.trim()).toBe("missing");
+    } finally {
+      if (originalFrontendPort === undefined) delete process.env.FRONTEND_PORT;
+      else process.env.FRONTEND_PORT = originalFrontendPort;
+    }
+  });
+
+  it("C23: runtime AGENTDOCK vars override worktree .env", async () => {
+    const ctx = makeContext({ sessionId: "runtime-session" });
+    writeFileSync(path.join(ctx.worktreePath, ".env"), "AGENTDOCK_SESSION_ID=file-session\n");
+    const hook = makeHook({ run: isWin ? "echo %AGENTDOCK_SESSION_ID%" : "printf '%s' \"$AGENTDOCK_SESSION_ID\"" });
+    const result = await engine.executeOne(hook, ctx);
+    expect(result.success).toBe(true);
+    expect(result.stdout.trim()).toBe("runtime-session");
+  });
 });
 
 // ============================================================

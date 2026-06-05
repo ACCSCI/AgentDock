@@ -23,8 +23,58 @@
  *     { type: "ready" }
  */
 
-const { existsSync } = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
+const path = require("node:path");
+
+const FALLBACK_STRIP_KEYS = new Set([
+  "FRONTEND_PORT",
+  "BACKEND_PORT",
+  "WS_PORT",
+  "DEBUG_PORT",
+  "PREVIEW_PORT",
+  "PORT",
+]);
+
+function parseEnv(content) {
+  const result = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let value = trimmed.slice(eqIdx + 1).trim();
+    if (!value.startsWith('"') && !value.startsWith("'")) {
+      const commentIdx = value.indexOf(" #");
+      if (commentIdx !== -1) value = value.slice(0, commentIdx).trim();
+    } else {
+      const quote = value[0];
+      const closingIdx = value.indexOf(quote, 1);
+      if (closingIdx !== -1) value = value.slice(1, closingIdx);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function readWorkspaceEnv(workspacePath) {
+  const envPath = path.join(workspacePath, ".env");
+  if (!existsSync(envPath)) return {};
+  return parseEnv(readFileSync(envPath, "utf-8"));
+}
+
+function buildScopedChildEnv(workspacePath, runtimeEnv = {}, parentEnv = process.env) {
+  const workspaceEnv = readWorkspaceEnv(workspacePath);
+  const env = { ...parentEnv };
+  for (const key of FALLBACK_STRIP_KEYS) delete env[key];
+  for (const key of Object.keys(workspaceEnv)) delete env[key];
+  return {
+    ...env,
+    ...workspaceEnv,
+    ...runtimeEnv,
+  };
+}
 
 let ptySpawn = null;
 try {
@@ -138,7 +188,7 @@ function handleSpawn(msg) {
     cols: cols ?? 80,
     rows: rows ?? 24,
     cwd: worktreePath,
-    env: Object.assign({}, process.env, {
+    env: buildScopedChildEnv(worktreePath, {
       TERM: "xterm-256color",
       AGENTDOCK_SESSION_ID: sessionId,
       AGENTDOCK_TERMINAL_ID: terminalId,

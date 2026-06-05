@@ -3,6 +3,13 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { apiPlugin } from "./plugins/api";
+import { readEnvFile } from "./plugins/env.js";
+
+// Vite's built-in .env loading happens AFTER config evaluation, so we must
+// read .env directly here so that the server.port IIFE can read FRONTEND_PORT.
+// File values take precedence over inherited environment variables.
+const envFile = resolve(__dirname, ".env");
+Object.assign(process.env, readEnvFile(envFile));
 
 export default defineConfig({
   plugins: [tanstackRouter({ quoteStyle: "double" }), react(), apiPlugin()],
@@ -26,7 +33,7 @@ export default defineConfig({
       // session mutates those files, which would otherwise trigger a Vite
       // full page reload and abort the in-flight create/delete SSE stream
       // (surfacing as "network error" in the UI). Ignore the whole dir.
-      ignored: ["**/.agentdock/**"],
+      ignored: ["**/.agentdock/**", "**/.claude/**"],
     },
   },
 });
