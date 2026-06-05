@@ -1,0 +1,10 @@
+version: "1"
+
+resources:
+  sync: []
+
+hooks:
+  afterCreateSession:
+    - run: "bun install"
+      required: true
+      timeout: 120000
