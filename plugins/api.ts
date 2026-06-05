@@ -41,7 +41,6 @@ export function apiPlugin(): Plugin {
   return {
     name: "vite-plugin-agentdock-api",
     configureServer(server) {
-      const port = server.config.server.port ?? 5173;
       const cwd = process.cwd();
 
       // Initialize daemon: detect or start, register directory

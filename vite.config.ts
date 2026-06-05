@@ -12,7 +12,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: Number(process.env.FRONTEND_PORT) || 5173,
+    port: (() => {
+      const p = Number(process.env.FRONTEND_PORT);
+      if (!p || p < 1 || p > 65535) {
+        throw new Error("FRONTEND_PORT is required — set it in .env or environment");
+      }
+      return p;
+    })(),
     strictPort: true,
   },
 });

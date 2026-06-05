@@ -12,8 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "open-app": "pwsh -Command \"Start-Process msedge 'http://localhost:5173 --app=http://localhost:5173'\"",
-    "start": "pwsh -Command \"Start-Process -NoNewWindow bun -ArgumentList 'run','dev'; Start-Sleep -Seconds 3; Start-Process msedge 'http://localhost:5173 --app=http://localhost:5173'\""
+    "open-app": "bun run scripts/open-app.ts",
+    "start": "bun run scripts/start.ts"
   },
   "dependencies": {
     "@ai-sdk/devtools": "^0.0.18",
