@@ -388,3 +388,41 @@ export function useReassignPorts() {
     },
   });
 }
+
+// ---- Terminal API ----
+
+export interface TerminalData {
+  terminalId: string;
+  sessionId: string;
+  shell: string;
+  status: "spawning" | "running" | "exited";
+  pid: number | null;
+  createdAt: string;
+}
+
+// POST /api/sessions/:id/terminals
+export function useCreateTerminal() {
+  return useMutation({
+    mutationFn: async ({ sessionId, shell }: { sessionId: string; shell?: string }) => {
+      const res = await fetch(`/api/sessions/${sessionId}/terminals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shell }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.terminal as TerminalData;
+    },
+  });
+}
+
+// DELETE /api/terminals/:terminalId
+export function useDeleteTerminal() {
+  return useMutation({
+    mutationFn: async (terminalId: string) => {
+      const res = await fetch(`/api/terminals/${terminalId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+    },
+  });
+}

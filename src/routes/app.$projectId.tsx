@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { TerminalManager } from "../components/TerminalManager";
 
 export const Route = createFileRoute("/app/$projectId")({
   component: ProjectWorkspace,
@@ -27,19 +28,16 @@ function ProjectWorkspace() {
         <h2>{project.name}</h2>
         <span className="workspace-path">{project.path}</span>
       </div>
-      {activeSession && (
-        <div className="workspace-session-info">
-          <span className="workspace-session-label">{activeSession.name}</span>
-          <span className="workspace-session-path">{activeSession.worktreePath}</span>
-        </div>
-      )}
       <div className="workspace-content">
         {project.sessions.length === 0 ? (
           <p className="workspace-hint">Click "+" in the sidebar to create a new session</p>
         ) : !activeSession ? (
           <p className="workspace-hint">Select a session from the sidebar to start working</p>
         ) : (
-          <p className="workspace-hint">Session ready</p>
+          <TerminalManager
+            sessionId={activeSession.id}
+            worktreePath={activeSession.worktreePath}
+          />
         )}
       </div>
     </div>
