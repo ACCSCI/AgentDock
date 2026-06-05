@@ -8,3 +8,4 @@ dist/
 *.sqlite-shm
 tsconfig.tsbuildinfo
 scripts/
+.data/
