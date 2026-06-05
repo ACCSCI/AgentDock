@@ -160,6 +160,7 @@ export function SessionTerminal({ terminalId }: SessionTerminalProps) {
       cursorStyle: "block",
       fontSize: 14,
       fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+      scrollback: 50000,
       allowProposedApi: true,
       theme: {
         background: "#1e1e1e",
