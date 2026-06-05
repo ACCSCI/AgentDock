@@ -183,10 +183,19 @@ Hook 执行时自动注入以下环境变量：
 | `AGENTDOCK_PROJECT_ID` | 当前项目 ID |
 | `AGENTDOCK_EVENT` | 当前生命周期事件名 |
 
-### Hook 执行顺序
+### Worktree 环境变量隔离
 
-- 同一事件的多个 hooks 按配置顺序依次执行
-- `required: true` 的 hook 失败后，后续 hooks 不再执行
+AgentDock 会在启动 Worktree 子进程（例如 terminal shell、lifecycle hooks）前，先读取当前 Worktree 的 `.env`，并按以下优先级构造最终环境变量：
+
+1. 继承父进程环境（先做冲突 key 消毒）
+2. 当前 Worktree `.env`
+3. `AGENTDOCK_*` 运行时变量
+
+这可以避免父项目或 AgentDock 自身进程中的环境变量污染子项目。例如：
+
+- 子项目自定义变量（如 `API_URL`）优先使用当前 Worktree `.env`
+- 端口变量（如 `FRONTEND_PORT`）优先使用当前 Session 写入 Worktree `.env` 的值
+- Hook 中注入的 `AGENTDOCK_SESSION_ID` / `AGENTDOCK_PROJECT_ID` / `AGENTDOCK_EVENT` 始终覆盖同名 `.env` 值
 
 ---
 
@@ -357,6 +366,12 @@ hooks:
       required: false
       timeout: 30000
 ```
+
+## 开发说明
+
+- `scripts/start.ts` 和 `vite.config.ts` 会复用 `plugins/env.ts` 中的 `readEnvFile()` 读取当前项目 `.env`
+- 这样可以正确处理带引号或行尾注释的 `.env` 值，避免启动时出现端口解析错误
+- Vite watcher 默认忽略 `.agentdock/**` 和 `.claude/**`，避免 session 或 Claude 生成文件触发无关热重载
 
 ---
 
