@@ -283,6 +283,7 @@ export function SessionCard({
               className="session-delete-confirm-btn session-delete-confirm-yes"
               onClick={(e) => {
                 e.stopPropagation();
+                setConfirmingDelete(false);
                 onDelete(session.id);
               }}
               title="确认删除"
