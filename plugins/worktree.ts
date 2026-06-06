@@ -66,9 +66,9 @@ export function validateBranchName(name: string): void {
   if (name.startsWith("-")) {
     throw new Error("Invalid branch name: must not start with '-'");
   }
-  // Reject git-illegal characters: whitespace, control chars, and ~ ^ : ? * [ \
-  // All other characters (including Unicode/CJK) are allowed.
-  if (/[\s~^:?*[\\]/.test(name)) {
+  // Reject git-illegal characters and shell metacharacters.
+  // Use Unicode property whitelist: letters (\p{L}), digits (\p{N}), and safe punctuation (._/-).
+  if (!/^[\p{L}\p{N}._/-]+$/u.test(name)) {
     throw new Error(`Invalid branch name: ${name}`);
   }
   // Git-specific rules: no "..", no leading/trailing "/", no "//",
