@@ -80,8 +80,10 @@ export function SessionCard({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(session.name);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
 
   // Poll the background hook status while an async afterCreateSession hook
   // (e.g. `bun install`) is still running. The create SSE stream closes as soon
@@ -101,6 +103,25 @@ export function SessionCard({
     return () => window.removeEventListener("mousedown", handleClick);
   }, [menuPos]);
 
+  // Cancel delete confirmation on click-outside or Escape
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const handleClick = (e: MouseEvent) => {
+      if (confirmRef.current && !confirmRef.current.contains(e.target as Node)) {
+        setConfirmingDelete(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirmingDelete(false);
+    };
+    window.addEventListener("mousedown", handleClick);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [confirmingDelete]);
+
   // Clamp context menu position to viewport
   useEffect(() => {
     if (!menuPos || !menuRef.current) return;
@@ -118,6 +139,13 @@ export function SessionCard({
     }
   }, [session.name, editing]);
 
+  // Reset delete confirmation when card becomes inactive
+  useEffect(() => {
+    if (!isActive) {
+      setConfirmingDelete(false);
+    }
+  }, [isActive]);
+
   useEffect(() => {
     if (editing && inputRef.current) {
       inputRef.current.focus();
@@ -133,6 +161,7 @@ export function SessionCard({
 
   const handleStartRename = useCallback(() => {
     setMenuPos(null);
+    setConfirmingDelete(false);
     setEditValue(session.name);
     setEditing(true);
   }, [session.name]);
@@ -163,8 +192,9 @@ export function SessionCard({
 
   const handleDelete = useCallback(() => {
     setMenuPos(null);
-    onDelete(session.id);
-  }, [session.id, onDelete]);
+    setEditing(false);
+    setConfirmingDelete(true);
+  }, []);
 
   const handleReassignPorts = useCallback(() => {
     setMenuPos(null);
@@ -245,16 +275,44 @@ export function SessionCard({
             :{session.ports.FRONTEND_PORT}
           </span>
         )}
-        <button
-          type="button"
-          className="session-close"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(session.id);
-          }}
-        >
-          ✕
-        </button>
+        {confirmingDelete ? (
+          <div ref={confirmRef} className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
+            <span className="session-delete-confirm-text">确认删除?</span>
+            <button
+              type="button"
+              className="session-delete-confirm-btn session-delete-confirm-yes"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(session.id);
+              }}
+              title="确认删除"
+            >
+              ✓
+            </button>
+            <button
+              type="button"
+              className="session-delete-confirm-btn session-delete-confirm-no"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmingDelete(false);
+              }}
+              title="取消"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="session-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmingDelete(true);
+            }}
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {menuPos && (
