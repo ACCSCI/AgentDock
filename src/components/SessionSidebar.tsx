@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
@@ -35,6 +36,7 @@ export function SessionSidebar() {
     if (!activeProject) return;
     try {
       await deleteSession.mutateAsync({ sessionId, projectId: activeProject.id });
+      terminalCache.disposeBySession(sessionId);
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
