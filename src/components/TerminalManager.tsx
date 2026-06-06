@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useCreateTerminal, useDeleteTerminal, useSessionTerminals } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
 
 interface TerminalManagerProps {
@@ -47,6 +48,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     e?.stopPropagation();
     try {
       await deleteTerminal.mutateAsync(terminalId);
+      terminalCache.dispose(terminalId);
       if (activeTerminalId === terminalId) {
         const remaining = terminals.filter((t) => t.terminalId !== terminalId && t.status !== "exited");
         setActiveTerminal(sessionId, remaining.length > 0 ? remaining[0].terminalId : null);
@@ -105,8 +107,8 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       <div className="terminal-content">
         {activeTerminal ? (
           <SessionTerminal
-            key={activeTerminal.terminalId}
             terminalId={activeTerminal.terminalId}
+            sessionId={sessionId}
             worktreePath={worktreePath}
           />
         ) : (
