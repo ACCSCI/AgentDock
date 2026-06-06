@@ -387,8 +387,15 @@ export function apiPlugin(): Plugin {
               const s = d.select().from(sessions).where(eq(sessions.id, id)).get();
               if (!s) { json(res, 404, { error: "Session not found" }); return; }
               const p = d.select().from(projects).where(eq(projects.id, s.projectId)).get();
-              if (p) renameWorktree(p.path, id, newName);
-              d.update(sessions).set({ name: newName }).where(eq(sessions.id, id)).run();
+              let newBranch: string | undefined;
+              if (p) {
+                const result = renameWorktree(p.path, id, newName, s.branch);
+                newBranch = result.newBranch;
+              }
+              d.update(sessions).set({
+                name: newName,
+                ...(newBranch ? { branch: newBranch } : {}),
+              }).where(eq(sessions.id, id)).run();
               const updated = d.select().from(sessions).where(eq(sessions.id, id)).get();
               json(res, 200, { success: true, session: updated });
             } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
