@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 
 // We test the handler logic by importing the pieces directly
 // and constructing a minimal HTTP test server.
-import { isGitRepo } from "../worktree.js";
+import { isGitRepo, renameWorktree } from "../worktree.js";
 import { loadConfig } from "../config.js";
 import { createSessionLifecycle } from "../session-lifecycle.js";
 import { loadGlobalAllocatedPorts } from "../port-registry.js";
@@ -101,6 +101,31 @@ function startTestServer(port: number): Promise<void> {
           await lifecycle.remove({ sessionId: id, projectPath: p.path, worktreePath: s.worktreePath, config });
           db.delete(sessions).where(eq(sessions.id, id)).run();
           json(res, 200, { success: true });
+        } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+        return;
+      }
+
+      // PATCH /api/sessions/:id
+      if (sMatch && method === "PATCH") {
+        const id = sMatch[1];
+        try {
+          const body = await parseBody(req);
+          const { name: newName } = body as { name?: string };
+          if (!newName) { json(res, 400, { error: "name is required" }); return; }
+          const s = db.select().from(sessions).where(eq(sessions.id, id)).get();
+          if (!s) { json(res, 404, { error: "Session not found" }); return; }
+          const p = db.select().from(projects).where(eq(projects.id, s.projectId)).get();
+          let newBranch: string | undefined;
+          if (p) {
+            const result = renameWorktree(p.path, id, newName, s.branch);
+            newBranch = result.newBranch;
+          }
+          db.update(sessions).set({
+            name: newName,
+            ...(newBranch ? { branch: newBranch } : {}),
+          }).where(eq(sessions.id, id)).run();
+          const updated = db.select().from(sessions).where(eq(sessions.id, id)).get();
+          json(res, 200, { success: true, session: updated });
         } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
         return;
       }
@@ -446,5 +471,71 @@ describe("并发请求 — execSync 阻塞事件循环", () => {
     if (createRes.data.session?.id) {
       await api("DELETE", `/api/sessions/${createRes.data.session.id}`);
     }
+  });
+});
+
+// ============================================================
+// R1–R4: PATCH /api/sessions/:id (重命名)
+// ============================================================
+describe("PATCH /api/sessions/:id", () => {
+  it("R1: 重命名后数据库 name 和 branch 都更新", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Old Name" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+    const oldBranch = createRes.data.session.branch;
+
+    const res = await api("PATCH", `/api/sessions/${sid}`, { name: "NewName" });
+    expect(res.status).toBe(200);
+    expect(res.data.session.name).toBe("NewName");
+
+    // 验证数据库 branch 字段也更新了
+    const row = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(row.name).toBe("NewName");
+    expect(row.branch).toBe("agentdock/NewName");
+    expect(row.branch).not.toBe(oldBranch);
+  });
+
+  it("R2: 中文名称重命名成功", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Old" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    const res = await api("PATCH", `/api/sessions/${sid}`, { name: "测试会话" });
+    expect(res.status).toBe(200);
+    expect(res.data.session.name).toBe("测试会话");
+
+    // 验证 branch 也更新为中文
+    const row = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(row.branch).toBe("agentdock/测试会话");
+  });
+
+  it("R3: 缺少 name 返回 400", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Test" });
+    const sid = createRes.data.session.id;
+
+    const res = await api("PATCH", `/api/sessions/${sid}`, {});
+    expect(res.status).toBe(400);
+    expect(res.data.error).toContain("name is required");
+  });
+
+  it("R4: 不存在的 session 返回 404", async () => {
+    const res = await api("PATCH", "/api/sessions/nonexistent", { name: "New" });
+    expect(res.status).toBe(404);
+  });
+
+  it("R5: 连续重命名两次都成功", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Original" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 第一次重命名
+    const res1 = await api("PATCH", `/api/sessions/${sid}`, { name: "First" });
+    expect(res1.status).toBe(200);
+
+    // 第二次重命名 — 当前会 500
+    const res2 = await api("PATCH", `/api/sessions/${sid}`, { name: "Second" });
+    expect(res2.status).toBe(200);
+    expect(res2.data.session.name).toBe("Second");
+    expect(res2.data.session.branch).toBe("agentdock/Second");
   });
 });

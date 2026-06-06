@@ -245,4 +245,21 @@ describe("renameWorktree newName injection safety", () => {
     const result = renameWorktree(projectDir, "rn2", "renamed2");
     expect(result.newBranch).toBe("agentdock/renamed2");
   });
+
+  it("WR3: 中文 session 名可以重命名", () => {
+    createWorktree(projectDir, "cn1");
+    const result = renameWorktree(projectDir, "cn1", "测试会话");
+    expect(result.newBranch).toBe("agentdock/测试会话");
+    // 确认旧分支已不存在
+    const branches = execSync("git branch --list", { cwd: projectDir, encoding: "utf-8" });
+    expect(branches).not.toContain("agentdock/cn1");
+  });
+
+  it("WR4: 连续重命名不会失败", () => {
+    createWorktree(projectDir, "rn4");
+    const first = renameWorktree(projectDir, "rn4", "first");
+    // 第二次重命名需要传入当前分支名，否则 oldBranch=agentdock/rn4 已不存在
+    const result = renameWorktree(projectDir, "rn4", "second", first.newBranch);
+    expect(result.newBranch).toBe("agentdock/second");
+  });
 });

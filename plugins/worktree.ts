@@ -66,10 +66,9 @@ export function validateBranchName(name: string): void {
   if (name.startsWith("-")) {
     throw new Error("Invalid branch name: must not start with '-'");
   }
-  // Reject git-illegal sequences / characters and shell metacharacters.
-  // Disallow: whitespace, control chars, and  ~ ^ : ? * [ \ and any char
-  // outside the safe allowlist below.
-  if (!/^[A-Za-z0-9._/-]+$/.test(name)) {
+  // Reject git-illegal characters: whitespace, control chars, and ~ ^ : ? * [ \
+  // All other characters (including Unicode/CJK) are allowed.
+  if (/[\s~^:?*[\\]/.test(name)) {
     throw new Error(`Invalid branch name: ${name}`);
   }
   // Git-specific rules: no "..", no leading/trailing "/", no "//",
@@ -283,6 +282,7 @@ export function renameWorktree(
   projectPath: string,
   sessionId: string,
   newName: string,
+  currentBranch?: string,
 ): { newBranch: string; worktreePath: string } {
   validateSessionId(sessionId);
 
@@ -296,7 +296,7 @@ export function renameWorktree(
     throw new Error(`Worktree not found: ${worktreePath}`);
   }
 
-  const oldBranch = `agentdock/${sessionId}`;
+  const oldBranch = currentBranch ?? `agentdock/${sessionId}`;
   const newBranch = `agentdock/${newName}`;
 
   // oldBranch derives from validated sessionId; newBranch derives from caller
