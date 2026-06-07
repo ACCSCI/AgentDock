@@ -397,6 +397,7 @@ export function useReassignPorts() {
 export interface TerminalData {
   terminalId: string;
   sessionId: string;
+  name: string;
   shell: string;
   status: "spawning" | "running" | "exited";
   pid: number | null;
@@ -449,6 +450,26 @@ export function useDeleteTerminal() {
       const res = await fetch(`/api/terminals/${terminalId}`, { method: "DELETE" });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["terminals"] });
+    },
+  });
+}
+
+// PATCH /api/terminals/:terminalId
+export function useRenameTerminal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ terminalId, name }: { terminalId: string; name: string }) => {
+      const res = await fetch(`/api/terminals/${terminalId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.terminal as TerminalData;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["terminals"] });

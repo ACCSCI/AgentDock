@@ -13,6 +13,7 @@ export type TerminalStatus = "spawning" | "running" | "exited";
 export interface TerminalInstance {
   terminalId: string;
   sessionId: string;
+  name: string;
   shell: string;
   cwd: string;
   cols: number;
@@ -179,6 +180,7 @@ export class TerminalManager {
     const terminal: TerminalInstance = {
       terminalId,
       sessionId,
+      name: shell,
       shell,
       cwd: worktreePath,
       cols,
@@ -210,6 +212,14 @@ export class TerminalManager {
   /** Get a terminal by ID. */
   get(terminalId: string): TerminalInstance | undefined {
     return this.terminals.get(terminalId);
+  }
+
+  /** Rename a terminal. */
+  rename(terminalId: string, name: string): TerminalInstance | undefined {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal) return undefined;
+    terminal.name = name;
+    return terminal;
   }
 
   /** Attach a WebSocket connection to a terminal. */

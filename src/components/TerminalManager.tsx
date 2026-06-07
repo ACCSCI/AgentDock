@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useCreateTerminal, useDeleteTerminal, useSessionTerminals } from "../lib/queries";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useCreateTerminal, useDeleteTerminal, useRenameTerminal, useSessionTerminals } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
@@ -9,6 +9,12 @@ interface TerminalManagerProps {
   worktreePath: string;
 }
 
+interface MenuState {
+  x: number;
+  y: number;
+  terminalId: string;
+}
+
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
   const { setActiveTerminal, getActiveTerminal } = useStore();
   const activeTerminalId = getActiveTerminal(sessionId);
@@ -16,13 +22,48 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const [loading, setLoading] = useState(false);
   const createTerminal = useCreateTerminal();
   const deleteTerminal = useDeleteTerminal();
+  const renameTerminal = useRenameTerminal();
+  const justCreatedRef = useRef<string | null>(null);
+
+  // Context menu state
+  const [menu, setMenu] = useState<MenuState | null>(null);
+
+  // Rename state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus rename input
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menu]);
 
   // If active terminal no longer exists, clear it
   useEffect(() => {
+    const justCreated = justCreatedRef.current;
+    if (justCreated && activeTerminalId === justCreated) return;
     if (activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
       setActiveTerminal(sessionId, null);
     }
   }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
+
+  // Clear the just-created ref once the terminal appears in the query data
+  useEffect(() => {
+    if (justCreatedRef.current && terminals.find((t) => t.terminalId === justCreatedRef.current)) {
+      justCreatedRef.current = null;
+    }
+  }, [terminals]);
 
   // Auto-select first terminal if none selected
   useEffect(() => {
@@ -36,6 +77,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     setLoading(true);
     try {
       const terminal = await createTerminal.mutateAsync({ sessionId });
+      justCreatedRef.current = terminal.terminalId;
       setActiveTerminal(sessionId, terminal.terminalId);
     } catch (err) {
       alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -59,7 +101,40 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   };
 
   const handleTabClick = (terminalId: string) => {
+    if (editingId) return; // don't switch tab while renaming
     setActiveTerminal(sessionId, terminalId);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, terminalId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, terminalId });
+  };
+
+  const handleStartRename = useCallback((terminalId: string) => {
+    const terminal = terminals.find((t) => t.terminalId === terminalId);
+    if (!terminal) return;
+    setMenu(null);
+    setEditValue(terminal.name);
+    setEditingId(terminalId);
+  }, [terminals]);
+
+  const handleConfirmRename = useCallback(() => {
+    if (!editingId) return;
+    const trimmed = editValue.trim();
+    const terminal = terminals.find((t) => t.terminalId === editingId);
+    if (trimmed && terminal && trimmed !== terminal.name) {
+      renameTerminal.mutateAsync({ terminalId: editingId, name: trimmed });
+    }
+    setEditingId(null);
+  }, [editingId, editValue, terminals, renameTerminal]);
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      handleConfirmRename();
+    } else if (e.key === "Escape") {
+      setEditingId(null);
+    }
   };
 
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
@@ -73,6 +148,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             key={t.terminalId}
             className={`terminal-tab ${t.terminalId === activeTerminalId ? "terminal-tab-active" : ""} ${t.status === "exited" ? "terminal-tab-exited" : ""}`}
             onClick={() => handleTabClick(t.terminalId)}
+            onContextMenu={(e) => handleContextMenu(e, t.terminalId)}
             onKeyDown={(e) => { if (e.key === "Enter") handleTabClick(t.terminalId); }}
             tabIndex={0}
             role="tab"
@@ -81,7 +157,19 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             <span className="terminal-tab-icon">
               {t.status === "exited" ? "○" : "●"}
             </span>
-            <span className="terminal-tab-name">{t.shell}</span>
+            {editingId === t.terminalId ? (
+              <input
+                ref={inputRef}
+                className="terminal-rename-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={handleConfirmRename}
+                onKeyDown={handleRenameKeyDown}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="terminal-tab-name">{t.name}</span>
+            )}
             <button
               type="button"
               className="terminal-tab-close"
@@ -102,6 +190,27 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
           +
         </button>
       </div>
+
+      {/* Context menu */}
+      {menu && (
+        <div
+          className="terminal-context-menu"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          <div
+            className="terminal-context-menu-item"
+            onClick={() => handleStartRename(menu.terminalId)}
+          >
+            Rename
+          </div>
+          <div
+            className="terminal-context-menu-item terminal-context-menu-item-danger"
+            onClick={() => { setMenu(null); handleCloseTerminal(menu.terminalId); }}
+          >
+            Close
+          </div>
+        </div>
+      )}
 
       {/* Terminal content */}
       <div className="terminal-content">
