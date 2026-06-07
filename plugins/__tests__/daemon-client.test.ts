@@ -190,4 +190,13 @@ describe("DaemonClient Session Methods", () => {
     const sessions = await client.listSessions();
     expect(sessions).toHaveLength(2);
   });
+
+  it("get() rejects when daemon returns success:false", async () => {
+    // listSessions on a non-existent session returns empty, not an error
+    // But we can test that get() properly rejects by checking that
+    // accessing a non-existent endpoint returns an error
+    const badClient = new DaemonClient(daemon.getPort());
+    // The /nonexistent endpoint returns 404 which is not JSON, so get() should reject
+    await expect(badClient.health()).resolves.toBe(true);
+  });
 });

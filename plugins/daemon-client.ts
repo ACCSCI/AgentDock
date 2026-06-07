@@ -189,7 +189,12 @@ export class DaemonClient implements PortAllocator {
         res.on("data", (chunk) => { data += chunk; });
         res.on("end", () => {
           try {
-            resolve(JSON.parse(data));
+            const parsed = JSON.parse(data);
+            if (!parsed.success) {
+              reject(new Error(parsed.error || "Daemon error"));
+            } else {
+              resolve(parsed);
+            }
           } catch (err) {
             reject(err);
           }

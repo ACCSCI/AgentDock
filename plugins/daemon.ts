@@ -107,6 +107,11 @@ export class AgentDockDaemon {
   private registryPath: string;
   private state: DaemonState;
   private wal: DaemonWAL;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Heartbeat timeout: clients not sending heartbeat for 90s are considered dead
+  private static HEARTBEAT_TIMEOUT = 90_000;
+  private static HEARTBEAT_CHECK_INTERVAL = 30_000;
 
   constructor(options?: DaemonOptions) {
     this.port = options?.port ?? 20000;
@@ -131,6 +136,10 @@ export class AgentDockDaemon {
       this.server.on("error", reject);
 
       this.server.listen(this.port, "127.0.0.1", () => {
+        // Start heartbeat timeout cleanup
+        this.heartbeatTimer = setInterval(() => {
+          this.cleanupStaleClients();
+        }, AgentDockDaemon.HEARTBEAT_CHECK_INTERVAL);
         resolve();
       });
     });
@@ -141,11 +150,44 @@ export class AgentDockDaemon {
    */
   stop(): Promise<void> {
     return new Promise((resolve) => {
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
       if (!this.server) {
         resolve();
         return;
       }
       this.server.close(() => resolve());
+    });
+  }
+
+  /**
+   * Clean up clients that haven't sent heartbeat within the timeout period.
+   * Releases all sessions owned by stale clients.
+   */
+  private cleanupStaleClients(): void {
+    this.mutex.runExclusive("state", () => {
+      const now = Date.now();
+      let changed = false;
+      for (const client of this.state.listClients()) {
+        if (now - client.lastHeartbeat > AgentDockDaemon.HEARTBEAT_TIMEOUT) {
+          // Release all sessions owned by this client
+          for (const session of this.state.listSessions()) {
+            if (session.ownerClientId === client.clientId) {
+              this.state.releaseSession(session.sessionId);
+              changed = true;
+            }
+          }
+          this.state.unregisterClient(client.clientId);
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.wal.persist(this.state);
+      }
+    }).catch(() => {
+      // Ignore errors in cleanup (e.g., mutex contention)
     });
   }
 
@@ -195,6 +237,14 @@ export class AgentDockDaemon {
     const pathname = new URL(req.url || "/", `http://${req.headers.host}`).pathname;
     const method = req.method || "GET";
 
+    // DNS Rebinding protection: validate Host header to prevent malicious
+    // websites from accessing the daemon via DNS rebinding attacks.
+    const host = req.headers.host;
+    if (host && !host.startsWith("127.0.0.1") && !host.startsWith("localhost")) {
+      this.json(res, 403, { success: false, error: "Forbidden: Invalid Host header" });
+      return;
+    }
+
     // The daemon is a local-only IPC server bound to 127.0.0.1. Its legitimate
     // clients (daemon-client.ts) use raw http.request and never send an Origin
     // header. A browser performing a cross-site/drive-by request WILL send an
@@ -220,7 +270,7 @@ export class AgentDockDaemon {
 
     // Health check
     if (pathname === "/health" && method === "GET") {
-      this.json(res, 200, { status: "ok" });
+      this.json(res, 200, { success: true, status: "ok" });
       return;
     }
 
@@ -372,7 +422,7 @@ export class AgentDockDaemon {
       }
       await this.mutex.runExclusive("state", () => {
         this.state.heartbeat(clientId);
-        this.wal.persist(this.state);
+        // No wal.persist() — heartbeat only updates in-memory timestamp
       });
       this.json(res, 200, { success: true });
       return;
@@ -387,8 +437,8 @@ export class AgentDockDaemon {
         return;
       }
 
-      // Validate sessionId: no path traversal
-      if (sessionId.includes("..") || sessionId.includes("/") || sessionId.includes("\\")) {
+      // Validate sessionId: alphanumeric + hyphen + underscore only
+      if (!/^[a-zA-Z0-9-_]+$/.test(sessionId)) {
         this.json(res, 400, { success: false, error: "Invalid sessionId" });
         return;
       }
@@ -397,6 +447,9 @@ export class AgentDockDaemon {
         this.json(res, 400, { success: false, error: "worktreePath must be absolute" });
         return;
       }
+      // Normalize paths to prevent duplicate detection bypass
+      const normalizedWorktreePath = path.resolve(worktreePath);
+      const normalizedProjectPath = path.resolve(projectPath);
 
       try {
         const result = await this.mutex.runExclusive("state", async () => {
@@ -407,7 +460,7 @@ export class AgentDockDaemon {
           }
 
           // Check for duplicate worktreePath
-          const duplicate = this.state.findDuplicate(worktreePath);
+          const duplicate = this.state.findDuplicate(normalizedWorktreePath);
           if (duplicate) {
             return { error: `duplicate_worktree: worktreePath already claimed by session ${duplicate}`, status: "conflict" as const };
           }
@@ -425,8 +478,8 @@ export class AgentDockDaemon {
 
           this.state.allocateSession({
             sessionId,
-            worktreePath,
-            projectPath,
+            worktreePath: normalizedWorktreePath,
+            projectPath: normalizedProjectPath,
             ports,
             ownerClientId: clientId,
             ownerPid: this.state.getClient(clientId)?.pid ?? 0,
@@ -526,7 +579,7 @@ export class AgentDockDaemon {
               results.push({ sessionId: decl.sessionId ?? "", ports: {} as SessionPorts, status: "error" });
               continue;
             }
-            if (decl.sessionId.includes("..") || decl.sessionId.includes("/") || decl.sessionId.includes("\\")) {
+            if (!/^[a-zA-Z0-9-_]+$/.test(decl.sessionId)) {
               results.push({ sessionId: decl.sessionId, ports: {} as SessionPorts, status: "error" });
               continue;
             }
@@ -534,6 +587,8 @@ export class AgentDockDaemon {
               results.push({ sessionId: decl.sessionId, ports: {} as SessionPorts, status: "error" });
               continue;
             }
+            const normalizedWtPath = path.resolve(decl.worktreePath);
+            const normalizedProjPath = path.resolve(decl.projectPath);
 
             const existing = this.state.getSession(decl.sessionId);
             if (existing) {
@@ -546,27 +601,34 @@ export class AgentDockDaemon {
             }
 
             // Check for duplicate worktreePath
-            const duplicate = this.state.findDuplicate(decl.worktreePath);
+            const duplicate = this.state.findDuplicate(normalizedWtPath);
             if (duplicate) {
               results.push({ sessionId: decl.sessionId, ports: this.state.getSession(duplicate)!.ports, status: "conflict" });
               continue;
             }
 
-            // New session — allocate ports
-            const excluded = this.state.getExcludedPorts();
-            const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
-            const ports: SessionPorts = {
-              FRONTEND_PORT: allocated[0],
-              BACKEND_PORT: allocated[1],
-              WS_PORT: allocated[2],
-              DEBUG_PORT: allocated[3],
-              PREVIEW_PORT: allocated[4],
-            };
+            // New session — use provided ports or allocate new ones
+            let ports: SessionPorts;
+            if (decl.ports && decl.ports.FRONTEND_PORT) {
+              // Use provided ports (from database)
+              ports = decl.ports;
+            } else {
+              // Allocate new ports
+              const excluded = this.state.getExcludedPorts();
+              const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
+              ports = {
+                FRONTEND_PORT: allocated[0],
+                BACKEND_PORT: allocated[1],
+                WS_PORT: allocated[2],
+                DEBUG_PORT: allocated[3],
+                PREVIEW_PORT: allocated[4],
+              };
+            }
 
             this.state.allocateSession({
               sessionId: decl.sessionId,
-              worktreePath: decl.worktreePath,
-              projectPath: decl.projectPath,
+              worktreePath: normalizedWtPath,
+              projectPath: normalizedProjPath,
               ports,
               ownerClientId: clientId,
               ownerPid: this.state.getClient(clientId)?.pid ?? 0,

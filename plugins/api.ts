@@ -15,7 +15,11 @@ import { writePortsToEnv } from "./port-write-env.js";
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
 let _daemonClient: DaemonClient | null = null;
-let _clientId: string = nanoid(8);
+// Stable clientId based on cwd — reuses same ID across restarts from same directory
+let _clientId: string = "client_" + process.cwd().replace(/[^a-zA-Z0-9]/g, "_").slice(-20);
+// Disk scan throttling: only scan once per project per 30 seconds
+const _lastScanTime = new Map<string, number>();
+const SCAN_THROTTLE_MS = 30_000;
 
 /**
  * Create a PortService adapter from the DaemonClient for session lifecycle.
@@ -79,7 +83,7 @@ export function apiPlugin(): Plugin {
           try {
             const d = getDb();
             const allProjects = d.select().from(projects).all();
-            const declaredSessions: Array<{ sessionId: string; worktreePath: string; projectPath: string }> = [];
+            const declaredSessions: Array<{ sessionId: string; worktreePath: string; projectPath: string; ports?: any }> = [];
             for (const p of allProjects) {
               const pSessions = d.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
               for (const s of pSessions) {
@@ -87,6 +91,7 @@ export function apiPlugin(): Plugin {
                   sessionId: s.id,
                   worktreePath: s.worktreePath,
                   projectPath: p.path,
+                  ports: s.ports ? JSON.parse(s.ports) : null,
                 });
               }
             }
@@ -174,6 +179,12 @@ export function apiPlugin(): Plugin {
 
             const allProjects = d.select().from(projects).all();
             for (const p of allProjects) {
+              // Throttle disk scan: only scan once per project per 30 seconds
+              const now = Date.now();
+              const lastScan = _lastScanTime.get(p.id) ?? 0;
+              if (now - lastScan < SCAN_THROTTLE_MS) continue;
+              _lastScanTime.set(p.id, now);
+
               const diskWts = scanDiskWorktrees(p.path);
               const existingSessions = d.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
               const existingIds = new Set(existingSessions.map((s) => s.id));

@@ -285,4 +285,77 @@ describe("Daemon edge cases", () => {
     // Should succeed but with ownerPid=0
     expect(res.status).toBe(200);
   });
+
+  // --- DNS Rebinding protection ---
+
+  it("request with valid Host header (127.0.0.1) passes", async () => {
+    // Use GET /health which accepts GET requests
+    const res = await get(port, "/health");
+    expect(res.status).toBe(200);
+  });
+
+  it("request with malicious Host header returns 403", async () => {
+    // Use raw HTTP request with custom Host header
+    const res = await new Promise<{ status: number; data: any }>((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port,
+        path: "/health",
+        method: "GET",
+        headers: { Host: "evil.com" },
+      }, (res) => {
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", () => {
+          try { resolve({ status: res.statusCode!, data: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode!, data }); }
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(res.status).toBe(403);
+  });
+
+  // --- sessionId strict validation ---
+
+  it("sessionId with alphanumeric passes", async () => {
+    await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/p"] });
+    const res = await post(port, "/sessions/allocate", {
+      clientId: "c1", sessionId: "abc-123_XYZ", projectPath: "/p", worktreePath: "/wt/x",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("sessionId with space returns 400", async () => {
+    const res = await post(port, "/sessions/allocate", {
+      clientId: "c1", sessionId: "abc 123", projectPath: "/p", worktreePath: "/wt/x",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("sessionId with special characters returns 400", async () => {
+    const res = await post(port, "/sessions/allocate", {
+      clientId: "c1", sessionId: "abc@123", projectPath: "/p", worktreePath: "/wt/x",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // --- worktreePath normalization ---
+
+  it("worktreePath with .. is normalized for duplicate detection", async () => {
+    await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/p"] });
+
+    // First allocation
+    const res1 = await post(port, "/sessions/allocate", {
+      clientId: "c1", sessionId: "s1", projectPath: "/p", worktreePath: "/foo/bar",
+    });
+    expect(res1.status).toBe(200);
+
+    // Second allocation with normalized path
+    const res2 = await post(port, "/sessions/allocate", {
+      clientId: "c1", sessionId: "s2", projectPath: "/p", worktreePath: "/foo/bar/../bar",
+    });
+    expect(res2.status).toBe(409);
+  });
 });
