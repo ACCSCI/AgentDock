@@ -19,6 +19,13 @@ export class DaemonWAL {
   }
 
   /**
+   * Get the path to the WAL file.
+   */
+  getPath(): string {
+    return this.filePath;
+  }
+
+  /**
    * Persist state to disk. Creates directory if needed.
    */
   persist(state: DaemonState): void {

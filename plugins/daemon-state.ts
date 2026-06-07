@@ -257,4 +257,99 @@ export class DaemonState {
     }
     return state;
   }
+
+  // --- Diagnostics ---
+
+  /**
+   * Get statistics about the current state.
+   */
+  getStats(): { sessionCount: number; clientCount: number; allocatedPortCount: number } {
+    return {
+      sessionCount: this.sessions.size,
+      clientCount: this.clients.size,
+      allocatedPortCount: this.allocatedPorts.size,
+    };
+  }
+
+  /**
+   * Run invariant checks and return results.
+   */
+  checkInvariants(): { valid: boolean; checks: Array<{ name: string; passed: boolean; detail: string }> } {
+    const checks: Array<{ name: string; passed: boolean; detail: string }> = [];
+    const sessions = this.listSessions();
+
+    // Check 1: port count matches (5 per session)
+    const expectedPortCount = sessions.length * 5;
+    const actualPortCount = this.allocatedPorts.size;
+    checks.push({
+      name: "port_count_matches",
+      passed: actualPortCount === expectedPortCount,
+      detail: `${actualPortCount} ports, ${sessions.length} sessions × 5 = ${expectedPortCount}`,
+    });
+
+    // Check 2: worktree index consistent
+    let worktreeMismatches = 0;
+    for (const session of sessions) {
+      const indexedId = this.worktreeIndex.get(session.worktreePath);
+      if (indexedId !== session.sessionId) worktreeMismatches++;
+    }
+    checks.push({
+      name: "worktree_index_consistent",
+      passed: worktreeMismatches === 0,
+      detail: worktreeMismatches === 0
+        ? `${this.worktreeIndex.size} entries, all match sessions`
+        : `${worktreeMismatches} mismatches found`,
+    });
+
+    // Check 3: no duplicate ports
+    const allPorts: number[] = [];
+    for (const session of sessions) {
+      for (const key of PORT_KEYS) {
+        allPorts.push(session.ports[key]);
+      }
+    }
+    const uniquePorts = new Set(allPorts);
+    checks.push({
+      name: "no_duplicate_ports",
+      passed: uniquePorts.size === allPorts.length,
+      detail: `${uniquePorts.size} unique ports out of ${allPorts.length} total`,
+    });
+
+    // Check 4: no duplicate worktrees
+    const worktreePaths = sessions.map((s) => s.worktreePath);
+    const uniqueWorktrees = new Set(worktreePaths);
+    checks.push({
+      name: "no_duplicate_worktrees",
+      passed: uniqueWorktrees.size === worktreePaths.length,
+      detail: `${uniqueWorktrees.size} unique worktrees out of ${worktreePaths.length} total`,
+    });
+
+    // Check 5: all allocated ports belong to sessions
+    let orphanedPorts = 0;
+    for (const port of this.allocatedPorts) {
+      if (!allPorts.includes(port)) orphanedPorts++;
+    }
+    checks.push({
+      name: "all_ports_belong_to_sessions",
+      passed: orphanedPorts === 0,
+      detail: orphanedPorts === 0
+        ? `${this.allocatedPorts.size}/${this.allocatedPorts.size} ports mapped`
+        : `${orphanedPorts} ports not mapped to any session`,
+    });
+
+    const valid = checks.every((c) => c.passed);
+    return { valid, checks };
+  }
+
+  /**
+   * Serialize state to a plain object for JSON responses.
+   */
+  toDebugObject(): Record<string, unknown> {
+    return {
+      sessions: Object.fromEntries(this.sessions),
+      clients: Object.fromEntries(this.clients),
+      allocatedPorts: [...this.allocatedPorts],
+      worktreeIndex: Object.fromEntries(this.worktreeIndex),
+    };
+  }
 }

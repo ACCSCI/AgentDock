@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { FilePortAllocator, type PortAllocator } from "./port-allocator.js";
 import { Mutex } from "./mutex.js";
-import { DaemonState, PORT_KEYS, type SessionPorts } from "./daemon-state.js";
+import { DaemonState, PORT_KEYS, PORT_RANGE_START, PORT_RANGE_END, type SessionPorts } from "./daemon-state.js";
 import { DaemonWAL } from "./daemon-wal.js";
 
 // ============================================================
@@ -672,6 +672,127 @@ export class AgentDockDaemon {
         ownerClientId: s.ownerClientId,
       }));
       this.json(res, 200, { success: true, sessions });
+      return;
+    }
+
+    // ============================================================
+    // Debug endpoints
+    // ============================================================
+
+    // GET /debug/state — full state dump
+    if (pathname === "/debug/state" && method === "GET") {
+      const stats = this.state.getStats();
+      this.json(res, 200, { success: true, state: this.state.toDebugObject(), stats });
+      return;
+    }
+
+    // GET /debug/invariants — run invariant checks
+    if (pathname === "/debug/invariants" && method === "GET") {
+      const result = this.state.checkInvariants();
+      this.json(res, 200, { success: true, ...result });
+      return;
+    }
+
+    // GET /debug/wal — WAL file status
+    if (pathname === "/debug/wal" && method === "GET") {
+      try {
+        const fs = await import("node:fs");
+        const walPath = this.wal.getPath();
+        const exists = fs.existsSync(walPath);
+        let walInfo: Record<string, unknown> = { exists, path: walPath };
+
+        if (exists) {
+          const stat = fs.statSync(walPath);
+          walInfo.sizeBytes = stat.size;
+          walInfo.lastModified = stat.mtime.toISOString();
+
+          try {
+            const content = fs.readFileSync(walPath, "utf-8");
+            const parsed = JSON.parse(content);
+            walInfo.isValidJson = true;
+            walInfo.sessionCount = parsed.sessions ? Object.keys(parsed.sessions).length : 0;
+            walInfo.clientCount = parsed.clients ? Object.keys(parsed.clients).length : 0;
+          } catch {
+            walInfo.isValidJson = false;
+          }
+        }
+
+        this.json(res, 200, { success: true, wal: walInfo });
+      } catch (err) {
+        this.json(res, 500, { success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+      return;
+    }
+
+    // GET /debug/ports — port allocation details
+    if (pathname === "/debug/ports" && method === "GET") {
+      const sessions = this.state.listSessions();
+      const bySession: Record<string, unknown> = {};
+      for (const s of sessions) {
+        bySession[s.sessionId] = {
+          ports: PORT_KEYS.map((k) => s.ports[k]),
+          named: s.ports,
+        };
+      }
+
+      const totalAllocated = this.state.getAllAllocatedPorts().size;
+      const rangeSize = PORT_RANGE_END - PORT_RANGE_START + 1;
+      const utilization = ((totalAllocated / rangeSize) * 100).toFixed(2) + "%";
+
+      this.json(res, 200, {
+        success: true,
+        totalAllocated,
+        range: { start: PORT_RANGE_START, end: PORT_RANGE_END },
+        utilization,
+        bySession,
+      });
+      return;
+    }
+
+    // GET /debug/clients — client details with heartbeat status
+    if (pathname === "/debug/clients" && method === "GET") {
+      const now = Date.now();
+      const clients = this.state.listClients().map((c) => ({
+        clientId: c.clientId,
+        pid: c.pid,
+        projectPaths: c.projectPaths,
+        lastHeartbeat: c.lastHeartbeat,
+        heartbeatAge: now - c.lastHeartbeat,
+        isStale: now - c.lastHeartbeat > 90_000,
+      }));
+
+      const staleCount = clients.filter((c) => c.isStale).length;
+
+      this.json(res, 200, {
+        success: true,
+        clients,
+        heartbeatTimeout: 90_000,
+        staleCount,
+      });
+      return;
+    }
+
+    // POST /debug/simulate-stale — simulate client staleness for testing
+    if (pathname === "/debug/simulate-stale" && method === "POST") {
+      const body = await parseBody(req);
+      const { clientId } = body as { clientId?: string };
+      if (!clientId) {
+        this.json(res, 400, { success: false, error: "clientId required" });
+        return;
+      }
+
+      const client = this.state.getClient(clientId);
+      if (!client) {
+        this.json(res, 404, { success: false, error: "Client not found" });
+        return;
+      }
+
+      // Set lastHeartbeat to 0 to simulate staleness
+      client.lastHeartbeat = 0;
+      this.json(res, 200, {
+        success: true,
+        message: `Client ${clientId} heartbeat set to 0, will be cleaned up on next check`,
+      });
       return;
     }
 
