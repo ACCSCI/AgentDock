@@ -472,6 +472,7 @@ export function apiPlugin(): Plugin {
               terminal: {
                 terminalId: terminal.terminalId,
                 sessionId: terminal.sessionId,
+                name: terminal.name,
                 shell: terminal.shell,
                 status: terminal.status,
                 pid: terminal.pid,
@@ -490,6 +491,7 @@ export function apiPlugin(): Plugin {
             const terminals = tm.listBySession(sessionId).map((t) => ({
               terminalId: t.terminalId,
               sessionId: t.sessionId,
+              name: t.name,
               shell: t.shell,
               status: t.status,
               pid: t.pid,
@@ -500,8 +502,34 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // DELETE /api/terminals/:terminalId �� Kill a terminal
+        // PATCH /api/terminals/:terminalId — Rename a terminal
         const termKillMatch = pathname.match(/^\/api\/terminals\/([^/]+)$/);
+        if (termKillMatch && method === "PATCH") {
+          const terminalId = termKillMatch[1];
+          try {
+            const { terminalManager: tm } = await import("./terminal-manager.js");
+            const body = await parseBody(req);
+            const { name } = body as { name?: string };
+            if (!name || !name.trim()) { json(res, 400, { error: "name is required" }); return; }
+            const terminal = tm.rename(terminalId, name.trim());
+            if (!terminal) { json(res, 404, { error: "Terminal not found" }); return; }
+            json(res, 200, {
+              success: true,
+              terminal: {
+                terminalId: terminal.terminalId,
+                sessionId: terminal.sessionId,
+                name: terminal.name,
+                shell: terminal.shell,
+                status: terminal.status,
+                pid: terminal.pid,
+                createdAt: terminal.createdAt,
+              },
+            });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // DELETE /api/terminals/:terminalId — Kill a terminal
         if (termKillMatch && method === "DELETE") {
           const terminalId = termKillMatch[1];
           try {
