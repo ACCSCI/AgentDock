@@ -6,11 +6,8 @@ import {
   type HookContext,
   type HookReport,
 } from "./hook-engine.js";
-import {
-  assignSessionPorts,
-  releaseSessionPorts,
-  type SessionPorts,
-} from "./port-registry.js";
+import type { SessionPorts } from "./daemon-state.js";
+import { writePortsToEnv } from "./port-write-env.js";
 import {
   createResourceSyncService,
   type SyncReport,
@@ -20,6 +17,19 @@ import {
   getWorktreePath,
   removeWorktree,
 } from "./worktree.js";
+
+/**
+ * Abstract port service interface for session lifecycle.
+ * Decouples lifecycle from concrete port implementation.
+ */
+export interface PortService {
+  allocateSession(params: {
+    sessionId: string;
+    projectPath: string;
+    worktreePath: string;
+  }): Promise<SessionPorts>;
+  releaseSession(sessionId: string): Promise<void>;
+}
 
 // --- Step event types ---
 export type StepName = "beforeCreateSession" | "createWorktree" | "syncResources" | "allocatePorts" | "afterCreateSession"
@@ -85,7 +95,7 @@ export interface SessionLifecycle {
  * Dependencies are injected to keep the orchestrator testable.
  */
 export function createSessionLifecycle(deps?: {
-  globalExcludedPorts?: Set<number>;
+  portService?: PortService;
 }): SessionLifecycle {
   const resourceSyncService = createResourceSyncService();
   const hookRegistry = createHookRegistry();
@@ -162,7 +172,9 @@ export function createSessionLifecycle(deps?: {
       // Step 4: AllocatePorts (Core)
       emit(onStep, { step: "allocatePorts", status: "running" });
       const portsStepStart = Date.now();
-      const ports = await assignSessionPorts(projectPath, sessionId, wt.worktreePath, deps?.globalExcludedPorts);
+      if (!deps?.portService) throw new Error("portService is required");
+      const ports = await deps.portService.allocateSession({ sessionId, projectPath, worktreePath: wt.worktreePath });
+      writePortsToEnv(wt.worktreePath, ports);
       const portsDuration = Date.now() - portsStepStart;
       log(sessionId, `allocatePorts ✓ ${portsDuration}ms (FRONTEND:${ports.FRONTEND_PORT})`);
       emit(onStep, { step: "allocatePorts", status: "done", duration: portsDuration });
@@ -210,7 +222,11 @@ export function createSessionLifecycle(deps?: {
         log(sessionId, `afterCreateSession ✗ FAILED (${afterDuration}ms)`);
         emit(onStep, { step: "afterCreateSession", status: "error", duration: afterDuration, error: "hook failed (required)" });
         log(sessionId, "ROLLBACK: releasing ports + removing worktree");
-        try { releaseSessionPorts(projectPath, sessionId); } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
+        try {
+          if (deps?.portService) {
+            await deps.portService.releaseSession(sessionId);
+          }
+        } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
         try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
         throw new Error("afterCreateSession hook failed (required)");
       }
@@ -224,7 +240,12 @@ export function createSessionLifecycle(deps?: {
         hookReports, duration: totalDuration, backgroundHookPromise: Promise.resolve(afterReport),
       };
     } catch (err) {
-      log(sessionId, "ROLLBACK: removing worktree");
+      log(sessionId, "ROLLBACK: releasing ports + removing worktree");
+      try {
+        if (deps?.portService) {
+          await deps.portService.releaseSession(sessionId);
+        }
+      } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
       try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
       throw err;
     }
@@ -257,7 +278,9 @@ export function createSessionLifecycle(deps?: {
     // Step 2: ReleasePorts (Core)
     emit(onStep, { step: "releasePorts", status: "running" });
     const portsStepStart = Date.now();
-    await releaseSessionPorts(projectPath, sessionId);
+    if (deps?.portService) {
+      await deps.portService.releaseSession(sessionId);
+    }
     const portsDuration = Date.now() - portsStepStart;
     log(sessionId, `releasePorts ✓ ${portsDuration}ms`);
     emit(onStep, { step: "releasePorts", status: "done", duration: portsDuration });

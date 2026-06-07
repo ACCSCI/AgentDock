@@ -71,6 +71,8 @@ export function useProjects() {
       if (!data.success) throw new Error(data.error);
       return data.projects;
     },
+    refetchInterval: 30_000, // 每 30 秒轮询一次，触发 auto-sync
+    refetchIntervalInBackground: false, // 后台标签页不轮询
   });
 }
 

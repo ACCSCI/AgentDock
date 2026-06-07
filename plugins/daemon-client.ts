@@ -1,5 +1,6 @@
 import http from "node:http";
 import type { PortAllocator } from "./port-allocator.js";
+import type { SessionPorts } from "./daemon-state.js";
 
 // ============================================================
 // DaemonClient — HTTP client to AgentDock Daemon
@@ -69,6 +70,83 @@ export class DaemonClient implements PortAllocator {
   async status(): Promise<{ instances: Array<{ dir: string; pid: number; status: string }> }> {
     const res = await this.get("/status");
     return res.data;
+  }
+
+  // --- Session-aware methods ---
+
+  /**
+   * Register a client with the daemon.
+   */
+  async registerClient(clientId: string, pid: number, projectPaths: string[]): Promise<void> {
+    await this.post("/client/register", { clientId, pid, projectPaths });
+  }
+
+  /**
+   * Send a heartbeat to keep the client alive.
+   */
+  async heartbeat(clientId: string): Promise<void> {
+    await this.post("/client/heartbeat", { clientId });
+  }
+
+  /**
+   * Allocate a session with 5 named ports.
+   * Idempotent — returns existing ports if session already exists.
+   */
+  async allocateSession(params: {
+    clientId: string;
+    sessionId: string;
+    projectPath: string;
+    worktreePath: string;
+  }): Promise<SessionPorts> {
+    const res = await this.post("/sessions/allocate", params);
+    return res.ports;
+  }
+
+  /**
+   * Release a session's ports.
+   */
+  async releaseSession(clientId: string, sessionId: string): Promise<void> {
+    await this.post("/sessions/release", { clientId, sessionId });
+  }
+
+  /**
+   * Reassign ports for an existing session.
+   * Returns new ports guaranteed to differ from old ones.
+   */
+  async reassignSession(clientId: string, sessionId: string): Promise<SessionPorts> {
+    const res = await this.post("/sessions/reassign", { clientId, sessionId });
+    return res.ports;
+  }
+
+  /**
+   * Declare all sessions for a client (startup sync).
+   * Returns results per session and list of orphaned sessions.
+   */
+  async declareSessions(clientId: string, sessions: Array<{
+    sessionId: string;
+    worktreePath: string;
+    projectPath: string;
+    ports?: SessionPorts | null;
+  }>): Promise<{
+    results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
+    orphans: string[];
+  }> {
+    const res = await this.post("/sync/declare", { clientId, sessions });
+    return { results: res.results, orphans: res.orphans };
+  }
+
+  /**
+   * List all sessions known to the daemon.
+   */
+  async listSessions(): Promise<Array<{
+    sessionId: string;
+    worktreePath: string;
+    projectPath: string;
+    ports: SessionPorts;
+    ownerClientId: string;
+  }>> {
+    const res = await this.get("/sessions/list");
+    return res.sessions;
   }
 
   // --- HTTP helpers ---

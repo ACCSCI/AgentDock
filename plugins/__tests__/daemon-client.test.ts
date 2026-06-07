@@ -2,10 +2,10 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { AgentDockDaemon } from "../daemon.js";
 import { DaemonClient } from "../daemon-client.js";
 import { DaemonManager } from "../daemon-manager.js";
-import { setPortAllocator, getPortAllocator } from "../port-pool.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import type { SessionPorts } from "../daemon-state.js";
 
 function tmpDir(): string {
   const dir = path.join(
@@ -105,12 +105,89 @@ describe("DaemonManager", () => {
     }
   });
 
-  it("setPortAllocator / getPortAllocator works", () => {
-    const original = getPortAllocator();
-    const fake = { allocate: async () => [99999], release: () => {} };
-    setPortAllocator(fake);
-    expect(getPortAllocator()).toBe(fake);
-    // Restore
-    setPortAllocator(original);
+});
+
+// ============================================================
+// DaemonClient Session Methods
+// ============================================================
+
+describe("DaemonClient Session Methods", () => {
+  let dir: string;
+  let daemon: AgentDockDaemon;
+  let client: DaemonClient;
+
+  beforeEach(async () => {
+    dir = tmpDir();
+    daemon = new AgentDockDaemon({ port: 0, baseDir: dir });
+    await daemon.start();
+    client = new DaemonClient(daemon.getPort());
+  });
+
+  afterEach(async () => {
+    await daemon.stop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("registerClient registers with daemon", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    // no error = success
+  });
+
+  it("allocateSession returns 5 named ports", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const ports = await client.allocateSession({
+      clientId: "c1",
+      sessionId: "s1",
+      projectPath: "/project/a",
+      worktreePath: "/wt/s1",
+    });
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+
+    const all = [ports.FRONTEND_PORT, ports.BACKEND_PORT, ports.WS_PORT, ports.DEBUG_PORT, ports.PREVIEW_PORT];
+    expect(new Set(all).size).toBe(5);
+  });
+
+  it("allocateSession is idempotent", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const p1 = await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
+    const p2 = await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
+    expect(p2).toEqual(p1);
+  });
+
+  it("releaseSession releases ports", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
+    await client.releaseSession("c1", "s1");
+    // no error = success
+  });
+
+  it("reassignSession returns new ports", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const old = await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
+    const fresh = await client.reassignSession("c1", "s1");
+    expect(fresh.FRONTEND_PORT).not.toBe(old.FRONTEND_PORT);
+  });
+
+  it("declareSessions allocates new sessions", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const result = await client.declareSessions("c1", [
+      { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project/a" },
+      { sessionId: "s2", worktreePath: "/wt/s2", projectPath: "/project/a" },
+    ]);
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0].status).toBe("allocated");
+    expect(result.results[1].status).toBe("allocated");
+  });
+
+  it("listSessions returns all sessions", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
+    await client.allocateSession({ clientId: "c1", sessionId: "s2", projectPath: "/project/a", worktreePath: "/wt/s2" });
+    const sessions = await client.listSessions();
+    expect(sessions).toHaveLength(2);
   });
 });
