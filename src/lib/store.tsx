@@ -16,15 +16,53 @@ interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
+  closedProjectIds: string[];
   activeTerminals: Map<string, string>; // sessionId → terminalId
 }
 
 interface StoreContextValue extends UIState {
   setActiveProject: (projectId: string | null) => void;
   setActiveSession: (sessionId: string | null) => void;
+  closeProject: (projectId: string) => void;
+  reopenProject: (projectId: string) => void;
   setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
   getActiveTerminal: (sessionId: string) => string | null;
   toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
+}
+
+const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
+const SIDEBAR_WIDTH_DEFAULT = 240;
+export const SIDEBAR_MIN_WIDTH = 140;
+export const SIDEBAR_MAX_WIDTH = 600;
+
+function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw !== null) {
+      const v = Number(raw);
+      if (Number.isFinite(v) && v >= SIDEBAR_MIN_WIDTH && v <= SIDEBAR_MAX_WIDTH) return v;
+    }
+  } catch { /* localStorage unavailable */ }
+  return SIDEBAR_WIDTH_DEFAULT;
+}
+
+const CLOSED_PROJECTS_KEY = "agentdock_closed_projects";
+
+function loadClosedProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(CLOSED_PROJECTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveClosedProjects(ids: string[]) {
+  try {
+    localStorage.setItem(CLOSED_PROJECTS_KEY, JSON.stringify(ids));
+  } catch { /* localStorage full or unavailable */ }
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -34,11 +72,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeProjectId: null,
     activeSessionId: null,
     sidebarCollapsed: false,
+    sidebarWidth: loadSidebarWidth(),
+    closedProjectIds: loadClosedProjects(),
     activeTerminals: new Map(),
   });
 
   const setActiveProject = useCallback((projectId: string | null) => {
-    setState((prev) => ({ ...prev, activeProjectId: projectId, activeSessionId: null }));
+    setState((prev) => {
+      const closedProjectIds = projectId ? prev.closedProjectIds.filter((id) => id !== projectId) : prev.closedProjectIds;
+      if (projectId) saveClosedProjects(closedProjectIds);
+      return { ...prev, activeProjectId: projectId, activeSessionId: null, closedProjectIds };
+    });
+  }, []);
+
+  const closeProject = useCallback((projectId: string) => {
+    setState((prev) => {
+      const closedProjectIds = prev.closedProjectIds.includes(projectId) ? prev.closedProjectIds : [...prev.closedProjectIds, projectId];
+      saveClosedProjects(closedProjectIds);
+      return { ...prev, activeProjectId: prev.activeProjectId === projectId ? null : prev.activeProjectId, closedProjectIds };
+    });
+  }, []);
+
+  const reopenProject = useCallback((projectId: string) => {
+    setState((prev) => {
+      const closedProjectIds = prev.closedProjectIds.filter((id) => id !== projectId);
+      saveClosedProjects(closedProjectIds);
+      return { ...prev, closedProjectIds };
+    });
   }, []);
 
   const setActiveSession = useCallback((sessionId: string | null) => {
@@ -65,15 +125,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, sidebarCollapsed: !prev.sidebarCollapsed }));
   }, []);
 
+  const setSidebarWidth = useCallback((width: number) => {
+    setState((prev) => ({ ...prev, sidebarWidth: width }));
+    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* localStorage full */ }
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
         ...state,
         setActiveProject,
         setActiveSession,
+        closeProject,
+        reopenProject,
         setActiveTerminal,
         getActiveTerminal,
         toggleSidebar,
+        setSidebarWidth,
       }}
     >
       {children}

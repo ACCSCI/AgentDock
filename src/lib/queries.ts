@@ -20,6 +20,9 @@ export interface SessionPorts {
   PREVIEW_PORT: number;
 }
 
+export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
+export type SessionViewStatus = SessionRuntimeStatus | "creating" | "deleting";
+
 export interface SessionData {
   id: string;
   projectId: string;
@@ -554,12 +557,12 @@ export function useBackgroundHookStatus(sessionId: string | null, enabled = true
 }
 
 /** Check if a session has an async background hook still running */
-export function isBackgroundHookRunning(s: SessionData | CreatingSession | DeletingSession): boolean {
+export function isBackgroundHookRunning(s: SessionListItem): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
 }
 
 /** Check if a session's async background hook has failed */
-export function isBackgroundHookFailed(s: SessionData | CreatingSession | DeletingSession): boolean {
+export function isBackgroundHookFailed(s: SessionListItem): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
 }
 
@@ -671,8 +674,8 @@ export function useSaveConfig(projectId: string) {
 export interface FileEntry {
   name: string;
   path: string;
-  type: "file" | "dir";
-  tracked: boolean;
+  isDir: boolean;
+  status: "untracked" | "modified" | "tracked";
 }
 
 // GET /api/projects/:id/files?path=...

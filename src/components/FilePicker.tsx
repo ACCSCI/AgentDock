@@ -30,7 +30,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   }, [open]);
 
   const handleNavigate = useCallback((entry: FileEntry) => {
-    if (entry.type === "dir") {
+    if (entry.isDir) {
       setCurrentPath(entry.path);
       setSelected(null);
       setSearch("");
@@ -52,6 +52,13 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
       onConfirm(selected);
     }
   }, [selected, onConfirm]);
+
+  const handleSelectDir = useCallback(() => {
+    if (currentPath) {
+      // Append "/" to signal directory selection (resource-sync convention)
+      onConfirm(currentPath.endsWith("/") ? currentPath : `${currentPath}/`);
+    }
+  }, [currentPath, onConfirm]);
 
   // Breadcrumb segments
   const breadcrumbs = currentPath ? currentPath.split("/").filter(Boolean) : [];
@@ -115,15 +122,15 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
                 className={`file-picker-entry ${selected === entry.path ? "file-picker-entry-selected" : ""}`}
                 onClick={() => handleNavigate(entry)}
                 onDoubleClick={() => {
-                  if (entry.type === "file") onConfirm(entry.path);
+                  if (!entry.isDir) onConfirm(entry.path);
                 }}
               >
                 <span className="file-picker-entry-icon">
-                  {entry.type === "dir" ? "📁" : "📄"}
+                  {entry.isDir ? "📁" : "📄"}
                 </span>
                 <span className="file-picker-entry-name">{entry.name}</span>
-                <span className={`file-picker-git-badge ${entry.tracked ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
-                  {entry.tracked ? "已跟踪" : "未跟踪"}
+                <span className={`file-picker-git-badge ${entry.status !== "untracked" ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
+                  {entry.status !== "untracked" ? "已跟踪" : "未跟踪"}
                 </span>
               </div>
             ))
@@ -133,9 +140,18 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         {/* Footer */}
         <div className="file-picker-footer">
           {currentPath && (
-            <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
-              ← 返回上级
-            </button>
+            <>
+              <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
+                ← 返回上级
+              </button>
+              <button
+                type="button"
+                className="file-picker-btn file-picker-btn-select-dir"
+                onClick={handleSelectDir}
+              >
+                📁 选择此目录
+              </button>
+            </>
           )}
           <div className="file-picker-footer-right">
             <button type="button" className="file-picker-btn file-picker-btn-cancel" onClick={onCancel}>

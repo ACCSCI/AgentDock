@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook } from "../lib/queries";
-import { useStore } from "../lib/store";
+import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
-  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar } = useStore();
+  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
   const { data: projects } = useProjects();
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
@@ -21,6 +21,41 @@ export function SessionSidebar() {
   const draggedIdRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [foreignOpen, setForeignOpen] = useState(false);
+  const handleRef = useRef<HTMLDivElement>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+
+    const startX = e.clientX;
+    const startWidth = sidebarWidthRef.current;
+
+    const cleanup = () => {
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", cleanup);
+      el.removeEventListener("pointercancel", cleanup);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + delta));
+      setSidebarWidth(newWidth);
+    };
+
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", cleanup);
+    el.addEventListener("pointercancel", cleanup);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }, [setSidebarWidth]);
 
   const activeProject = projects?.find((p) => p.id === activeProjectId);
   const sessions = activeProject?.sessions ?? [];
@@ -200,7 +235,7 @@ export function SessionSidebar() {
   }
 
   return (
-    <div className="session-sidebar">
+    <div className="session-sidebar" style={{ width: sidebarWidth }}>
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
@@ -266,6 +301,14 @@ export function SessionSidebar() {
         )}
       </div>
       <button type="button" className="session-add" onClick={handleNewSession} disabled={createSession.isPending}>+</button>
+      <div
+        ref={handleRef}
+        className="session-sidebar-resize-handle"
+        onPointerDown={onResizeStart}
+        title="拖拽调整宽度"
+      >
+        <span className="session-sidebar-resize-dots" />
+      </div>
     </div>
   );
 }

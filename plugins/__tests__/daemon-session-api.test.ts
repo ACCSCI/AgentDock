@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { AgentDockDaemon } from "../daemon.js";
 import http from "node:http";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -237,40 +237,55 @@ describe("Daemon Session API", () => {
       expect(res.data.success).toBe(true);
     });
 
-    it("release is idempotent", async () => {
-      await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/project/a"] });
-      const res = await post(port, "/sessions/release", {
-        clientId: "c1",
-        sessionId: "nonexistent",
+    it("rejects release from another live client", async () => {
+      await post(port, "/client/register", { clientId: "owner", pid: 100, projectPaths: ["/project/a"] });
+      await post(port, "/client/register", { clientId: "other", pid: 200, projectPaths: ["/project/a"] });
+      await post(port, "/sessions/allocate", {
+        clientId: "owner",
+        sessionId: "s1",
+        projectPath: "/project/a",
+        worktreePath: "/wt/s1",
       });
-      expect(res.status).toBe(200);
+
+      const res = await post(port, "/sessions/release", {
+        clientId: "other",
+        sessionId: "s1",
+      });
+      expect(res.status).toBe(403);
+      expect(res.data.error).toContain("owned by another client");
+
+      const sessions = await get(port, "/sessions/list");
+      expect(sessions.data.sessions).toHaveLength(1);
+      expect(sessions.data.sessions[0].ownerClientId).toBe("owner");
     });
+
   });
 
   // --- Session Reassign ---
 
   describe("POST /sessions/reassign", () => {
-    it("reassigns ports for a session", async () => {
-      await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/project/a"] });
+    it("rejects reassign from another live client", async () => {
+      await post(port, "/client/register", { clientId: "owner", pid: 100, projectPaths: ["/project/a"] });
+      await post(port, "/client/register", { clientId: "other", pid: 200, projectPaths: ["/project/a"] });
       const alloc = await post(port, "/sessions/allocate", {
-        clientId: "c1",
+        clientId: "owner",
         sessionId: "s1",
         projectPath: "/project/a",
         worktreePath: "/wt/s1",
       });
-      const oldPorts = alloc.data.ports;
 
       const res = await post(port, "/sessions/reassign", {
-        clientId: "c1",
+        clientId: "other",
         sessionId: "s1",
       });
-      expect(res.status).toBe(200);
-      expect(res.data.ports).toBeDefined();
+      expect(res.status).toBe(403);
+      expect(res.data.error).toContain("owned by another client");
 
-      // New ports should differ from old
-      const newPorts = res.data.ports;
-      expect(newPorts.FRONTEND_PORT).not.toBe(oldPorts.FRONTEND_PORT);
+      const sessions = await get(port, "/sessions/list");
+      expect(sessions.data.sessions[0].ports).toEqual(alloc.data.ports);
+      expect(sessions.data.sessions[0].ownerClientId).toBe("owner");
     });
+
   });
 
   // --- Sync Declare ---
@@ -316,30 +331,78 @@ describe("Daemon Session API", () => {
       expect(res.data.results[0].ports).toEqual(originalPorts);
     });
 
-    it("detects orphans", async () => {
-      // Client c1 allocates session
-      await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/project/a"] });
-      await post(port, "/sessions/allocate", {
-        clientId: "c1",
+    it("reassigns ports for a reclaimable session and transfers ownership", async () => {
+      await post(port, "/client/register", { clientId: "owner", pid: 100, projectPaths: ["/project/a"] });
+      const alloc = await post(port, "/sessions/allocate", {
+        clientId: "owner",
         sessionId: "s1",
         projectPath: "/project/a",
         worktreePath: "/wt/s1",
       });
+      await post(port, "/client/unregister", { clientId: "owner" });
+      await post(port, "/client/register", { clientId: "rescuer", pid: 200, projectPaths: ["/project/a"] });
 
-      // Unregister c1
-      await post(port, "/client/unregister", { clientId: "c1" });
+      const res = await post(port, "/sessions/reassign", {
+        clientId: "rescuer",
+        sessionId: "s1",
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.status).toBe("reclaimed");
+      expect(res.data.ports.FRONTEND_PORT).not.toBe(alloc.data.ports.FRONTEND_PORT);
 
-      // Client c2 declares — should see s1 as orphan
-      await post(port, "/client/register", { clientId: "c2", pid: 200, projectPaths: ["/project/a"] });
+      const sessions = await get(port, "/sessions/list");
+      expect(sessions.data.sessions[0].ownerClientId).toBe("rescuer");
+    });
+
+    it("returns foreign when another live client declares an existing session", async () => {
+      await post(port, "/client/register", { clientId: "owner", pid: 100, projectPaths: ["/project/a"] });
+      const alloc = await post(port, "/sessions/allocate", {
+        clientId: "owner",
+        sessionId: "s1",
+        projectPath: "/project/a",
+        worktreePath: "/wt/s1",
+      });
+      await post(port, "/client/register", { clientId: "other", pid: 200, projectPaths: ["/project/a"] });
+
       const res = await post(port, "/sync/declare", {
-        clientId: "c2",
+        clientId: "other",
         sessions: [
-          { sessionId: "s2", worktreePath: "/wt/s2", projectPath: "/project/a" },
+          { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project/a" },
         ],
       });
       expect(res.status).toBe(200);
-      expect(res.data.orphans).toContain("s1");
+      expect(res.data.results[0].status).toBe("foreign");
+      expect(res.data.results[0].ports).toEqual(alloc.data.ports);
+
+      const sessions = await get(port, "/sessions/list");
+      expect(sessions.data.sessions[0].ownerClientId).toBe("owner");
     });
+
+    it("returns reclaimed when declare revives a session from a missing owner", async () => {
+      await post(port, "/client/register", { clientId: "owner", pid: 100, projectPaths: ["/project/a"] });
+      const alloc = await post(port, "/sessions/allocate", {
+        clientId: "owner",
+        sessionId: "s1",
+        projectPath: "/project/a",
+        worktreePath: "/wt/s1",
+      });
+      await post(port, "/client/unregister", { clientId: "owner" });
+      await post(port, "/client/register", { clientId: "rescuer", pid: 200, projectPaths: ["/project/a"] });
+
+      const res = await post(port, "/sync/declare", {
+        clientId: "rescuer",
+        sessions: [
+          { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project/a" },
+        ],
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.results[0].status).toBe("reclaimed");
+      expect(res.data.results[0].ports).toEqual(alloc.data.ports);
+
+      const sessions = await get(port, "/sessions/list");
+      expect(sessions.data.sessions[0].ownerClientId).toBe("rescuer");
+    });
+
   });
 
   // --- GET /sessions/list ---
@@ -387,14 +450,25 @@ describe("Daemon Session API", () => {
       // the heartbeat endpoint doesn't write to WAL
     });
 
-    it("heartbeat does not persist to WAL", async () => {
+    it("heartbeat eventually persists to WAL after throttle interval", async () => {
+      await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/p"] });
+      const walPath = path.join(dir, "daemon-state.json");
+      const before = JSON.parse(readFileSync(walPath, "utf-8"));
+      const beforeHeartbeat = before.clients.c1.lastHeartbeat;
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await post(port, "/client/heartbeat", { clientId: "c1" });
+
+      const immediate = JSON.parse(readFileSync(walPath, "utf-8"));
+      expect(immediate.clients.c1.lastHeartbeat).toBe(beforeHeartbeat);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await post(port, "/client/unregister", { clientId: "c1" });
       await post(port, "/client/register", { clientId: "c1", pid: 100, projectPaths: ["/p"] });
 
-      // Send heartbeat
-      const res = await post(port, "/client/heartbeat", { clientId: "c1" });
-      expect(res.status).toBe(200);
-      expect(res.data.success).toBe(true);
-      // The WAL should not be updated (we can't easily test this without mocking)
+      const after = JSON.parse(readFileSync(walPath, "utf-8"));
+      expect(after.clients.c1.lastHeartbeat).toBeGreaterThan(beforeHeartbeat);
     });
+
   });
 });

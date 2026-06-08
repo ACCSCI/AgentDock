@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionListItem, type SessionStep } from "../lib/queries";
+import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionListItem, type SessionStep } from "../lib/queries";
 
 const CREATE_STEP_LABELS: Record<string, string> = {
   beforeCreateSession: "前置检查",
@@ -207,6 +207,18 @@ export function SessionCard({
     onReassignPorts(session.id);
   }, [session.id, onReassignPorts]);
 
+  const isForeign = session.status === "foreign";
+  const statusLabel = session.status === "reclaimed"
+    ? "Recovered"
+    : session.status === "allocated"
+      ? "Ports refreshed"
+      : session.status === "foreign"
+        ? "Foreign"
+        : null;
+  const foreignTitle = session.ownerClientId
+    ? `This session is currently managed by another AgentDock instance (${session.ownerClientId}).`
+    : "This session is currently managed by another AgentDock instance.";
+
   // Creating state — show spinner + steps, no interaction
   if (isCreatingSession(session)) {
     const creating = session as CreatingSession;
@@ -255,15 +267,15 @@ export function SessionCard({
     );
   }
 
-  // Initializing state — async background hook running, not clickable
-  if (isBackgroundHookRunning(session)) {
+  // Foreign state — visible but intentionally not interactive
+  if (isForeign) {
     return (
-      <div className="session-card session-card-initializing">
-        <div className="session-card-header">
-          <span className="step-spinner" />
-          <span className="session-name">{session.name}</span>
+      <div className="session-card session-card-foreign" title={foreignTitle}>
+        <span className="session-name">{session.name}</span>
+        <div className="session-card-meta">
+          {session.ports && <span className="session-ports">:{session.ports.FRONTEND_PORT}</span>}
+          {statusLabel && <span className="session-status-badge session-status-badge-foreign">{statusLabel}</span>}
         </div>
-        <div className="initializing-hint">环境初始化中...</div>
       </div>
     );
   }
@@ -282,7 +294,7 @@ export function SessionCard({
         onClick={() => onSelect(session.id)}
         onMouseEnter={() => onHover?.(session.id)}
         onContextMenu={handleContextMenu}
-        onDoubleClick={handleStartRename}
+        onDoubleClick={session.canRename === false ? undefined : handleStartRename}
         onKeyDown={(e) => e.key === "Enter" && onSelect(session.id)}
         tabIndex={0}
         role="button"
@@ -307,6 +319,9 @@ export function SessionCard({
           >
             :{session.ports.FRONTEND_PORT}
           </span>
+        )}
+        {statusLabel && session.status !== "foreign" && (
+          <span className={`session-status-badge session-status-badge-${session.status}`}>{statusLabel}</span>
         )}
         {confirmingDelete ? (
           <div ref={confirmRef} className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
@@ -351,23 +366,31 @@ export function SessionCard({
 
       {menuPos && (
         <div ref={menuRef} className="context-menu" style={{ left: menuPos.x, top: menuPos.y }}>
-          <button type="button" className="context-menu-item" onClick={handleStartRename}>
-            重命名
-          </button>
+          {session.canRename !== false && (
+            <button type="button" className="context-menu-item" onClick={handleStartRename}>
+              重命名
+            </button>
+          )}
           <button type="button" className="context-menu-item" onClick={handleOpenInExplorer}>
             在文件管理器中打开
           </button>
-          <button type="button" className="context-menu-item" onClick={handleReassignPorts}>
-            重新分配端口
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            type="button"
-            className="context-menu-item context-menu-danger"
-            onClick={handleDelete}
-          >
-            删除
-          </button>
+          {session.canReassign !== false && (
+            <button type="button" className="context-menu-item" onClick={handleReassignPorts}>
+              重新分配端口
+            </button>
+          )}
+          {session.canDelete !== false && (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                className="context-menu-item context-menu-danger"
+                onClick={handleDelete}
+              >
+                删除
+              </button>
+            </>
+          )}
         </div>
       )}
     </>

@@ -156,6 +156,7 @@ body {
   flex-direction: column;
   background: var(--color-bg);
   flex-shrink: 0;
+  position: relative;
 }
 
 .session-sidebar-collapsed {
@@ -198,6 +199,43 @@ body {
 .session-sidebar-expand-btn:hover {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
+}
+
+.session-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.session-sidebar-resize-handle:hover {
+  background: rgba(212, 56, 83, 0.1);
+}
+
+.session-sidebar-resize-handle:hover .session-sidebar-resize-dots {
+  background: var(--color-primary);
+  box-shadow:
+    -4px 0 0 var(--color-primary),
+    4px 0 0 var(--color-primary);
+}
+
+.session-sidebar-resize-dots {
+  display: block;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--color-border-light);
+  box-shadow:
+    -4px 0 0 var(--color-border-light),
+    4px 0 0 var(--color-border-light);
+  transition: background 0.15s, box-shadow 0.15s;
 }
 
 .session-list {
@@ -382,6 +420,95 @@ body {
 .session-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.session-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.session-status-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-session-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  white-space: nowrap;
+}
+
+.session-status-badge-allocated,
+.workspace-session-status-allocated {
+  border-color: #f59e0b;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.session-status-badge-reclaimed,
+.workspace-session-status-reclaimed {
+  border-color: #60a5fa;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.session-status-badge-foreign,
+.workspace-session-status-foreign {
+  border-color: #9ca3af;
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.session-card-foreign {
+  cursor: default;
+  opacity: 0.72;
+  background: #f8fafc;
+  color: var(--color-text-secondary);
+}
+
+.session-card-foreign:hover {
+  background: #f8fafc;
+}
+
+.session-foreign-group {
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 8px;
+}
+
+.session-foreign-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  padding: 6px 4px;
+  cursor: pointer;
+}
+
+.session-foreign-toggle:hover {
+  color: var(--color-primary);
+}
+
+.session-foreign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.workspace-session-status {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-session-border);
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
 }
 
 /* Workspace */
@@ -2005,6 +2132,17 @@ body {
 
 .file-picker-btn-cancel:hover {
   background: var(--color-bg-tertiary);
+}
+
+.file-picker-btn-select-dir {
+  background: var(--color-accent, #6366f1);
+  border-color: var(--color-accent, #6366f1);
+  color: #fff;
+  margin-left: 8px;
+}
+
+.file-picker-btn-select-dir:hover {
+  opacity: 0.9;
 }
 
 .file-picker-btn-confirm {

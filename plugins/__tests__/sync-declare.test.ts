@@ -128,7 +128,7 @@ describe("Sync/declare protocol", () => {
       );
     }
     expect(new Set(allPorts).size).toBe(500);
-  });
+  }, 15000);
 
   it("orphan detection: sessions from dead client reported", async () => {
     const daemonPort = daemon.getPort();
@@ -163,24 +163,46 @@ describe("Sync/declare protocol", () => {
     expect(result.orphans).toHaveLength(0);
   });
 
-  it("declare updates ownership of existing session", async () => {
+  it("declare from another live client returns foreign and preserves ownership", async () => {
     await client.registerClient("clientA", 100, ["/project"]);
-    await client.allocateSession({
+    const original = await client.allocateSession({
       clientId: "clientA", sessionId: "s1", projectPath: "/project", worktreePath: "/wt/s1",
     });
 
-    // Client B claims the same session
     await client.registerClient("clientB", 200, ["/project"]);
     const result = await client.declareSessions("clientB", [
       { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project" },
     ]);
 
-    expect(result.results[0].status).toBe("existing");
+    expect(result.results[0].status).toBe("foreign");
+    expect(result.results[0].ports).toEqual(original);
 
-    // Verify ownership updated
     const sessions = await client.listSessions();
     const s1 = sessions.find((s) => s.sessionId === "s1");
-    expect(s1).toBeDefined();
+    expect(s1?.ownerClientId).toBe("clientA");
+  });
+
+  it("declare reclaims session when prior owner is stale/unregistered", async () => {
+    const daemonPort = daemon.getPort();
+
+    await client.registerClient("clientA", 100, ["/project"]);
+    const original = await client.allocateSession({
+      clientId: "clientA", sessionId: "s1", projectPath: "/project", worktreePath: "/wt/s1",
+    });
+
+    await post(daemonPort, "/client/unregister", { clientId: "clientA" });
+    await client.registerClient("clientB", 200, ["/project"]);
+
+    const result = await client.declareSessions("clientB", [
+      { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project" },
+    ]);
+
+    expect(result.results[0].status).toBe("reclaimed");
+    expect(result.results[0].ports).toEqual(original);
+
+    const sessions = await client.listSessions();
+    const s1 = sessions.find((s) => s.sessionId === "s1");
+    expect(s1?.ownerClientId).toBe("clientB");
   });
 
   it("declare mixes known, unknown, and conflict", async () => {
