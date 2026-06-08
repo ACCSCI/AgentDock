@@ -1,4 +1,4 @@
-# PR: Harden session ownership, port recovery, and UI session status
+# PR: Harden session ownership, port recovery, external-session discovery, and UI status
 
 ## Summary
 
@@ -8,115 +8,95 @@ This PR tightens session ownership semantics, adds self-healing for stale DB por
 
 ## Why
 
-The existing system had several correctness gaps:
-
-- **No ownership enforcement.** Any registered client could `release` or `reassign-ports` on another client's session, and `declare` would silently transfer ownership.
+- **No ownership enforcement.** Any registered client could `release` or `reassign-ports` on another client's session.
 - **DB ports could go stale without recovery.** `GET /api/projects` only filled null ports but never corrected mismatched non-null ones.
-- **External sessions (created by another AgentDock instance) discovered from disk got `ports: null`** and stayed that way until manual reassign — the discovery path never called `declareSessions` to get fresh ports.
-- **`/sync/declare` trusted DB-provided ports without an OS bindability check.** After a daemon restart, old DB ports that happened to be externally occupied would be accepted.
-- **Heartbeat timestamps were not persisted.** A daemon restart could immediately stale active clients because the WAL had stale `lastHeartbeat` values.
-- **Affirmative consent not required.** Clicking the ✕ on a project tab called `DELETE /api/projects/:id`, destroying all sessions under the project with no confirmation.
+- **External sessions (created by another instance) discovered from disk got `ports: null`** until manual reassign.
+- **`/sync/declare` trusted DB-provided ports without an OS bindability check.**
+- **Heartbeat timestamps were not persisted.** A daemon restart could immediately stale active clients.
+- **Clicking ✕ on a project tab called `DELETE /api/projects/:id`**, destroying all sessions with no confirmation.
 
 ---
 
 ## What changed
 
 ### 1. Session ownership hardening
-
-**Files:** `plugins/daemon-state.ts`, `plugins/daemon.ts`
-
-- Added `getSessionOwnership()` returning `"owned" | "reclaimable" | "foreign" | "missing"`.
-- `/sessions/release` now rejects (403) if the caller is not the current owner. Returns 404 for unknown sessions.
-- `/sessions/reassign` validates ownership. If the owner is stale, ownership is transferred to the caller first (returns `"reclaimed"`).
-- `/sync/declare` no longer silently transfers ownership to a different live client. Returns `"foreign"` when the session belongs to another live client, `"reclaimed"` when the former owner is gone, and `"existing"` for same-owner declarations.
+- `plugins/daemon-state.ts`: Added `getSessionOwnership()` returning `"owned" | "reclaimable" | "foreign" | "missing"`, plus `claimSession()`.
+- `plugins/daemon.ts`: `/sessions/release` and `/sessions/reassign` now reject (403) non-owner callers. `/sync/declare` returns `"foreign"`/`"reclaimed"`/`"existing"` — no silent takeover.
+- `plugins/api.ts`: `_sessionStatuses` cleaned up on session/project delete to prevent memory leak.
 
 ### 2. Port reconciliation and self-healing
-
-**Files:** `plugins/api.ts`, `plugins/daemon.ts`
-
-- `/sync/declare` now checks all five declared ports with `isPortAvailable()` before trusting DB values. If any port is externally occupied, the entire set is reallocated.
-- Startup sync now writes DB and `.env` for _every_ result with `r.ports`, not only `"allocated"` status.
-- `GET /api/projects` now:
-  - Calls `syncProjectPortsToDb()` to correct non-null but outdated DB ports using daemon state.
-  - When a new worktree is discovered on disk: if daemon knows it, uses its ports; if not, calls `declareSessions()` immediately to get fresh ports instead of inserting `ports: null`.
-  - `declareDiscoveredSession` is wrapped in try-catch so a daemon error doesn't crash the entire sync.
+- `/sync/declare` checks all five declared ports with `isPortAvailable()` before trusting DB values. If any port is externally occupied, the entire set is reallocated.
+- Startup sync writes DB and `.env` for every result with `r.ports`, not only `"allocated"`.
+- `GET /api/projects` corrects non-null but outdated DB ports from daemon state and auto-declares discovered sessions instead of inserting `ports: null`.
 
 ### 3. Heartbeat liveness persistence
+- Heartbeat persists to WAL with throttling (every 30s per client) to prevent stale-client cleanup on daemon restart.
 
-**Files:** `plugins/daemon.ts`
+### 4. API session status
+- `GET /api/projects` returns `status` (`"existing"`/`"foreign"`/`"allocated"`/`"reclaimed"`), `ownerClientId`, and `can*` permission flags per session.
 
-- Heartbeat now persists to WAL with throttling (every 30s per client) so a daemon restart does not immediately invalidate recently active clients.
-- `registerClient` / `unregisterClient` / `cleanupStaleClients` all manage the throttled-persistence bookkeeping.
+### 5. Frontend UI
+- **Foreign sessions** in a collapsed "Foreign Sessions (N)" accordion, greyed out, non-interactive.
+- **Active session auto-fallback** when current session becomes foreign.
+- **Recovered / Ports refreshed** one-time dismissible badges.
+- **Session card** for foreign state: greyed, no context menu. For reclaimed/allocated: subtle badge.
+- **Project-tab ✕** closes the tab (filtered via `closedProjectIds`), no longer calls DELETE API. Tab reappears when project is re-opened via +.
+- **Tab click logic**: clicking active tab toggles session; clicking different project switches.
+- **Sidebar collapse/expand** and **ConfigEditor** synced from origin/master.
 
-### 4. API session status plumbing
+### 6. Files + Config API
+- `GET/POST /api/projects/:id/config` — read/write `agentdock.config.yaml`.
+- `GET /api/projects/:id/files` — async file browser with git-tracked status (`untracked`/`modified`/`tracked`), node_modules/.git/.agentdock filtering.
 
-**Files:** `plugins/api.ts`
+### 7. Project config
+- `ConfigEditor` + `FilePicker` components restored from origin/master.
+- Workspace shows ConfigEditor when no session is active; TerminalManager when a session is active.
+- Transient status pill (`Recovered`/`Ports refreshed`) shown in workspace header.
 
-- `GET /api/projects` now returns per-session `status` (`"existing"` / `"foreign"` / `"allocated"` / `"reclaimed"`), `ownerClientId`, and permission flags (`canSelect`, `canDelete`, `canReassign`, `canRename`).
-- Transient statuses (`"allocated"`, `"reclaimed"`) are tracked via an in-memory `_sessionStatuses` map derived from startup sync and creation/reassign paths.
+---
 
-### 5. Frontend session status UI
+## Commits (13)
 
-**Files:** `src/lib/queries.ts`, `src/components/SessionCard.tsx`, `src/components/SessionSidebar.tsx`, `src/routes/app.$projectId.tsx`, `src/styles/globals.css`
-
-- **`SessionData`** extended with `status`, `ownerClientId`, and `can*` permission flags.
-- **`SessionListItem`** union type resolves conflicts between `CreatingSession`/`DeletingSession` and the new runtime status field.
-- **Foreign sessions** are rendered in a collapsed accordion ("Foreign Sessions (N)") at the bottom of the sidebar, greyed out, non-interactive, with an owner tooltip.
-- **Active session auto-fallback**: if `activeSessionId` becomes foreign, the sidebar automatically selects the first available session.
-- **Recovered / Allocated badges** show as one-time dismissible pills in the workspace header.
-- **Session card** for foreign state is greyed, non-clickable, no context menu. For reclaimed/allocated states it shows a subtle badge.
-- **Project-tab close button (✕)** now only clears the UI store — it no longer calls `DELETE /api/projects/:id`, which destroyed all sessions under the project.
+```
+281b96c fix: add closedProjectIds to store, filter open projects in TabBar, remove useDeleteProject
+a7a1f1f fix: navigate to / on project deactivate/close to avoid stale requests
+bb5cded fix: files endpoint — switch execSync to async execAsync + Promise.all
+3b760c1 fix: sync files API format — add success, node_modules filter; update FileEntry/FilePicker
+41492eb fix: add missing url variable in files endpoint
+fcc3d84 fix: _sessionStatuses memory leak — cleanup on session/project delete
+89dc504 fix: sync tab click logic with origin/master
+b88f31e fix: add config and files API endpoints from origin/master
+7e7eff6 fix: sync queries.ts from origin/master
+aca88ed fix: restore ConfigEditor/FilePicker, add navigate home on deactivate
+b9a1ecb fix: sync SessionSidebar and store from origin/master with foreign accordion
+ba09d17 fix: sync IconSidebar and CSS from origin/master
+e790497 fix: address review comments — write env before DB insert, context menu
+0071e51 fix: harden session ownership, port recovery, external-session discovery, and UI status
+```
 
 ---
 
 ## Testing
 
-### Pre-existing test results (Vitest, Node)
-All 87 tests pass across 5 test files:
-
+### Focused regression (Vitest, Node)
 ```
-plugins/__tests__/port-conflict-defense.test.ts   ✓
-plugins/__tests__/api-integration.test.ts          ✓  (34 tests incl. P1/P2 port self-healing)
-plugins/__tests__/sync-declare.test.ts             ✓
-plugins/__tests__/daemon-session-api.test.ts        ✓
-plugins/__tests__/daemon-client-resilience.test.ts  ✓
+5 files, 87 tests — all pass
 ```
-
-### Key test additions
-
-| Test file | New / modified tests |
-|-----------|---------------------|
-| `daemon-session-api.test.ts` | Non-owner release → 403; non-owner reassign → 403; owner can reassign reclaimed session; declare returns foreign/reclaimed |
-| `sync-declare.test.ts` | Foreign live-owner; reclaimed stale-owner; mixed batch (existing/foreign/allocated) |
-| `port-conflict-defense.test.ts` | OS-occupied ports force full reallocation on declare |
-| `api-integration.test.ts` | P1: first-discovered external session gets ports immediately; P2: daemon corrects stale non-null DB ports + `.env` |
-| `daemon-client-resilience.test.ts` | Restart preserves ownership for recently heartbeating client |
 
 ### Manual verification checklist
-
-1. **Normal single-instance flow:** create session → ports assigned → terminal works.
-2. **External session discovery:** `git worktree add` outside AgentDock, restart, verify session appears with ports.
-3. **Reassign ports:** right-click → reassign → workspace header shows "Ports refreshed" (dismissible).
-4. **Foreign sessions** (dual-instance): instance B sees A's sessions as greyed out in foreign accordion.
-5. **Active-session auto-fallback:** B's active session becomes foreign → B auto-switches.
-6. **Tab close safety:** clicking ✕ closes tab, does not delete sessions.
+1. Normal single-instance flow: create session → ports → terminal works.
+2. External session discovery: `git worktree add`, restart, session appears with ports.
+3. Reassign ports: right-click → reassign → "Ports refreshed" dismissible badge.
+4. Foreign sessions (dual-instance): instance B sees A's sessions greyed in accordion.
+5. Active-session auto-fallback on foreign status.
+6. Tab close: ✕ closes tab, does not delete sessions, navigates home.
+7. ConfigEditor: click active tab → shows config; click ✕ → home.
+8. FilePicker: opens from ConfigEditor, shows git status badges.
 
 ---
 
 ## Known limitations
 
-- **`npm run build` is not clean.** The project has pre-existing TypeScript errors (unused imports, type assertions, test-typing issues) unrelated to this PR. The focused test suite passes cleanly.
-- **probe-then-bind race** is architecturally unavoidable: the allocator checks `isPortAvailable()` before recording the assignment, but an external process can bind the port between probe and actual service start. The fix reduces the window by rejecting already-unavailable DB ports on declare.
-- **Legacy `/ports/*` allocator** is not unified with the session-allocator path; port allocations from legacy APIs are invisible to the session daemon state.
-
----
-
-## Review guide
-
-Suggested review order:
-
-1. **`plugins/daemon-state.ts`** — new ownership helpers (`getSessionOwnership`, `claimSession`)
-2. **`plugins/daemon.ts`** — ownership validation in release/reassign/declare routes; OS-bindability check; heartbeat throttled persist
-3. **`plugins/api.ts`** — `syncProjectPortsToDb`, `declareDiscoveredSession`, `getSessionUiStatus`; startup sync and `/api/projects` changes
-4. **Test files** — validate the semantic changes through the test suite
-5. **Frontend** — `SessionSidebar` foreign accordion, `SessionCard` foreign/allocated/reclaimed states, `app.$projectId` transient-status pill, `TabBar` close-safety fix
+- **`npm run build` has pre-existing TS errors** (unused imports, test typing issues) unrelated to this PR. Focused test suite passes.
+- **probe-then-bind race** is architecturally unavoidable: external process can bind between probe and service start.
+- **Legacy `/ports/*` allocator** is not unified with session-allocator path.
