@@ -566,6 +566,7 @@ export function apiPlugin(): Plugin {
             if (_daemonClient) {
               for (const s of ps) { try { await _daemonClient.releaseSession(_clientId, s.id); } catch {} }
             }
+            for (const s of ps) { _sessionStatuses.delete(s.id); }
             d.delete(sessions).where(eq(sessions.projectId, id)).run();
             d.delete(projects).where(eq(projects.id, id)).run();
             json(res, 200, { success: true });
@@ -695,6 +696,7 @@ export function apiPlugin(): Plugin {
                   config,
                 });
                 d.delete(sessions).where(eq(sessions.id, id)).run();
+                _sessionStatuses.delete(id);
                 json(res, 200, { success: true });
                 return;
               }
@@ -726,6 +728,7 @@ export function apiPlugin(): Plugin {
                   onStep: (event) => sendDelSSE("step", event),
                 });
                 d.delete(sessions).where(eq(sessions.id, id)).run();
+                _sessionStatuses.delete(id);
                 sendDelSSE("complete", { success: true });
               } catch (err) {
                 sendDelSSE("error", { error: err instanceof Error ? err.message : "Unknown error" });
