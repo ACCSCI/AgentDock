@@ -28,14 +28,23 @@ export function useOpenProject() {
       // Extract basename as project name
       const normalized = selectedPath.replace(/\\/g, "/");
       const segments = normalized.split("/").filter(Boolean);
-      const name = segments[segments.length - 1] || selectedPath;
+      const baseName = segments[segments.length - 1] || selectedPath;
 
-      // Check if project with same name already exists
-      const existing = projects?.find((p) => p.name === name);
-      if (existing) {
-        setActiveProject(existing.id);
-        navigate({ to: "/app/$projectId", params: { projectId: existing.id } });
+      // First, match by exact path — same directory = same project
+      const existingByPath = projects?.find((p) => p.path === selectedPath);
+      if (existingByPath) {
+        setActiveProject(existingByPath.id);
+        navigate({ to: "/app/$projectId", params: { projectId: existingByPath.id } });
         return;
+      }
+
+      // Resolve name collision: if a project with the same name but different path exists, add suffix
+      let name = baseName;
+      const existingNames = new Set(projects?.map((p) => p.name) ?? []);
+      if (existingNames.has(name)) {
+        let suffix = 1;
+        while (existingNames.has(`${baseName} (${suffix})`)) suffix++;
+        name = `${baseName} (${suffix})`;
       }
 
       try {

@@ -96,7 +96,10 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     // Compute parent path directly from currentPath
     const normalized = currentPath.replace(/\\/g, "/");
     const lastSlash = normalized.lastIndexOf("/");
-    if (lastSlash > 0) {
+    if (lastSlash === 0) {
+      // Unix: e.g. /usr → /
+      fetchDirs("/");
+    } else if (lastSlash > 0) {
       const parent = normalized.slice(0, lastSlash);
       // On Windows, "C:" needs a backslash — "C:/" → "C:\"
       const parentPath = /^[A-Z]:$/.test(parent) ? parent + "\\" : parent;
@@ -110,11 +113,21 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   // Build breadcrumb segments from currentPath
   const breadcrumbs: Array<{ label: string; path: string }> = [];
   if (currentPath) {
+    const isUnixRoot = currentPath.startsWith("/");
+    const isWindows = currentPath.includes("\\");
+    const sep = isWindows ? "\\" : "/";
     const parts = currentPath.replace(/\\/g, "/").split("/").filter(Boolean);
     let accumulated = "";
     for (const part of parts) {
-      const sep = currentPath.includes("\\") ? "\\" : "/";
-      accumulated = accumulated ? `${accumulated}${sep}${part}` : (part.endsWith(":") ? part + "\\" : part);
+      if (part.endsWith(":")) {
+        // Windows drive letter — e.g. "C:" → "C:\"
+        accumulated = part + "\\";
+      } else if (!accumulated && isUnixRoot) {
+        // First segment on Unix — prepend /
+        accumulated = "/" + part;
+      } else {
+        accumulated = `${accumulated}${sep}${part}`;
+      }
       breadcrumbs.push({ label: part, path: accumulated });
     }
   }

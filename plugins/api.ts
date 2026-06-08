@@ -300,35 +300,39 @@ export function apiPlugin(): Plugin {
           const url = new URL(req.url!, `http://${req.headers.host}`);
           const targetPath = url.searchParams.get("path");
           try {
-            const fs = await import("node:fs");
+            const fs = await import("node:fs/promises");
             const nodePath = await import("node:path");
             if (!targetPath) {
               // Return root drives / common starting points
               const roots: Array<{ name: string; path: string }> = [];
               if (process.platform === "win32") {
-                // List available drive letters
-                for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+                // Skip A: and B: (legacy floppy drives) to avoid system delays
+                for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
                   const drive = `${letter}:\\`;
-                  if (fs.existsSync(drive)) roots.push({ name: drive, path: drive });
+                  try { await fs.access(drive); roots.push({ name: drive, path: drive }); } catch {}
                 }
               } else {
                 roots.push({ name: "/", path: "/" });
               }
               // Also include home directory and common project dirs
               const home = process.env.HOME || process.env.USERPROFILE || "";
-              if (home && fs.existsSync(home)) roots.push({ name: "~ (Home)", path: home });
-              const desktop = nodePath.join(home, "Desktop");
-              if (home && fs.existsSync(desktop)) roots.push({ name: "Desktop", path: desktop });
-              const documents = nodePath.join(home, "Documents");
-              if (home && fs.existsSync(documents)) roots.push({ name: "Documents", path: documents });
+              if (home) {
+                try { await fs.access(home); roots.push({ name: "~ (Home)", path: home }); } catch {}
+                const desktop = nodePath.join(home, "Desktop");
+                try { await fs.access(desktop); roots.push({ name: "Desktop", path: desktop }); } catch {}
+                const documents = nodePath.join(home, "Documents");
+                try { await fs.access(documents); roots.push({ name: "Documents", path: documents }); } catch {}
+              }
               json(res, 200, { entries: roots });
               return;
             }
             // List subdirectories of the given path
             const resolved = nodePath.resolve(targetPath);
-            if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
-              json(res, 400, { error: "Path is not an existing directory" });
-              return;
+            try {
+              const stat = await fs.stat(resolved);
+              if (!stat.isDirectory()) { json(res, 400, { error: "Path is not an existing directory" }); return; }
+            } catch {
+              json(res, 400, { error: "Path is not an existing directory" }); return;
             }
             const entries: Array<{ name: string; path: string }> = [];
             // Add parent directory entry
@@ -336,7 +340,7 @@ export function apiPlugin(): Plugin {
             if (parent !== resolved) {
               entries.push({ name: ".. (上级目录)", path: parent });
             }
-            const items = fs.readdirSync(resolved, { withFileTypes: true });
+            const items = await fs.readdir(resolved, { withFileTypes: true });
             for (const item of items) {
               if (item.isDirectory() && !item.name.startsWith(".")) {
                 entries.push({ name: item.name, path: nodePath.join(resolved, item.name) });
