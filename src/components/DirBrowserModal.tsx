@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface DirEntry {
   name: string;
@@ -19,6 +19,8 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  /** Stores the scrollTop for each directory path we've visited. */
+  const scrollPositions = useRef<Map<string, number>>(new Map());
 
   // Filter entries by search keyword
   const displayEntries = search.trim()
@@ -41,8 +43,6 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
       if (!res.ok) throw new Error(data.error || "Failed to list directories");
       setEntries(data.entries);
       setCurrentPath(data.currentPath ?? "");
-      // Scroll to top on navigation
-      listRef.current?.scrollTo(0, 0);
     } catch (err) {
       setEntries([]);
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -51,9 +51,29 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     }
   }, []);
 
+  /** Continuously save the current scroll position for the active directory. */
+  const handleScroll = useCallback(() => {
+    if (listRef.current && currentPath) {
+      scrollPositions.current.set(currentPath, listRef.current.scrollTop);
+    }
+  }, [currentPath]);
+
+  // Restore scroll position when data for the new directory is ready
+  useLayoutEffect(() => {
+    if (!loading && listRef.current && currentPath) {
+      const saved = scrollPositions.current.get(currentPath);
+      if (saved !== undefined) {
+        listRef.current.scrollTop = saved;
+      }
+    }
+  }, [currentPath, entries, loading]);
+
   // Load root directories when modal opens
-  useEffect(() => {
-    if (open) fetchDirs();
+  useLayoutEffect(() => {
+    if (open) {
+      scrollPositions.current.clear();
+      fetchDirs();
+    }
   }, [open, fetchDirs]);
 
   // Keyboard navigation
@@ -188,7 +208,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
         </div>
 
         {/* Directory list */}
-        <div className="dir-modal-list" ref={listRef}>
+        <div className="dir-modal-list" ref={listRef} onScroll={handleScroll}>
           {loading && <div className="dir-modal-status">加载中...</div>}
           {error && <div className="dir-modal-status dir-modal-error">{error}</div>}
           {!loading && !error && displayEntries.length === 0 && (
