@@ -14,6 +14,7 @@ export function TabBar() {
   const handleRemoveProject = (projectId: string) => {
     if (activeProjectId === projectId) {
       setActiveProject(null);
+      navigate({ to: "/" });
     }
   };
 
