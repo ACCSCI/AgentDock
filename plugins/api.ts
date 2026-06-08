@@ -468,6 +468,7 @@ export function apiPlugin(): Plugin {
             if (!p) { json(res, 404, { error: "Project not found" }); return; }
             const { execSync } = await import("node:child_process");
             const { readdirSync, statSync, existsSync } = await import("node:fs");
+            const url = new URL(req.url!, `http://${req.headers.host}`);
             const queryPath = url.searchParams.get("path") || "";
             const targetDir = path.resolve(p.path, queryPath);
             if (!targetDir.startsWith(path.resolve(p.path))) {
