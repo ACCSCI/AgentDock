@@ -7,8 +7,10 @@ export interface ProjectData {
   name: string;
   path: string;
   createdAt: string;
-  sessions: SessionData[];
+  sessions: SessionListItem[];
 }
+
+export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
 
 export interface SessionPorts {
   FRONTEND_PORT: number;
@@ -27,6 +29,12 @@ export interface SessionData {
   ports: SessionPorts | null;
   createdAt: string;
   backgroundHookStatus?: string | null;
+  status?: SessionRuntimeStatus;
+  ownerClientId?: string | null;
+  canSelect?: boolean;
+  canDelete?: boolean;
+  canReassign?: boolean;
+  canRename?: boolean;
 }
 
 // --- SSE step event types ---
@@ -37,21 +45,23 @@ export interface SessionStep {
   error?: string;
 }
 
-export interface CreatingSession extends SessionData {
+export interface CreatingSession extends Omit<SessionData, "status"> {
   status: "creating";
   steps: SessionStep[];
 }
 
-export function isCreatingSession(s: SessionData | CreatingSession | DeletingSession): s is CreatingSession {
+export type SessionListItem = SessionData | CreatingSession | DeletingSession;
+
+export function isCreatingSession(s: SessionListItem): s is CreatingSession {
   return "status" in s && (s as CreatingSession).status === "creating";
 }
 
-export interface DeletingSession extends SessionData {
+export interface DeletingSession extends Omit<SessionData, "status"> {
   status: "deleting";
   steps: SessionStep[];
 }
 
-export function isDeletingSession(s: SessionData | CreatingSession | DeletingSession): s is DeletingSession {
+export function isDeletingSession(s: SessionListItem): s is DeletingSession {
   return "status" in s && (s as DeletingSession).status === "deleting";
 }
 
@@ -369,6 +379,25 @@ export function useRenameSession() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data.session as SessionData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// PUT /api/sessions/reorder — reorder sessions for a project
+export function useReorderSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, sessionIds }: { projectId: string; sessionIds: string[] }) => {
+      const res = await fetch("/api/sessions/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, sessionIds }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });

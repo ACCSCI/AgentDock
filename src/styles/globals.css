@@ -231,6 +231,57 @@ body {
   box-shadow: 0 0 0 1px var(--color-primary);
 }
 
+/* Drag-and-drop reordering styles */
+.session-card-wrapper {
+  position: relative;
+}
+
+.session-card .session-card[draggable="true"] {
+  cursor: grab;
+}
+
+.session-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.session-card.dragging {
+  opacity: 0.4;
+}
+
+.session-list.drag-active .session-card-wrapper .session-card:hover {
+  cursor: default;
+}
+
+.session-drop-indicator {
+  height: 3px;
+  background: var(--color-primary, #e11931);
+  border-radius: 2px;
+  margin: -1px 0;
+  position: relative;
+  z-index: 1;
+  transition: opacity 0.1s;
+}
+
+.session-drop-indicator::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: var(--color-primary, #e11931);
+  border-radius: 50%;
+}
+
+.session-card-wrapper.drop-before > .session-drop-indicator {
+  margin-bottom: 2px;
+}
+
+.session-card-wrapper.drop-after > .session-drop-indicator {
+  margin-top: 2px;
+}
+
 .session-rename-input {
   flex: 1;
   font-size: 13px;
