@@ -647,7 +647,7 @@ export interface FileEntry {
 }
 
 // GET /api/projects/:id/files?path=...
-export function useProjectFiles(projectId: string, relPath: string) {
+export function useProjectFiles(projectId: string, relPath: string, enabled = true) {
   return useQuery({
     queryKey: ["projectFiles", projectId, relPath],
     queryFn: async (): Promise<FileEntry[]> => {
@@ -657,7 +657,7 @@ export function useProjectFiles(projectId: string, relPath: string) {
       if (!data.success) throw new Error(data.error);
       return data.entries;
     },
-    enabled: !!projectId,
+    enabled: enabled && !!projectId,
     staleTime: 5_000,
   });
 }

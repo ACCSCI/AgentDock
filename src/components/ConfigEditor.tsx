@@ -42,12 +42,17 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [filePickerTarget, setFilePickerTarget] = useState<number | null>(null);
 
-  // Initialize config from fetched data
+  // Reset config when projectId changes
   useEffect(() => {
-    if (data?.config) {
+    setConfig(null);
+  }, [projectId]);
+
+  // Initialize config from fetched data (only when config is null)
+  useEffect(() => {
+    if (data?.config && config === null) {
       setConfig(data.config);
     }
-  }, [data]);
+  }, [data, config]);
 
   const updateConfig = useCallback((updater: (prev: Config) => Config) => {
     setConfig((prev) => (prev ? updater(prev) : prev));

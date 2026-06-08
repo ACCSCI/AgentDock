@@ -13,7 +13,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  const { data: entries = [], isLoading } = useProjectFiles(projectId, currentPath);
+  const { data: entries = [], isLoading } = useProjectFiles(projectId, currentPath, open);
 
   // Filter entries by search keyword
   const displayEntries = search.trim()

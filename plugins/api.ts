@@ -427,30 +427,38 @@ export function apiPlugin(): Plugin {
             const relPath = url.searchParams.get("path") || "";
             const targetDir = path.resolve(p.path, relPath);
             // Security: ensure target is within project path
-            if (!targetDir.startsWith(p.path)) { json(res, 400, { error: "Invalid path" }); return; }
+            const relative = path.relative(p.path, targetDir);
+            if (relative.startsWith("..") || path.isAbsolute(relative)) { json(res, 400, { error: "Invalid path" }); return; }
             const fs = await import("node:fs/promises");
             const stat = await fs.stat(targetDir);
             if (!stat.isDirectory()) { json(res, 400, { error: "Not a directory" }); return; }
-            // Get git-tracked files
-            const { execSync } = await import("node:child_process");
+            // Get git-tracked files (async to avoid blocking event loop)
+            const { exec } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const execAsync = promisify(exec);
             let trackedFiles = new Set<string>();
             try {
-              const gitOutput = execSync("git ls-files", { cwd: p.path, encoding: "utf-8", timeout: 5000 });
-              for (const f of gitOutput.split("\n").filter(Boolean)) {
+              const { stdout } = await execAsync("git ls-files", { cwd: p.path, encoding: "utf-8", timeout: 5000 });
+              for (const f of stdout.split("\n").filter(Boolean)) {
                 trackedFiles.add(f.replace(/\\/g, "/"));
               }
             } catch {}
             const items = await fs.readdir(targetDir, { withFileTypes: true });
             const entries: Array<{ name: string; path: string; type: "file" | "dir"; tracked: boolean }> = [];
+            const trackedFilesArray = Array.from(trackedFiles);
             for (const item of items) {
               if (item.name === "node_modules" || item.name === ".git" || item.name === ".agentdock") continue;
               const itemRelPath = relPath ? `${relPath}/${item.name}` : item.name;
               const normalizedRel = itemRelPath.replace(/\\/g, "/");
+              const isDir = item.isDirectory();
+              const tracked = isDir
+                ? trackedFilesArray.some(f => f.startsWith(normalizedRel + "/"))
+                : trackedFiles.has(normalizedRel);
               entries.push({
                 name: item.name,
                 path: itemRelPath,
-                type: item.isDirectory() ? "dir" : "file",
-                tracked: trackedFiles.has(normalizedRel) || Array.from(trackedFiles).some(f => f.startsWith(normalizedRel + "/")),
+                type: isDir ? "dir" : "file",
+                tracked,
               });
             }
             json(res, 200, { success: true, entries, currentPath: relPath });
