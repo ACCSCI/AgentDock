@@ -37,18 +37,18 @@ export function SessionSidebar() {
 
   // Keep localOrder in sync with server data
   useEffect(() => {
-    if (!localOrder) {
-      setLocalOrder(visibleSessionIds);
-      return;
-    }
-    const existingSet = new Set(localOrder);
-    const currentSet = new Set(visibleSessionIds);
-    const pruned = localOrder.filter((id) => currentSet.has(id));
-    const added = visibleSessionIds.filter((id) => !existingSet.has(id));
-    if (pruned.length !== localOrder.length || added.length > 0) {
-      setLocalOrder([...pruned, ...added]);
-    }
-  }, [visibleSessionIds, localOrder]);
+    setLocalOrder((prev) => {
+      if (!prev) return visibleSessionIds;
+      const existingSet = new Set(prev);
+      const currentSet = new Set(visibleSessionIds);
+      const pruned = prev.filter((id) => currentSet.has(id));
+      const added = visibleSessionIds.filter((id) => !existingSet.has(id));
+      if (pruned.length !== prev.length || added.length > 0) {
+        return [...pruned, ...added];
+      }
+      return prev;
+    });
+  }, [visibleSessionIds]);
 
   const sortedVisibleSessions = useMemo(() => {
     const order = localOrder ?? visibleSessionIds;
@@ -105,12 +105,10 @@ export function SessionSidebar() {
 
       setLocalOrder((prevOrder) => {
         const order = prevOrder ?? visibleSessionIds;
-        const fromIdx = order.indexOf(draggedId);
-        const toIdx = order.indexOf(targetId);
-        if (fromIdx === -1 || toIdx === -1) return order;
-        const next = [...order];
-        next.splice(fromIdx, 1);
-        const insertAt = fromIdx < toIdx ? toIdx : toIdx;
+        if (!order.includes(draggedId) || !order.includes(targetId)) return order;
+        const next = order.filter((id) => id !== draggedId);
+        let insertAt = next.indexOf(targetId);
+        if (dragPosition === "after") insertAt += 1;
         next.splice(insertAt, 0, draggedId);
         reorderSessions.mutateAsync({ projectId: activeProject.id, sessionIds: next })
           .catch(() => setLocalOrder(null));
@@ -118,7 +116,7 @@ export function SessionSidebar() {
       });
       setDragOverSessionId(null);
     },
-    [activeProject, visibleSessionIds, reorderSessions],
+    [activeProject, visibleSessionIds, reorderSessions, dragPosition],
   );
 
   const prefetchTerminals = (sessionId: string) => {

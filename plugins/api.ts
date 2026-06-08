@@ -689,9 +689,11 @@ export function apiPlugin(): Plugin {
                 json(res, 400, { error: `Session ${sid} not found in project` }); return;
               }
             }
-            for (let i = 0; i < sessionIds.length; i++) {
-              d.update(sessions).set({ sortOrder: i + 1 }).where(eq(sessions.id, sessionIds[i])).run();
-            }
+            d.transaction((tx) => {
+              for (let i = 0; i < sessionIds.length; i++) {
+                tx.update(sessions).set({ sortOrder: i + 1 }).where(eq(sessions.id, sessionIds[i])).run();
+              }
+            });
             json(res, 200, { success: true });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;

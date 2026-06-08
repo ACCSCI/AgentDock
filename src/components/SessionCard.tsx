@@ -272,7 +272,7 @@ export function SessionCard({
     <>
       <div
         className={`session-card ${isActive ? "session-card-active" : ""}`}
-        draggable={true}
+        draggable={!!onDragStart}
         onDragStart={(e) => {
           e.dataTransfer.setData("text/plain", session.id);
           e.dataTransfer.effectAllowed = "move";

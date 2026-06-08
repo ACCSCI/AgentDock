@@ -236,7 +236,7 @@ body {
   position: relative;
 }
 
-.session-card .session-card[draggable="true"] {
+.session-card[draggable="true"] {
   cursor: grab;
 }
 
