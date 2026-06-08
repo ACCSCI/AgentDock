@@ -16,6 +16,7 @@ interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
   closedProjectIds: string[];
   activeTerminals: Map<string, string>; // sessionId → terminalId
 }
@@ -28,6 +29,23 @@ interface StoreContextValue extends UIState {
   setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
   getActiveTerminal: (sessionId: string) => string | null;
   toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
+}
+
+const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
+const SIDEBAR_WIDTH_DEFAULT = 240;
+export const SIDEBAR_MIN_WIDTH = 140;
+export const SIDEBAR_MAX_WIDTH = 600;
+
+function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw !== null) {
+      const v = Number(raw);
+      if (Number.isFinite(v) && v >= SIDEBAR_MIN_WIDTH && v <= SIDEBAR_MAX_WIDTH) return v;
+    }
+  } catch { /* localStorage unavailable */ }
+  return SIDEBAR_WIDTH_DEFAULT;
 }
 
 const CLOSED_PROJECTS_KEY = "agentdock_closed_projects";
@@ -54,6 +72,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeProjectId: null,
     activeSessionId: null,
     sidebarCollapsed: false,
+    sidebarWidth: loadSidebarWidth(),
     closedProjectIds: loadClosedProjects(),
     activeTerminals: new Map(),
   });
@@ -106,6 +125,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, sidebarCollapsed: !prev.sidebarCollapsed }));
   }, []);
 
+  const setSidebarWidth = useCallback((width: number) => {
+    setState((prev) => ({ ...prev, sidebarWidth: width }));
+    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* localStorage full */ }
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
@@ -117,6 +141,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setActiveTerminal,
         getActiveTerminal,
         toggleSidebar,
+        setSidebarWidth,
       }}
     >
       {children}
