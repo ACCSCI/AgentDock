@@ -31,13 +31,15 @@ interface StoreContextValue extends UIState {
 
 const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
 const SIDEBAR_WIDTH_DEFAULT = 240;
+export const SIDEBAR_MIN_WIDTH = 140;
+export const SIDEBAR_MAX_WIDTH = 600;
 
 function loadSidebarWidth(): number {
   try {
     const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     if (raw !== null) {
       const v = Number(raw);
-      if (Number.isFinite(v) && v >= 100 && v <= 600) return v;
+      if (Number.isFinite(v) && v >= SIDEBAR_MIN_WIDTH && v <= SIDEBAR_MAX_WIDTH) return v;
     }
   } catch { /* localStorage unavailable */ }
   return SIDEBAR_WIDTH_DEFAULT;

@@ -1,12 +1,9 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useRetryHook } from "../lib/queries";
-import { useStore } from "../lib/store";
+import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
-
-const SIDEBAR_MIN_WIDTH = 140;
-const SIDEBAR_MAX_WIDTH = 600;
 
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
@@ -84,13 +81,27 @@ export function SessionSidebar() {
   };
 
   const handleRef = useRef<HTMLDivElement>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
 
   const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
 
     const startX = e.clientX;
-    const startWidth = sidebarWidth;
+    const startWidth = sidebarWidthRef.current;
+
+    const cleanup = () => {
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", cleanup);
+      el.removeEventListener("pointercancel", cleanup);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
 
     const onPointerMove = (ev: PointerEvent) => {
       const delta = ev.clientX - startX;
@@ -98,18 +109,12 @@ export function SessionSidebar() {
       setSidebarWidth(newWidth);
     };
 
-    const onPointerUp = () => {
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("pointerup", onPointerUp);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", cleanup);
+    el.addEventListener("pointercancel", cleanup);
     document.body.style.userSelect = "none";
     document.body.style.cursor = "col-resize";
-  }, [sidebarWidth, setSidebarWidth]);
+  }, [setSidebarWidth]);
 
   const prefetchTerminals = (sessionId: string) => {
     queryClient.prefetchQuery({
