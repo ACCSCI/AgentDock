@@ -16,6 +16,7 @@ interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
   activeTerminals: Map<string, string>; // sessionId → terminalId
 }
 
@@ -25,6 +26,21 @@ interface StoreContextValue extends UIState {
   setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
   getActiveTerminal: (sessionId: string) => string | null;
   toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
+}
+
+const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
+const SIDEBAR_WIDTH_DEFAULT = 240;
+
+function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw !== null) {
+      const v = Number(raw);
+      if (Number.isFinite(v) && v >= 100 && v <= 600) return v;
+    }
+  } catch { /* localStorage unavailable */ }
+  return SIDEBAR_WIDTH_DEFAULT;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -34,6 +50,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeProjectId: null,
     activeSessionId: null,
     sidebarCollapsed: false,
+    sidebarWidth: loadSidebarWidth(),
     activeTerminals: new Map(),
   });
 
@@ -65,6 +82,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, sidebarCollapsed: !prev.sidebarCollapsed }));
   }, []);
 
+  const setSidebarWidth = useCallback((width: number) => {
+    setState((prev) => ({ ...prev, sidebarWidth: width }));
+    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* localStorage full */ }
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
@@ -74,6 +96,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setActiveTerminal,
         getActiveTerminal,
         toggleSidebar,
+        setSidebarWidth,
       }}
     >
       {children}

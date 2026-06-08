@@ -1,11 +1,15 @@
+import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useRetryHook } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
+const SIDEBAR_MIN_WIDTH = 140;
+const SIDEBAR_MAX_WIDTH = 600;
+
 export function SessionSidebar() {
-  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar } = useStore();
+  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
   const { data: projects } = useProjects();
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
@@ -79,6 +83,34 @@ export function SessionSidebar() {
     }
   };
 
+  const handleRef = useRef<HTMLDivElement>(null);
+
+  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + delta));
+      setSidebarWidth(newWidth);
+    };
+
+    const onPointerUp = () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }, [sidebarWidth, setSidebarWidth]);
+
   const prefetchTerminals = (sessionId: string) => {
     queryClient.prefetchQuery({
       queryKey: queryKeys.terminals(sessionId),
@@ -103,7 +135,7 @@ export function SessionSidebar() {
   }
 
   return (
-    <div className="session-sidebar">
+    <div className="session-sidebar" style={{ width: sidebarWidth }}>
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
         <button
@@ -139,6 +171,14 @@ export function SessionSidebar() {
       >
         +
       </button>
+      <div
+        ref={handleRef}
+        className="session-sidebar-resize-handle"
+        onPointerDown={onResizeStart}
+        title="拖拽调整宽度"
+      >
+        <span className="session-sidebar-resize-dots" />
+      </div>
     </div>
   );
 }
