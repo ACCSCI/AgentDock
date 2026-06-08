@@ -16,15 +16,35 @@ interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
   sidebarCollapsed: boolean;
+  closedProjectIds: string[];
   activeTerminals: Map<string, string>; // sessionId → terminalId
 }
 
 interface StoreContextValue extends UIState {
   setActiveProject: (projectId: string | null) => void;
   setActiveSession: (sessionId: string | null) => void;
+  closeProject: (projectId: string) => void;
+  reopenProject: (projectId: string) => void;
   setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
   getActiveTerminal: (sessionId: string) => string | null;
   toggleSidebar: () => void;
+}
+
+const CLOSED_PROJECTS_KEY = "agentdock_closed_projects";
+
+function loadClosedProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(CLOSED_PROJECTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveClosedProjects(ids: string[]) {
+  try {
+    localStorage.setItem(CLOSED_PROJECTS_KEY, JSON.stringify(ids));
+  } catch { /* localStorage full or unavailable */ }
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -34,11 +54,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeProjectId: null,
     activeSessionId: null,
     sidebarCollapsed: false,
+    closedProjectIds: loadClosedProjects(),
     activeTerminals: new Map(),
   });
 
   const setActiveProject = useCallback((projectId: string | null) => {
-    setState((prev) => ({ ...prev, activeProjectId: projectId, activeSessionId: null }));
+    setState((prev) => {
+      const closedProjectIds = projectId ? prev.closedProjectIds.filter((id) => id !== projectId) : prev.closedProjectIds;
+      if (projectId) saveClosedProjects(closedProjectIds);
+      return { ...prev, activeProjectId: projectId, activeSessionId: null, closedProjectIds };
+    });
+  }, []);
+
+  const closeProject = useCallback((projectId: string) => {
+    setState((prev) => {
+      const closedProjectIds = prev.closedProjectIds.includes(projectId) ? prev.closedProjectIds : [...prev.closedProjectIds, projectId];
+      saveClosedProjects(closedProjectIds);
+      return { ...prev, activeProjectId: prev.activeProjectId === projectId ? null : prev.activeProjectId, closedProjectIds };
+    });
+  }, []);
+
+  const reopenProject = useCallback((projectId: string) => {
+    setState((prev) => {
+      const closedProjectIds = prev.closedProjectIds.filter((id) => id !== projectId);
+      saveClosedProjects(closedProjectIds);
+      return { ...prev, closedProjectIds };
+    });
   }, []);
 
   const setActiveSession = useCallback((sessionId: string | null) => {
@@ -71,6 +112,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...state,
         setActiveProject,
         setActiveSession,
+        closeProject,
+        reopenProject,
         setActiveTerminal,
         getActiveTerminal,
         toggleSidebar,
