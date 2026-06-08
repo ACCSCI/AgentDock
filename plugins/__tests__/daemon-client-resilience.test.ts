@@ -108,11 +108,36 @@ describe("DaemonClient resilience", () => {
     expect(p2.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
   });
 
-  it("declareSessions with empty array succeeds", async () => {
+  it("declareSessions after daemon restart preserves ownership for recently heartbeating client", async () => {
     await client.registerClient("c1", 100, ["/project"]);
+    const original = await client.allocateSession({
+      clientId: "c1",
+      sessionId: "s1",
+      projectPath: "/project",
+      worktreePath: "/wt/s1",
+    });
 
-    const result = await client.declareSessions("c1", []);
-    expect(result.results).toHaveLength(0);
+    await client.heartbeat("c1");
+
+    await daemon.stop();
+    daemon = new AgentDockDaemon({ port: daemon.getPort(), baseDir: dir });
+    await daemon.start();
+    client = new DaemonClient(daemon.getPort());
+
+    await client.registerClient("c1", 100, ["/project"]);
+    const result = await client.declareSessions("c1", [{
+      sessionId: "s1",
+      worktreePath: "/wt/s1",
+      projectPath: "/project",
+      ports: original,
+    }]);
+
+    expect(result.results).toHaveLength(1);
+    expect(["existing", "reclaimed"]).toContain(result.results[0].status);
+    expect(result.results[0].ports).toEqual(original);
+
+    const sessions = await client.listSessions();
+    expect(sessions.find((s) => s.sessionId === "s1")?.ownerClientId).toBe("c1");
   });
 
   it("declareSessions with 10 sessions succeeds", async () => {

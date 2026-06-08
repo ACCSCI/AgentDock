@@ -7,7 +7,7 @@ export interface ProjectData {
   name: string;
   path: string;
   createdAt: string;
-  sessions: SessionData[];
+  sessions: SessionListItem[];
 }
 
 export interface SessionPorts {
@@ -18,6 +18,9 @@ export interface SessionPorts {
   PREVIEW_PORT: number;
 }
 
+export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
+export type SessionViewStatus = SessionRuntimeStatus | "creating" | "deleting";
+
 export interface SessionData {
   id: string;
   projectId: string;
@@ -27,6 +30,12 @@ export interface SessionData {
   ports: SessionPorts | null;
   createdAt: string;
   backgroundHookStatus?: string | null;
+  status?: SessionRuntimeStatus;
+  ownerClientId?: string | null;
+  canSelect?: boolean;
+  canDelete?: boolean;
+  canReassign?: boolean;
+  canRename?: boolean;
 }
 
 // --- SSE step event types ---
@@ -37,21 +46,23 @@ export interface SessionStep {
   error?: string;
 }
 
-export interface CreatingSession extends SessionData {
+export interface CreatingSession extends Omit<SessionData, "status"> {
   status: "creating";
   steps: SessionStep[];
 }
 
-export function isCreatingSession(s: SessionData | CreatingSession | DeletingSession): s is CreatingSession {
+export type SessionListItem = SessionData | CreatingSession | DeletingSession;
+
+export function isCreatingSession(s: SessionListItem): s is CreatingSession {
   return "status" in s && (s as CreatingSession).status === "creating";
 }
 
-export interface DeletingSession extends SessionData {
+export interface DeletingSession extends Omit<SessionData, "status"> {
   status: "deleting";
   steps: SessionStep[];
 }
 
-export function isDeletingSession(s: SessionData | CreatingSession | DeletingSession): s is DeletingSession {
+export function isDeletingSession(s: SessionListItem): s is DeletingSession {
   return "status" in s && (s as DeletingSession).status === "deleting";
 }
 
@@ -525,12 +536,12 @@ export function useBackgroundHookStatus(sessionId: string | null, enabled = true
 }
 
 /** Check if a session has an async background hook still running */
-export function isBackgroundHookRunning(s: SessionData | CreatingSession | DeletingSession): boolean {
+export function isBackgroundHookRunning(s: SessionListItem): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
 }
 
 /** Check if a session's async background hook has failed */
-export function isBackgroundHookFailed(s: SessionData | CreatingSession | DeletingSession): boolean {
+export function isBackgroundHookFailed(s: SessionListItem): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
 }
 
@@ -589,75 +600,5 @@ export function useDeleteOrphans() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["orphans"] });
     },
-  });
-}
-
-// ---- Config API ----
-
-export interface ProjectConfigData {
-  config: {
-    version: string;
-    resources: { sync: Array<{ source: string; strategy: string; skipIfMissing: boolean }> };
-    hooks: Record<string, Array<{ run: string; required: boolean; timeout: number; cwd: string; async: boolean }>>;
-  };
-  exists: boolean;
-  yaml: string;
-}
-
-// GET /api/projects/:id/config
-export function useProjectConfig(projectId: string) {
-  return useQuery({
-    queryKey: ["projectConfig", projectId],
-    queryFn: async (): Promise<ProjectConfigData> => {
-      const res = await fetch(`/api/projects/${projectId}/config`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return { config: data.config, exists: data.exists, yaml: data.yaml };
-    },
-    enabled: !!projectId,
-    staleTime: 10_000,
-  });
-}
-
-// POST /api/projects/:id/config
-export function useSaveConfig(projectId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (config: ProjectConfigData["config"]) => {
-      const res = await fetch(`/api/projects/${projectId}/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.yaml as string;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projectConfig", projectId] });
-    },
-  });
-}
-
-export interface FileEntry {
-  name: string;
-  path: string;
-  type: "file" | "dir";
-  tracked: boolean;
-}
-
-// GET /api/projects/:id/files?path=...
-export function useProjectFiles(projectId: string, relPath: string, enabled = true) {
-  return useQuery({
-    queryKey: ["projectFiles", projectId, relPath],
-    queryFn: async (): Promise<FileEntry[]> => {
-      const url = `/api/projects/${projectId}/files${relPath ? `?path=${encodeURIComponent(relPath)}` : ""}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.entries;
-    },
-    enabled: enabled && !!projectId,
-    staleTime: 5_000,
   });
 }

@@ -17,6 +17,7 @@ import { writePortsToEnv } from "./port-write-env.js";
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
 let _daemonClient: DaemonClient | null = null;
+let _sessionStatuses = new Map<string, "allocated" | "reclaimed">();
 // Stable clientId based on cwd — reuses same ID across restarts from same directory
 let _clientId: string = "client_" + process.cwd().replace(/[^a-zA-Z0-9]/g, "_").slice(-20);
 // Disk scan throttling: only scan once per project per 30 seconds
@@ -36,6 +37,21 @@ function createPortService(client: DaemonClient): PortService {
   };
 }
 
+/**
+ * Start periodic heartbeat to keep the client alive with the daemon.
+ * The daemon cleans up clients that don't send heartbeat within 90 seconds.
+ * Returns the interval timer so the caller can clear it on shutdown.
+ */
+export function startDaemonHeartbeat(
+  client: DaemonClient,
+  clientId: string,
+  intervalMs: number = 30_000,
+): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    client.heartbeat(clientId).catch(() => {});
+  }, intervalMs);
+}
+
 function getDb(): DrizzleDb {
   if (!db) { db = createDb(process.cwd()); }
   return db;
@@ -50,6 +66,60 @@ function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
     });
     req.on("error", (err) => reject(err));
   });
+}
+
+function syncProjectPortsToDb(
+  d: DrizzleDb,
+  projectId: string,
+  daemonSessions: Map<string, { sessionId: string; ports: any; worktreePath: string; projectPath: string }>,
+): void {
+  const projectSessions = d.select().from(sessions).where(eq(sessions.projectId, projectId)).all();
+  for (const session of projectSessions) {
+    const daemonSession = daemonSessions.get(session.id);
+    if (!daemonSession) continue;
+
+    const dbPorts = session.ports ? JSON.parse(session.ports) : null;
+    const daemonPortsJson = JSON.stringify(daemonSession.ports);
+    if (!dbPorts || JSON.stringify(dbPorts) !== daemonPortsJson) {
+      d.update(sessions).set({ ports: daemonPortsJson }).where(eq(sessions.id, session.id)).run();
+      writePortsToEnv(session.worktreePath, daemonSession.ports);
+    }
+  }
+}
+
+function getSessionUiStatus(sessionId: string, ownerClientId?: string | null): "existing" | "foreign" | "allocated" | "reclaimed" {
+  const transient = _sessionStatuses.get(sessionId);
+  if (transient === "allocated" || transient === "reclaimed") return transient;
+  if (ownerClientId && ownerClientId !== _clientId) return "foreign";
+  return "existing";
+}
+
+async function declareDiscoveredSession(
+  d: DrizzleDb,
+  projectId: string,
+  projectPath: string,
+  wt: { sessionId: string; worktreePath: string; branch: string },
+): Promise<{ ports: any; status: string } | null> {
+  if (!_daemonClient) return null;
+  const result = await _daemonClient.declareSessions(_clientId, [{
+    sessionId: wt.sessionId,
+    worktreePath: wt.worktreePath,
+    projectPath,
+    ports: null,
+  }]);
+  const declared = result.results.find((r) => r.sessionId === wt.sessionId);
+  if (!declared?.ports) return null;
+
+  d.insert(sessions).values({
+    id: wt.sessionId,
+    projectId,
+    name: `Session ${wt.sessionId}`,
+    branch: wt.branch,
+    worktreePath: wt.worktreePath,
+    ports: JSON.stringify(declared.ports),
+  }).run();
+  writePortsToEnv(wt.worktreePath, declared.ports);
+  return { ports: declared.ports, status: declared.status };
 }
 
 function json(res: ServerResponse, status: number, data: unknown) {
@@ -102,14 +172,16 @@ export function apiPlugin(): Plugin {
               const syncResult = await client.declareSessions(_clientId, declaredSessions);
               console.log(`  Startup sync: ${syncResult.results.length} sessions declared, ${syncResult.orphans.length} orphans`);
 
-              // Write ports for newly allocated sessions
+              // Write ports for newly allocated or reconciled sessions
               for (const r of syncResult.results) {
-                if (r.status === "allocated" && r.ports) {
+                if (r.ports) {
                   const s = declaredSessions.find((d) => d.sessionId === r.sessionId);
                   if (s) {
                     writePortsToEnv(s.worktreePath, r.ports);
-                    // Update DB with ports
                     d.update(sessions).set({ ports: JSON.stringify(r.ports) }).where(eq(sessions.id, r.sessionId)).run();
+                    if (r.status === "allocated" || r.status === "reclaimed") {
+                      _sessionStatuses.set(r.sessionId, r.status);
+                    }
                   }
                 }
               }
@@ -118,7 +190,8 @@ export function apiPlugin(): Plugin {
             console.warn(`  Startup sync failed: ${syncErr instanceof Error ? syncErr.message : syncErr}`);
           }
 
-          // Daemon detects client death via heartbeat timeout
+          // Start heartbeat to keep client alive (daemon cleans up after 90s without heartbeat)
+          startDaemonHeartbeat(client, _clientId);
         } catch (err) {
           console.warn(`  Daemon unavailable: ${err instanceof Error ? err.message : err}`);
         }
@@ -181,6 +254,7 @@ export function apiPlugin(): Plugin {
 
             const allProjects = d.select().from(projects).all();
             for (const p of allProjects) {
+              syncProjectPortsToDb(d, p.id, daemonSessions);
               // Throttle disk scan: only scan once per project per 30 seconds
               const now = Date.now();
               const lastScan = _lastScanTime.get(p.id) ?? 0;
@@ -193,25 +267,44 @@ export function apiPlugin(): Plugin {
               for (const wt of diskWts) {
                 if (!existingIds.has(wt.sessionId)) {
                   const daemonSession = daemonSessions.get(wt.sessionId);
-                  d.insert(sessions).values({
-                    id: wt.sessionId,
-                    projectId: p.id,
-                    name: `Session ${wt.sessionId}`,
-                    branch: wt.branch,
-                    worktreePath: wt.worktreePath,
-                    ports: daemonSession ? JSON.stringify(daemonSession.ports) : null,
-                  }).run();
-                }
-              }
-              // Update existing sessions missing ports
-              for (const s of existingSessions) {
-                if (!s.ports) {
-                  const daemonSession = daemonSessions.get(s.id);
                   if (daemonSession) {
-                    d.update(sessions).set({ ports: JSON.stringify(daemonSession.ports) }).where(eq(sessions.id, s.id)).run();
+                    d.insert(sessions).values({
+                      id: wt.sessionId,
+                      projectId: p.id,
+                      name: `Session ${wt.sessionId}`,
+                      branch: wt.branch,
+                      worktreePath: wt.worktreePath,
+                      ports: JSON.stringify(daemonSession.ports),
+                    }).run();
+                    writePortsToEnv(wt.worktreePath, daemonSession.ports);
+                  } else {
+                    let declaredResult: { ports: any; status: string } | null = null;
+                    try { declaredResult = await declareDiscoveredSession(d, p.id, p.path, wt); } catch (e) {
+                      console.warn(`  Failed to declare discovered session ${wt.sessionId}: ${e}`);
+                    }
+                    if (declaredResult) {
+                      _sessionStatuses.set(wt.sessionId, declaredResult.status === "reclaimed" ? "reclaimed" : "allocated");
+                      daemonSessions.set(wt.sessionId, {
+                        sessionId: wt.sessionId,
+                        worktreePath: wt.worktreePath,
+                        projectPath: p.path,
+                        ports: declaredResult.ports,
+                      });
+                    } else {
+                      d.insert(sessions).values({
+                        id: wt.sessionId,
+                        projectId: p.id,
+                        name: `Session ${wt.sessionId}`,
+                        branch: wt.branch,
+                        worktreePath: wt.worktreePath,
+                        ports: null,
+                      }).run();
+                    }
                   }
                 }
               }
+
+              syncProjectPortsToDb(d, p.id, daemonSessions);
               // Clean up sessions whose worktree no longer exists on disk
               const diskWtIds = new Set(diskWts.map((w) => w.sessionId));
               for (const s of existingSessions) {
@@ -237,10 +330,20 @@ export function apiPlugin(): Plugin {
             const refreshed = d.select().from(projects).all();
             const result = refreshed.map((p) => ({
               ...p,
-              sessions: d.select().from(sessions).where(eq(sessions.projectId, p.id)).all().map((s) => ({
-                ...s,
-                ports: s.ports ? JSON.parse(s.ports) : null,
-              })),
+              sessions: d.select().from(sessions).where(eq(sessions.projectId, p.id)).all().map((s) => {
+                const daemonSession = daemonSessions.get(s.id);
+                const status = getSessionUiStatus(s.id, daemonSession?.ownerClientId ?? null);
+                return {
+                  ...s,
+                  ports: s.ports ? JSON.parse(s.ports) : null,
+                  status,
+                  ownerClientId: daemonSession?.ownerClientId ?? null,
+                  canSelect: status !== "foreign",
+                  canDelete: status !== "foreign",
+                  canReassign: status !== "foreign",
+                  canRename: status !== "foreign",
+                };
+              }),
             }));
             json(res, 200, { success: true, projects: result });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
@@ -364,108 +467,6 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/projects/:id/config — read agentdock.config.yaml
-        const configReadMatch = pathname.match(/^\/api\/projects\/([^/]+)\/config$/);
-        if (configReadMatch && method === "GET") {
-          const id = configReadMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const { loadConfig } = await import("./config.js");
-            const { existsSync, readFileSync } = await import("node:fs");
-            const yamlPath = path.join(p.path, "agentdock.config.yaml");
-            const exists = existsSync(yamlPath);
-            const config = loadConfig(p.path);
-            const yaml = exists ? readFileSync(yamlPath, "utf-8") : "";
-            json(res, 200, { success: true, config, exists, yaml });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
-
-        // POST /api/projects/:id/config — write agentdock.config.yaml
-        const configWriteMatch = pathname.match(/^\/api\/projects\/([^/]+)\/config$/);
-        if (configWriteMatch && method === "POST") {
-          const id = configWriteMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const body = await parseBody(req);
-            const { AgentDockConfigSchema } = await import("./config.js");
-            const parsed = AgentDockConfigSchema.parse(body.config);
-            const { stringify, Scalar } = await import("yaml");
-            // Force double quotes on all hook run fields
-            const hooksForYaml: Record<string, unknown[]> = {};
-            if (parsed.hooks) {
-              for (const event of Object.keys(parsed.hooks)) {
-                hooksForYaml[event] = parsed.hooks[event].map((h) => {
-                  const s = new Scalar(h.run);
-                  s.type = Scalar.QUOTE_DOUBLE;
-                  return { ...h, run: s };
-                });
-              }
-            }
-            const yamlContent = stringify({ ...parsed, hooks: hooksForYaml }, { indent: 2 });
-            const { writeFileSync } = await import("node:fs");
-            const yamlPath = path.join(p.path, "agentdock.config.yaml");
-            writeFileSync(yamlPath, yamlContent, "utf-8");
-            json(res, 200, { success: true, yaml: yamlContent });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
-
-        // GET /api/projects/:id/files?path= — list files with git-tracked status
-        const filesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/files$/);
-        if (filesMatch && method === "GET") {
-          const id = filesMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const url = new URL(req.url!, `http://${req.headers.host}`);
-            const relPath = url.searchParams.get("path") || "";
-            const targetDir = path.resolve(p.path, relPath);
-            // Security: ensure target is within project path
-            const relative = path.relative(p.path, targetDir);
-            if (relative.startsWith("..") || path.isAbsolute(relative)) { json(res, 400, { error: "Invalid path" }); return; }
-            const fs = await import("node:fs/promises");
-            const stat = await fs.stat(targetDir);
-            if (!stat.isDirectory()) { json(res, 400, { error: "Not a directory" }); return; }
-            // Get git-tracked files (async to avoid blocking event loop)
-            const { exec } = await import("node:child_process");
-            const { promisify } = await import("node:util");
-            const execAsync = promisify(exec);
-            let trackedFiles = new Set<string>();
-            try {
-              const { stdout } = await execAsync("git ls-files", { cwd: p.path, encoding: "utf-8", timeout: 5000 });
-              for (const f of stdout.split("\n").filter(Boolean)) {
-                trackedFiles.add(f.replace(/\\/g, "/"));
-              }
-            } catch {}
-            const items = await fs.readdir(targetDir, { withFileTypes: true });
-            const entries: Array<{ name: string; path: string; type: "file" | "dir"; tracked: boolean }> = [];
-            const trackedFilesArray = Array.from(trackedFiles);
-            for (const item of items) {
-              if (item.name === "node_modules" || item.name === ".git" || item.name === ".agentdock") continue;
-              const itemRelPath = relPath ? `${relPath}/${item.name}` : item.name;
-              const normalizedRel = itemRelPath.replace(/\\/g, "/");
-              const isDir = item.isDirectory();
-              const tracked = isDir
-                ? trackedFilesArray.some(f => f.startsWith(normalizedRel + "/"))
-                : trackedFiles.has(normalizedRel);
-              entries.push({
-                name: item.name,
-                path: itemRelPath,
-                type: isDir ? "dir" : "file",
-                tracked,
-              });
-            }
-            json(res, 200, { success: true, entries, currentPath: relPath });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
-
         // DELETE /api/projects/:id
         const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
         if (projectMatch && method === "DELETE") {
@@ -517,6 +518,7 @@ export function apiPlugin(): Plugin {
                   },
                 });
                 d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
+                _sessionStatuses.set(id, "allocated");
                 const session = d.select().from(sessions).where(eq(sessions.id, id)).get();
                 json(res, 200, { success: true, session: { ...session, ports: result.ports }, syncReport: result.syncReport, hookReports: result.hookReports });
               } catch (err) {
@@ -563,6 +565,7 @@ export function apiPlugin(): Plugin {
                 },
               });
               d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
+              _sessionStatuses.set(id, "allocated");
               const session = d.select().from(sessions).where(eq(sessions.id, id)).get();
               sendSSE("complete", { session: { ...session, ports: result.ports }, syncReport: result.syncReport, hookReports: result.hookReports });
             } catch (err) {
@@ -702,6 +705,7 @@ export function apiPlugin(): Plugin {
             }
             writePortsToEnv(s.worktreePath, ports);
             d.update(sessions).set({ ports: JSON.stringify(ports) }).where(eq(sessions.id, id)).run();
+            _sessionStatuses.set(id, "allocated");
             const updated = d.select().from(sessions).where(eq(sessions.id, id)).get();
             json(res, 200, { success: true, session: { ...updated, ports } });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useRetryHook } from "../lib/queries";
 import { useStore } from "../lib/store";
@@ -5,7 +6,7 @@ import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
-  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar } = useStore();
+  const { activeProjectId, activeSessionId, setActiveSession } = useStore();
   const { data: projects } = useProjects();
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
@@ -13,6 +14,7 @@ export function SessionSidebar() {
   const renameSession = useRenameSession();
   const reassignPorts = useReassignPorts();
   const retryHook = useRetryHook();
+  const [showForeign, setShowForeign] = useState(false);
 
   const activeProject = projects?.find((p) => p.id === activeProjectId);
 
@@ -87,36 +89,20 @@ export function SessionSidebar() {
     });
   };
 
-  if (sidebarCollapsed) {
-    return (
-      <div className="session-sidebar session-sidebar-collapsed">
-        <button
-          type="button"
-          className="session-sidebar-expand-btn"
-          onClick={toggleSidebar}
-          title="展开 Session 侧栏"
-        >
-          ▶
-        </button>
-      </div>
-    );
-  }
+  const visibleSessions = activeProject.sessions.filter((session) => session.status !== "foreign");
+  const foreignSessions = activeProject.sessions.filter((session) => session.status === "foreign");
+
+  useEffect(() => {
+    if (activeSessionId && foreignSessions.some((session) => session.id === activeSessionId)) {
+      const fallback = visibleSessions.find((session) => session.canSelect !== false)?.id ?? null;
+      setActiveSession(fallback);
+    }
+  }, [activeSessionId, foreignSessions, visibleSessions, setActiveSession]);
 
   return (
     <div className="session-sidebar">
-      <div className="session-sidebar-header">
-        <span className="session-sidebar-title">Sessions</span>
-        <button
-          type="button"
-          className="session-sidebar-collapse-btn"
-          onClick={toggleSidebar}
-          title="收起侧栏"
-        >
-          ◀
-        </button>
-      </div>
       <div className="session-list">
-        {activeProject.sessions.map((session) => (
+        {visibleSessions.map((session) => (
           <SessionCard
             key={session.id}
             session={session}
@@ -130,6 +116,31 @@ export function SessionSidebar() {
             onHover={prefetchTerminals}
           />
         ))}
+        {foreignSessions.length > 0 && (
+          <div className="session-foreign-group">
+            <button type="button" className="session-foreign-toggle" onClick={() => setShowForeign((v) => !v)}>
+              {showForeign ? "▼" : "▶"} Foreign Sessions ({foreignSessions.length})
+            </button>
+            {showForeign && (
+              <div className="session-foreign-list">
+                {foreignSessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    isActive={false}
+                    onSelect={setActiveSession}
+                    onDelete={handleDeleteSession}
+                    onRename={handleRenameSession}
+                    onOpenInExplorer={handleOpenInExplorer}
+                    onReassignPorts={handleReassignPorts}
+                    onRetryHooks={handleRetryHooks}
+                    onHover={prefetchTerminals}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <button
         type="button"

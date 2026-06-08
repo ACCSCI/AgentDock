@@ -6,37 +6,14 @@ import { DirBrowserModal } from "./DirBrowserModal";
 
 export function TabBar() {
   const navigate = useNavigate();
-  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession } = useStore();
+  const { activeProjectId, setActiveProject } = useStore();
   const { data: projects } = useProjects();
   const deleteProject = useDeleteProject();
   const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
 
-  const handleRemoveProject = async (projectId: string) => {
-    try {
-      await deleteProject.mutateAsync(projectId);
-      if (activeProjectId === projectId) {
-        setActiveProject(null);
-      }
-    } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
-    }
-  };
-
-  const handleTabClick = (projectId: string) => {
-    if (projectId === activeProjectId) {
-      // Clicking active project tab
-      if (activeSessionId) {
-        // Session is active → clear session, show project config
-        setActiveSession(null);
-      } else {
-        // No session → deactivate project entirely
-        setActiveProject(null);
-        navigate({ to: "/app" });
-      }
-    } else {
-      // Clicking a different project → activate it
-      setActiveProject(projectId);
-      navigate({ to: "/app/$projectId", params: { projectId } });
+  const handleRemoveProject = (projectId: string) => {
+    if (activeProjectId === projectId) {
+      setActiveProject(null);
     }
   };
 
@@ -46,9 +23,15 @@ export function TabBar() {
         <div
           key={project.id}
           className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
-          onClick={() => handleTabClick(project.id)}
+          onClick={() => {
+            setActiveProject(project.id);
+            navigate({ to: "/app/$projectId", params: { projectId: project.id } });
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleTabClick(project.id);
+            if (e.key === "Enter") {
+              setActiveProject(project.id);
+              navigate({ to: "/app/$projectId", params: { projectId: project.id } });
+            }
           }}
           tabIndex={0}
           role="tab"
