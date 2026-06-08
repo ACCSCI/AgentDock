@@ -256,12 +256,15 @@ async function main() {
         const { paths } = body as { paths?: string[] };
         if (!Array.isArray(paths) || paths.length === 0) { json(res, 400, { error: "paths array is required" }); return; }
         const allProjects = d.select().from(projects).all();
-        const validPrefixes = allProjects.map((p) => path.join(p.path, ".agentdock", "worktrees").replace(/\\/g, "/"));
+        const validPrefixes = allProjects.map((p) => {
+          const base = path.resolve(p.path, ".agentdock", "worktrees").replace(/\\/g, "/");
+          return base.endsWith("/") ? base : base + "/";
+        });
         const deleted: string[] = [];
         const failed: Array<{ path: string; error: string }> = [];
         for (const p of paths) {
-          const normalized = p.replace(/\\/g, "/");
-          if (!validPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+          const resolved = path.resolve(p).replace(/\\/g, "/");
+          if (!validPrefixes.some((prefix) => resolved.startsWith(prefix))) {
             failed.push({ path: p, error: "Path is not under any known project's worktree directory" });
             continue;
           }

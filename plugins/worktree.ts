@@ -385,7 +385,12 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
     if (existsSync(gitFile)) continue;
 
     // Check if directory is empty
-    const dirContents = readdirSync(wtPath);
+    let dirContents: string[] = [];
+    try {
+      dirContents = readdirSync(wtPath);
+    } catch {
+      continue;
+    }
     const reason: OrphanDir["reason"] = dirContents.length === 0 ? "empty-dir" : "no-git-file";
 
     result.push({ sessionId, worktreePath: wtPath, reason });

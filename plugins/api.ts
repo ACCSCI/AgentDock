@@ -228,7 +228,7 @@ export function apiPlugin(): Plugin {
               // callback never fired, leaving backgroundHookStatus stuck at "running".
               // On restart/sync, the async hook process is dead — reset to null.
               for (const s of existingSessions) {
-                if (s.backgroundHookStatus === "running") {
+                if (diskWtIds.has(s.id) && s.backgroundHookStatus === "running") {
                   d.update(sessions).set({ backgroundHookStatus: null }).where(eq(sessions.id, s.id)).run();
                 }
               }
@@ -795,16 +795,16 @@ export function apiPlugin(): Plugin {
             const d = getDb();
             const allProjects = d.select().from(projects).all();
             const validPrefixes = allProjects.map((p) => {
-              const base = path.join(p.path, ".agentdock", "worktrees");
-              return base.replace(/\\/g, "/");
+              const base = path.resolve(p.path, ".agentdock", "worktrees").replace(/\\/g, "/");
+              return base.endsWith("/") ? base : base + "/";
             });
 
             const deleted: string[] = [];
             const failed: Array<{ path: string; error: string }> = [];
 
             for (const p of paths) {
-              const normalized = p.replace(/\\/g, "/");
-              const isUnderProject = validPrefixes.some((prefix) => normalized.startsWith(prefix));
+              const resolved = path.resolve(p).replace(/\\/g, "/");
+              const isUnderProject = validPrefixes.some((prefix) => resolved.startsWith(prefix));
               if (!isUnderProject) {
                 failed.push({ path: p, error: "Path is not under any known project's worktree directory" });
                 continue;
