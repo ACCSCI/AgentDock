@@ -95,12 +95,15 @@ function findVitePids(): number[] {
       }
     } else {
       const out = execSync(
-        `ps -eo pid,args | grep -E 'vite|agentdock' | grep -v grep | grep -v ${selfPid}`,
+        `ps -eo pid,args | grep -E 'vite|agentdock' | grep -v grep`,
         { encoding: "utf-8", timeout: 5000 },
       );
       for (const line of out.split("\n")) {
         const match = line.trim().match(/^(\d+)/);
-        if (match) pids.push(parseInt(match[1], 10));
+        if (match) {
+          const pid = parseInt(match[1], 10);
+          if (pid !== selfPid) pids.push(pid);
+        }
       }
     }
   } catch {
