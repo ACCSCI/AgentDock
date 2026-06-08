@@ -353,25 +353,33 @@ export function SessionCard({
         )}
       </div>
 
-      {menuPos && session.canRename !== false && session.canDelete !== false && session.canReassign !== false && (
+      {menuPos && (
         <div ref={menuRef} className="context-menu" style={{ left: menuPos.x, top: menuPos.y }}>
-          <button type="button" className="context-menu-item" onClick={handleStartRename}>
-            重命名
-          </button>
+          {session.canRename !== false && (
+            <button type="button" className="context-menu-item" onClick={handleStartRename}>
+              重命名
+            </button>
+          )}
           <button type="button" className="context-menu-item" onClick={handleOpenInExplorer}>
             在文件管理器中打开
           </button>
-          <button type="button" className="context-menu-item" onClick={handleReassignPorts}>
-            重新分配端口
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            type="button"
-            className="context-menu-item context-menu-danger"
-            onClick={handleDelete}
-          >
-            删除
-          </button>
+          {session.canReassign !== false && (
+            <button type="button" className="context-menu-item" onClick={handleReassignPorts}>
+              重新分配端口
+            </button>
+          )}
+          {session.canDelete !== false && (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                className="context-menu-item context-menu-danger"
+                onClick={handleDelete}
+              >
+                删除
+              </button>
+            </>
+          )}
         </div>
       )}
     </>

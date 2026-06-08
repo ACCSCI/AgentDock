@@ -110,6 +110,7 @@ async function declareDiscoveredSession(
   const declared = result.results.find((r) => r.sessionId === wt.sessionId);
   if (!declared?.ports) return null;
 
+  writePortsToEnv(wt.worktreePath, declared.ports);
   d.insert(sessions).values({
     id: wt.sessionId,
     projectId,
@@ -118,7 +119,6 @@ async function declareDiscoveredSession(
     worktreePath: wt.worktreePath,
     ports: JSON.stringify(declared.ports),
   }).run();
-  writePortsToEnv(wt.worktreePath, declared.ports);
   return { ports: declared.ports, status: declared.status };
 }
 
