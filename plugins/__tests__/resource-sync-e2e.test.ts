@@ -109,7 +109,7 @@ function cleanup(fixture: Fixture) {
 // Remove git worktree via git command
 function gitWorktreeRemove(projectDir: string, worktreePath: string) {
   try {
-    execSync(`git worktree remove "${worktreePath}" 2>/dev/null || true`, {
+    execSync(`git worktree remove --force "${worktreePath}" 2>/dev/null || true`, {
       cwd: projectDir,
       stdio: "pipe",
     });
