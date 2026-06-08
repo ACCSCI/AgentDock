@@ -53,6 +53,13 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
     }
   }, [selected, onConfirm]);
 
+  const handleSelectDir = useCallback(() => {
+    if (currentPath) {
+      // Append "/" to signal directory selection (resource-sync convention)
+      onConfirm(currentPath.endsWith("/") ? currentPath : `${currentPath}/`);
+    }
+  }, [currentPath, onConfirm]);
+
   // Breadcrumb segments
   const breadcrumbs = currentPath ? currentPath.split("/").filter(Boolean) : [];
 
@@ -133,9 +140,18 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         {/* Footer */}
         <div className="file-picker-footer">
           {currentPath && (
-            <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
-              ← 返回上级
-            </button>
+            <>
+              <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
+                ← 返回上级
+              </button>
+              <button
+                type="button"
+                className="file-picker-btn file-picker-btn-select-dir"
+                onClick={handleSelectDir}
+              >
+                📁 选择此目录
+              </button>
+            </>
           )}
           <div className="file-picker-footer-right">
             <button type="button" className="file-picker-btn file-picker-btn-cancel" onClick={onCancel}>
