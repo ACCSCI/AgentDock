@@ -40,7 +40,7 @@ This PR tightens session ownership semantics, adds self-healing for stale DB por
 - **Active session auto-fallback** when current session becomes foreign.
 - **Recovered / Ports refreshed** one-time dismissible badges.
 - **Session card** for foreign state: greyed, no context menu. For reclaimed/allocated: subtle badge.
-- **Project-tab ✕** closes the tab (filtered via `closedProjectIds`), no longer calls DELETE API. Tab reappears when project is re-opened via +.
+- **Project-tab ✕** closes the tab (filtered via `closedProjectIds`, persisted to localStorage). No longer calls DELETE API. Tab reappears when project is re-opened via +. Survives restart.
 - **Tab click logic**: clicking active tab toggles session; clicking different project switches.
 - **Sidebar collapse/expand** and **ConfigEditor** synced from origin/master.
 
@@ -58,7 +58,11 @@ This PR tightens session ownership semantics, adds self-healing for stale DB por
 ## Commits (13)
 
 ```
-281b96c fix: add closedProjectIds to store, filter open projects in TabBar, remove useDeleteProject
+4b129f4 fix: persist closedProjectIds to localStorage to survive restart
+ced530e fix: files endpoint — directory tracked detection via startsWith, same as origin/master
+b284d0b fix: files endpoint git status — use git ls-files --cached for tracked detection
+f763a14 docs: update PR description with closedProjectIds
+281b96c fix: add closedProjectIds to store, filter open projects in TabBar
 a7a1f1f fix: navigate to / on project deactivate/close to avoid stale requests
 bb5cded fix: files endpoint — switch execSync to async execAsync + Promise.all
 3b760c1 fix: sync files API format — add success, node_modules filter; update FileEntry/FilePicker
