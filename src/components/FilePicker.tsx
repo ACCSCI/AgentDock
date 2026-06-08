@@ -23,9 +23,9 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
     ? entries.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
     : entries;
 
-  // Reset state when modal opens
+  // Reset state when modal closes (avoids re-fetch on next open)
   useLayoutEffect(() => {
-    if (open) {
+    if (!open) {
       scrollPositions.current.clear();
       setCurrentPath("");
       setSelected(null);

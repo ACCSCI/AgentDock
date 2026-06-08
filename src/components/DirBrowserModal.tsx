@@ -53,14 +53,14 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
   /** Continuously save the current scroll position for the active directory. */
   const handleScroll = useCallback(() => {
-    if (listRef.current && currentPath) {
+    if (listRef.current) {
       scrollPositions.current.set(currentPath, listRef.current.scrollTop);
     }
   }, [currentPath]);
 
   // Restore scroll position when data for the new directory is ready
   useLayoutEffect(() => {
-    if (!loading && listRef.current && currentPath) {
+    if (!loading && listRef.current) {
       const saved = scrollPositions.current.get(currentPath);
       if (saved !== undefined) {
         listRef.current.scrollTop = saved;
