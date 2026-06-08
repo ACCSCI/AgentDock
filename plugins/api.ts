@@ -295,6 +295,64 @@ export function apiPlugin(): Plugin {
           return;
         }
 
+        // GET /api/browse-dirs?path=... — list subdirectories for project picker
+        if (pathname === "/api/browse-dirs" && method === "GET") {
+          const url = new URL(req.url!, `http://${req.headers.host}`);
+          const targetPath = url.searchParams.get("path");
+          try {
+            const fs = await import("node:fs/promises");
+            const nodePath = await import("node:path");
+            if (!targetPath) {
+              // Return root drives / common starting points
+              const roots: Array<{ name: string; path: string }> = [];
+              if (process.platform === "win32") {
+                // Skip A: and B: (legacy floppy drives) to avoid system delays
+                for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
+                  const drive = `${letter}:\\`;
+                  try { await fs.access(drive); roots.push({ name: drive, path: drive }); } catch {}
+                }
+              } else {
+                roots.push({ name: "/", path: "/" });
+              }
+              // Also include home directory and common project dirs
+              const home = process.env.HOME || process.env.USERPROFILE || "";
+              if (home) {
+                try { await fs.access(home); roots.push({ name: "~ (Home)", path: home }); } catch {}
+                const desktop = nodePath.join(home, "Desktop");
+                try { await fs.access(desktop); roots.push({ name: "Desktop", path: desktop }); } catch {}
+                const documents = nodePath.join(home, "Documents");
+                try { await fs.access(documents); roots.push({ name: "Documents", path: documents }); } catch {}
+              }
+              json(res, 200, { entries: roots });
+              return;
+            }
+            // List subdirectories of the given path
+            const resolved = nodePath.resolve(targetPath);
+            try {
+              const stat = await fs.stat(resolved);
+              if (!stat.isDirectory()) { json(res, 400, { error: "Path is not an existing directory" }); return; }
+            } catch {
+              json(res, 400, { error: "Path is not an existing directory" }); return;
+            }
+            const entries: Array<{ name: string; path: string }> = [];
+            // Add parent directory entry
+            const parent = nodePath.dirname(resolved);
+            if (parent !== resolved) {
+              entries.push({ name: ".. (上级目录)", path: parent });
+            }
+            const items = await fs.readdir(resolved, { withFileTypes: true });
+            for (const item of items) {
+              if (item.isDirectory() && !item.name.startsWith(".")) {
+                entries.push({ name: item.name, path: nodePath.join(resolved, item.name) });
+              }
+            }
+            json(res, 200, { entries, currentPath: resolved });
+          } catch (err) {
+            json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" });
+          }
+          return;
+        }
+
         // DELETE /api/projects/:id
         const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
         if (projectMatch && method === "DELETE") {
