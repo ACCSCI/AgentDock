@@ -98,6 +98,15 @@ export class DaemonState {
       throw new Error(`Session ${entry.sessionId} already exists`);
     }
 
+    // Defense-in-depth: reject if any port is already claimed by another session
+    for (const key of PORT_KEYS) {
+      if (this.allocatedPorts.has(entry.ports[key])) {
+        throw new Error(
+          `Port conflict: ${key}=${entry.ports[key]} already allocated (session ${entry.sessionId})`,
+        );
+      }
+    }
+
     const session: SessionEntry = {
       ...entry,
       createdAt: new Date().toISOString(),

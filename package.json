@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "open-app": "bun run scripts/open-app.ts",
-    "start": "bun run scripts/start.ts"
+    "start": "bun run scripts/start.ts",
+    "kill-all": "bun run scripts/kill-all.ts"
   },
   "dependencies": {
     "@ai-sdk/devtools": "^0.0.18",

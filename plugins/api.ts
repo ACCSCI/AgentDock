@@ -570,7 +570,23 @@ export function apiPlugin(): Plugin {
             if (!p) { json(res, 404, { error: "Project not found" }); return; }
 
             if (!_daemonClient) { json(res, 500, { error: "Daemon not available" }); return; }
-            const ports = await _daemonClient.reassignSession(_clientId, id);
+            let ports;
+            try {
+              ports = await _daemonClient.reassignSession(_clientId, id);
+            } catch (err) {
+              // Session not in daemon state (daemon restart) — auto-register then retry
+              if (err instanceof Error && err.message.includes("not found")) {
+                await _daemonClient.declareSessions(_clientId, [{
+                  sessionId: id,
+                  worktreePath: s.worktreePath,
+                  projectPath: p.path,
+                  ports: s.ports ? JSON.parse(s.ports) : null,
+                }]);
+                ports = await _daemonClient.reassignSession(_clientId, id);
+              } else {
+                throw err;
+              }
+            }
             writePortsToEnv(s.worktreePath, ports);
             d.update(sessions).set({ ports: JSON.stringify(ports) }).where(eq(sessions.id, id)).run();
             const updated = d.select().from(sessions).where(eq(sessions.id, id)).get();

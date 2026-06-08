@@ -609,12 +609,19 @@ export class AgentDockDaemon {
 
             // New session — use provided ports or allocate new ones
             let ports: SessionPorts;
-            if (decl.ports && decl.ports.FRONTEND_PORT) {
-              // Use provided ports (from database)
-              ports = decl.ports;
+            const hasAllPorts = !!(decl.ports && PORT_KEYS.every((key) => typeof decl.ports![key] === "number"));
+            const needsRealloc = !hasAllPorts || PORT_KEYS.some((key) => this.state.isPortAllocated(decl.ports![key]));
+
+            if (hasAllPorts && !needsRealloc) {
+              // Use provided ports (from database) — no conflict
+              ports = decl.ports!;
             } else {
-              // Allocate new ports
+              // Allocate new ports (no ports provided, or provided ports conflict)
               const excluded = this.state.getExcludedPorts();
+              if (hasAllPorts) {
+                // Also exclude the conflicting DB ports so they're not re-picked
+                for (const key of PORT_KEYS) excluded.add(decl.ports![key]);
+              }
               const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
               ports = {
                 FRONTEND_PORT: allocated[0],
