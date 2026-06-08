@@ -7,21 +7,25 @@ export function IconSidebar() {
   return (
     <>
       <div className="icon-sidebar">
-        <button
-          type="button"
-          className="icon-sidebar-btn"
-          title="清理孤儿目录"
-          onClick={() => setOrphanModalOpen(true)}
-        >
-          🧹
-        </button>
-        <button
-          type="button"
-          className="icon-sidebar-btn"
-          title="设置"
-        >
-          ⚙
-        </button>
+        <div className="icon-sidebar-top">
+          <button
+            type="button"
+            className="icon-sidebar-btn"
+            title="清理孤儿目录"
+            onClick={() => setOrphanModalOpen(true)}
+          >
+            🧹
+          </button>
+        </div>
+        <div className="icon-sidebar-bottom">
+          <button
+            type="button"
+            className="icon-sidebar-btn"
+            title="设置"
+          >
+            ⚙
+          </button>
+        </div>
       </div>
       <OrphanCleanModal open={orphanModalOpen} onClose={() => setOrphanModalOpen(false)} />
     </>

@@ -6,7 +6,7 @@ import { DirBrowserModal } from "./DirBrowserModal";
 
 export function TabBar() {
   const navigate = useNavigate();
-  const { activeProjectId, setActiveProject } = useStore();
+  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession } = useStore();
   const { data: projects } = useProjects();
   const deleteProject = useDeleteProject();
   const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
@@ -22,21 +22,33 @@ export function TabBar() {
     }
   };
 
+  const handleTabClick = (projectId: string) => {
+    if (projectId === activeProjectId) {
+      // Clicking active project tab
+      if (activeSessionId) {
+        // Session is active → clear session, show project config
+        setActiveSession(null);
+      } else {
+        // No session → deactivate project entirely
+        setActiveProject(null);
+        navigate({ to: "/app" });
+      }
+    } else {
+      // Clicking a different project → activate it
+      setActiveProject(projectId);
+      navigate({ to: "/app/$projectId", params: { projectId } });
+    }
+  };
+
   return (
     <div className="tab-bar">
       {(projects || []).map((project) => (
         <div
           key={project.id}
           className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
-          onClick={() => {
-            setActiveProject(project.id);
-            navigate({ to: "/app/$projectId", params: { projectId: project.id } });
-          }}
+          onClick={() => handleTabClick(project.id)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              setActiveProject(project.id);
-              navigate({ to: "/app/$projectId", params: { projectId: project.id } });
-            }
+            if (e.key === "Enter") handleTabClick(project.id);
           }}
           tabIndex={0}
           role="tab"

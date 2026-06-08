@@ -15,6 +15,7 @@ export interface TerminalInfo {
 interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
+  sidebarCollapsed: boolean;
   activeTerminals: Map<string, string>; // sessionId → terminalId
 }
 
@@ -23,6 +24,7 @@ interface StoreContextValue extends UIState {
   setActiveSession: (sessionId: string | null) => void;
   setActiveTerminal: (sessionId: string, terminalId: string | null) => void;
   getActiveTerminal: (sessionId: string) => string | null;
+  toggleSidebar: () => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -31,6 +33,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<UIState>({
     activeProjectId: null,
     activeSessionId: null,
+    sidebarCollapsed: false,
     activeTerminals: new Map(),
   });
 
@@ -58,6 +61,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return state.activeTerminals.get(sessionId) ?? null;
   }, [state.activeTerminals]);
 
+  const toggleSidebar = useCallback(() => {
+    setState((prev) => ({ ...prev, sidebarCollapsed: !prev.sidebarCollapsed }));
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
@@ -66,6 +73,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setActiveSession,
         setActiveTerminal,
         getActiveTerminal,
+        toggleSidebar,
       }}
     >
       {children}
