@@ -13,6 +13,7 @@ import { createSessionLifecycle, type PortService } from "./session-lifecycle.js
 import { DaemonManager } from "./daemon-manager.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { writePortsToEnv } from "./port-write-env.js";
+import { readEnvFile } from "./env.js";
 
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
@@ -378,7 +379,11 @@ export function apiPlugin(): Plugin {
             const exists = existsSync(yamlPath);
             const config = loadConfig(p.path);
             const yaml = exists ? readFileSync(yamlPath, "utf-8") : "";
-            json(res, 200, { success: true, config, exists, yaml });
+            // Detect _PORT variables from project .env for UI hints
+            const envPath = path.join(p.path, ".env");
+            const envVars = readEnvFile(envPath);
+            const envPorts = Object.keys(envVars).filter((k) => k.endsWith("_PORT"));
+            json(res, 200, { success: true, config, exists, yaml, envPorts });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }

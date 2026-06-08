@@ -98,6 +98,15 @@ export function writeEnv(env: Record<string, string>): string {
 }
 
 /**
+ * Discover port variable names from an .env file.
+ * Returns all keys ending with `_PORT`.
+ */
+export function discoverPortKeysFromEnv(envPath: string): string[] {
+  const env = readEnvFile(envPath);
+  return Object.keys(env).filter((k) => k.endsWith("_PORT"));
+}
+
+/**
  * Read .env file, merge updates, and write back.
  */
 export function updateEnvFile(

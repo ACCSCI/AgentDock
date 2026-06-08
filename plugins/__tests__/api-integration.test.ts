@@ -28,13 +28,11 @@ let allocatedPorts = new Set<number>();
 function createMockPortService(): PortService {
   return {
     async allocateSession(params) {
-      const ports: SessionPorts = {
-        FRONTEND_PORT: 30000 + allocatedPorts.size * 5,
-        BACKEND_PORT: 30001 + allocatedPorts.size * 5,
-        WS_PORT: 30002 + allocatedPorts.size * 5,
-        DEBUG_PORT: 30003 + allocatedPorts.size * 5,
-        PREVIEW_PORT: 30004 + allocatedPorts.size * 5,
-      };
+      const keys = params.portKeys?.length ? params.portKeys : ["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT", "DEBUG_PORT", "PREVIEW_PORT"];
+      const ports: SessionPorts = {};
+      keys.forEach((key, i) => {
+        ports[key] = 30000 + allocatedPorts.size * keys.length + i;
+      });
       for (const v of Object.values(ports)) allocatedPorts.add(v);
       return ports;
     },
@@ -640,6 +638,93 @@ describe("PATCH /api/sessions/:id", () => {
     expect(res2.status).toBe(200);
     expect(res2.data.session.name).toBe("Second");
     expect(res2.data.session.branch).toBe("agentdock/Second");
+  });
+});
+
+// ============================================================
+// EP1-EP5: env.ports 配置 — 自定义端口分配
+// ============================================================
+describe("env.ports 配置 — 自定义端口分配", () => {
+  it("EP1: 配置 2 个端口变量时只分配 2 个端口", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - FRONTEND_PORT
+    - BACKEND_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "2 Ports" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(2);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP2: 配置自定义端口变量名", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - MY_API_PORT
+    - METRICS_PORT
+    - WS_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Custom Names" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(3);
+    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP3: worktree .env 文件只包含配置的端口变量", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - FRONTEND_PORT
+    - WS_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Env Check" });
+    expect(res.status).toBe(200);
+    const envPath = path.join(res.data.session.worktreePath, ".env");
+    const envContent = readFileSync(envPath, "utf-8");
+    expect(envContent).toContain("FRONTEND_PORT=");
+    expect(envContent).toContain("WS_PORT=");
+    expect(envContent).not.toContain("BACKEND_PORT=");
+    expect(envContent).not.toContain("DEBUG_PORT=");
+    expect(envContent).not.toContain("PREVIEW_PORT=");
+  });
+
+  it("EP4: 不配置 env.ports 时仍分配默认 5 端口", async () => {
+    // Remove any existing config file
+    const configPath = path.join(projectDir, "agentdock.config.yaml");
+    if (existsSync(configPath)) rmSync(configPath);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Default" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(5);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP5: 配置 1 个端口变量只分配 1 个端口", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - SINGLE_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Single" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(1);
+    expect(ports.SINGLE_PORT).toBeGreaterThanOrEqual(20000);
   });
 });
 

@@ -4,21 +4,18 @@ import { isPortAvailable } from "./port-allocator.js";
 // Types
 // ============================================================
 
-export interface SessionPorts {
-  FRONTEND_PORT: number;
-  BACKEND_PORT: number;
-  WS_PORT: number;
-  DEBUG_PORT: number;
-  PREVIEW_PORT: number;
-}
+export type SessionPorts = Record<string, number>;
 
-export const PORT_KEYS: (keyof SessionPorts)[] = [
+export const PORT_KEYS_DEFAULT = [
   "FRONTEND_PORT",
   "BACKEND_PORT",
   "WS_PORT",
   "DEBUG_PORT",
   "PREVIEW_PORT",
 ];
+
+/** @deprecated Use PORT_KEYS_DEFAULT instead */
+export const PORT_KEYS = PORT_KEYS_DEFAULT;
 
 export const PORT_RANGE_START = 20000;
 export const PORT_RANGE_END = 65535;
@@ -98,11 +95,15 @@ export class DaemonState {
       throw new Error(`Session ${entry.sessionId} already exists`);
     }
 
+    const portKeys = Object.keys(entry.ports);
+
     // Defense-in-depth: reject if any port is already claimed by another session
-    for (const key of PORT_KEYS) {
-      if (this.allocatedPorts.has(entry.ports[key])) {
+    for (const key of portKeys) {
+      const port = entry.ports[key];
+      if (port === undefined) continue;
+      if (this.allocatedPorts.has(port)) {
         throw new Error(
-          `Port conflict: ${key}=${entry.ports[key]} already allocated (session ${entry.sessionId})`,
+          `Port conflict: ${key}=${port} already allocated (session ${entry.sessionId})`,
         );
       }
     }
@@ -114,8 +115,11 @@ export class DaemonState {
 
     this.sessions.set(session.sessionId, session);
 
-    for (const key of PORT_KEYS) {
-      this.allocatedPorts.add(session.ports[key]);
+    for (const key of portKeys) {
+      const port = session.ports[key];
+      if (port !== undefined) {
+        this.allocatedPorts.add(port);
+      }
     }
 
     this.worktreeIndex.set(session.worktreePath, session.sessionId);
@@ -125,8 +129,8 @@ export class DaemonState {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    for (const key of PORT_KEYS) {
-      this.allocatedPorts.delete(session.ports[key]);
+    for (const port of Object.values(session.ports)) {
+      this.allocatedPorts.delete(port);
     }
 
     this.worktreeIndex.delete(session.worktreePath);
@@ -140,14 +144,14 @@ export class DaemonState {
     }
 
     // Free old ports
-    for (const key of PORT_KEYS) {
-      this.allocatedPorts.delete(session.ports[key]);
+    for (const port of Object.values(session.ports)) {
+      this.allocatedPorts.delete(port);
     }
 
     // Assign new ports
     session.ports = newPorts;
-    for (const key of PORT_KEYS) {
-      this.allocatedPorts.add(newPorts[key]);
+    for (const port of Object.values(newPorts)) {
+      this.allocatedPorts.add(port);
     }
   }
 
@@ -287,13 +291,14 @@ export class DaemonState {
     const checks: Array<{ name: string; passed: boolean; detail: string }> = [];
     const sessions = this.listSessions();
 
-    // Check 1: port count matches (5 per session)
-    const expectedPortCount = sessions.length * 5;
+    // Check 1: port count matches per session
+    const expectedPerSession = sessions.map((s) => Object.keys(s.ports).length);
+    const totalExpected = expectedPerSession.reduce((a, b) => a + b, 0);
     const actualPortCount = this.allocatedPorts.size;
     checks.push({
       name: "port_count_matches",
-      passed: actualPortCount === expectedPortCount,
-      detail: `${actualPortCount} ports, ${sessions.length} sessions × 5 = ${expectedPortCount}`,
+      passed: actualPortCount === totalExpected,
+      detail: `${actualPortCount} ports, sessions have ${expectedPerSession.join("+")} = ${totalExpected}`,
     });
 
     // Check 2: worktree index consistent
@@ -313,8 +318,8 @@ export class DaemonState {
     // Check 3: no duplicate ports
     const allPorts: number[] = [];
     for (const session of sessions) {
-      for (const key of PORT_KEYS) {
-        allPorts.push(session.ports[key]);
+      for (const port of Object.values(session.ports)) {
+        if (port !== undefined) allPorts.push(port);
       }
     }
     const uniquePorts = new Set(allPorts);
