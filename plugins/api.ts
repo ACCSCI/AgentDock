@@ -4,8 +4,10 @@ import { nanoid } from "nanoid";
 import type { Plugin } from "vite";
 import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
-import { isGitRepo, removeWorktree, renameWorktree, scanDiskWorktrees } from "./worktree.js";
+import path from "node:path";
+import { isGitRepo, removeOrphanDir, removeWorktree, renameWorktree, scanDiskWorktrees, scanOrphanWorktrees } from "./worktree.js";
 import { validateProjectPath } from "./path-validation.js";
+import { createHookEngine, createHookRegistry } from "./hook-engine.js";
 import { loadConfig } from "./config.js";
 import { createSessionLifecycle, type PortService } from "./session-lifecycle.js";
 import { DaemonManager } from "./daemon-manager.js";
@@ -219,6 +221,15 @@ export function apiPlugin(): Plugin {
                     try { await _daemonClient.releaseSession(_clientId, s.id); } catch {}
                   }
                   d.delete(sessions).where(eq(sessions.id, s.id)).run();
+                }
+              }
+              // Reset stale backgroundHookStatus: if the server was killed while an
+              // async afterCreateSession hook was running, the onBackgroundHookComplete
+              // callback never fired, leaving backgroundHookStatus stuck at "running".
+              // On restart/sync, the async hook process is dead — reset to null.
+              for (const s of existingSessions) {
+                if (s.backgroundHookStatus === "running") {
+                  d.update(sessions).set({ backgroundHookStatus: null }).where(eq(sessions.id, s.id)).run();
                 }
               }
             }
@@ -595,6 +606,48 @@ export function apiPlugin(): Plugin {
           return;
         }
 
+        // POST /api/sessions/:id/retry-hooks — re-run afterCreateSession hooks for a failed session
+        const retryMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/retry-hooks$/);
+        if (retryMatch && method === "POST") {
+          const id = retryMatch[1];
+          try {
+            const d = getDb();
+            const s = d.select().from(sessions).where(eq(sessions.id, id)).get();
+            if (!s) { json(res, 404, { error: "Session not found" }); return; }
+            if (s.backgroundHookStatus !== "failed") {
+              json(res, 400, { error: "Session is not in failed state" }); return;
+            }
+            const p = d.select().from(projects).where(eq(projects.id, s.projectId)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+
+            // Set status to "running" immediately
+            d.update(sessions).set({ backgroundHookStatus: "running" }).where(eq(sessions.id, id)).run();
+
+            // Re-run hooks asynchronously (fire-and-forget)
+            const config = loadConfig(p.path);
+            const registry = createHookRegistry();
+            const engine = createHookEngine(registry);
+            registry.loadFromConfig(config.hooks as Record<string, import("./config.js").HookDefinition[]>);
+            const ctx = {
+              event: "afterCreateSession" as const,
+              sessionId: id,
+              projectId: s.projectId,
+              projectPath: p.path,
+              worktreePath: s.worktreePath,
+              payload: {},
+            };
+            engine.execute("afterCreateSession", ctx).then((report) => {
+              const status = report.success ? "completed" : "failed";
+              d.update(sessions).set({ backgroundHookStatus: status }).where(eq(sessions.id, id)).run();
+            }).catch(() => {
+              d.update(sessions).set({ backgroundHookStatus: "failed" }).where(eq(sessions.id, id)).run();
+            });
+
+            json(res, 200, { success: true });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
         // GET /api/sessions/:id/background-hook-status
         const bgStatusMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/background-hook-status$/);
         if (bgStatusMatch && method === "GET") {
@@ -710,6 +763,61 @@ export function apiPlugin(): Plugin {
             if (!terminal) { json(res, 404, { error: "Terminal not found" }); return; }
             tm.kill(terminalId);
             json(res, 200, { success: true });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // GET /api/projects/:id/orphans — list orphan directories for a project
+        const orphansMatch = pathname.match(/^\/api\/projects\/([^/]+)\/orphans$/);
+        if (orphansMatch && method === "GET") {
+          const projectId = orphansMatch[1];
+          try {
+            const d = getDb();
+            const project = d.select().from(projects).where(eq(projects.id, projectId)).get();
+            if (!project) { json(res, 404, { error: "Project not found" }); return; }
+            const orphans = scanOrphanWorktrees(project.path);
+            json(res, 200, { orphans });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // POST /api/orphans/delete — delete selected orphan directories
+        if (pathname === "/api/orphans/delete" && method === "POST") {
+          try {
+            const body = await parseBody(req);
+            const { paths } = body as { paths?: string[] };
+            if (!Array.isArray(paths) || paths.length === 0) {
+              json(res, 400, { error: "paths array is required" });
+              return;
+            }
+
+            // Validate: each path must be under a known project's .agentdock/worktrees/
+            const d = getDb();
+            const allProjects = d.select().from(projects).all();
+            const validPrefixes = allProjects.map((p) => {
+              const base = path.join(p.path, ".agentdock", "worktrees");
+              return base.replace(/\\/g, "/");
+            });
+
+            const deleted: string[] = [];
+            const failed: Array<{ path: string; error: string }> = [];
+
+            for (const p of paths) {
+              const normalized = p.replace(/\\/g, "/");
+              const isUnderProject = validPrefixes.some((prefix) => normalized.startsWith(prefix));
+              if (!isUnderProject) {
+                failed.push({ path: p, error: "Path is not under any known project's worktree directory" });
+                continue;
+              }
+              try {
+                await removeOrphanDir(p);
+                deleted.push(p);
+              } catch (err) {
+                failed.push({ path: p, error: err instanceof Error ? err.message : "Unknown error" });
+              }
+            }
+
+            json(res, 200, { deleted, failed });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }

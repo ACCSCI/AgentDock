@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useRetryHook } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
@@ -12,6 +12,7 @@ export function SessionSidebar() {
   const deleteSession = useDeleteSessionSSE();
   const renameSession = useRenameSession();
   const reassignPorts = useReassignPorts();
+  const retryHook = useRetryHook();
 
   const activeProject = projects?.find((p) => p.id === activeProjectId);
 
@@ -70,6 +71,14 @@ export function SessionSidebar() {
     }
   };
 
+  const handleRetryHooks = async (sessionId: string) => {
+    try {
+      await retryHook.mutateAsync(sessionId);
+    } catch (err) {
+      alert(`重试失败: ${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  };
+
   const prefetchTerminals = (sessionId: string) => {
     queryClient.prefetchQuery({
       queryKey: queryKeys.terminals(sessionId),
@@ -91,6 +100,7 @@ export function SessionSidebar() {
             onRename={handleRenameSession}
             onOpenInExplorer={handleOpenInExplorer}
             onReassignPorts={handleReassignPorts}
+            onRetryHooks={handleRetryHooks}
             onHover={prefetchTerminals}
           />
         ))}

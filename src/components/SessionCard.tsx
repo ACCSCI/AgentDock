@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionStep } from "../lib/queries";
+import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionStep } from "../lib/queries";
 
 const CREATE_STEP_LABELS: Record<string, string> = {
   beforeCreateSession: "前置检查",
@@ -64,6 +64,7 @@ interface SessionCardProps {
   onRename: (sessionId: string, newName: string) => void;
   onOpenInExplorer: (worktreePath: string) => void;
   onReassignPorts: (sessionId: string) => void;
+  onRetryHooks: (sessionId: string) => void;
   onHover?: (sessionId: string) => void;
 }
 
@@ -75,6 +76,7 @@ export function SessionCard({
   onRename,
   onOpenInExplorer,
   onReassignPorts,
+  onRetryHooks,
   onHover,
 }: SessionCardProps) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -225,6 +227,26 @@ export function SessionCard({
           <span className="session-name">{deleting.name}</span>
         </div>
         <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={DELETE_STEP_LABELS} />
+      </div>
+    );
+  }
+
+  // Failed state — async background hook failed, show warning + retry button
+  if (isBackgroundHookFailed(session)) {
+    return (
+      <div className="session-card session-card-failed">
+        <div className="session-card-header">
+          <span className="failed-icon">⚠</span>
+          <span className="session-name">{session.name}</span>
+        </div>
+        <div className="failed-hint">环境初始化失败</div>
+        <button
+          type="button"
+          className="failed-retry-btn"
+          onClick={(e) => { e.stopPropagation(); onRetryHooks(session.id); }}
+        >
+          重试
+        </button>
       </div>
     );
   }

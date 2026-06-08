@@ -14,7 +14,8 @@
     "test:coverage": "vitest run --coverage",
     "open-app": "bun run scripts/open-app.ts",
     "start": "bun run scripts/start.ts",
-    "kill-all": "bun run scripts/kill-all.ts"
+    "kill-all": "bun run scripts/kill-all.ts",
+    "debug": "npx tsx scripts/debug-headless.ts"
   },
   "dependencies": {
     "@ai-sdk/devtools": "^0.0.18",
