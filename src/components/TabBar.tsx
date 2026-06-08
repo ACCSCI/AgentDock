@@ -1,30 +1,31 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useDeleteProject, useProjects } from "../lib/queries";
+import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
 
 export function TabBar() {
   const navigate = useNavigate();
-  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession } = useStore();
+  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession, closedProjectIds, closeProject } = useStore();
   const { data: projects } = useProjects();
-  const deleteProject = useDeleteProject();
   const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
+  const openProjects = projects?.filter((p) => !closedProjectIds.includes(p.id)) ?? [];
 
   const handleRemoveProject = (projectId: string) => {
-    if (activeProjectId === projectId) {
-      setActiveProject(null);
-      navigate({ to: "/" });
-    }
+    closeProject(projectId);
+    try { navigate({ to: "/" }); } catch {}
   };
 
   const handleTabClick = (projectId: string) => {
+    if (closedProjectIds.includes(projectId)) {
+      closeProject(projectId);
+    }
     if (projectId === activeProjectId) {
       if (activeSessionId) {
         setActiveSession(null);
       } else {
         setActiveProject(null);
-        navigate({ to: "/" });
+        try { navigate({ to: "/" }); } catch {}
       }
     } else {
       setActiveProject(projectId);
@@ -34,7 +35,7 @@ export function TabBar() {
 
   return (
     <div className="tab-bar">
-      {(projects || []).map((project) => (
+      {openProjects.map((project) => (
         <div
           key={project.id}
           className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
