@@ -2083,6 +2083,17 @@ body {
   background: var(--color-bg-tertiary);
 }
 
+.file-picker-btn-select-dir {
+  background: var(--color-accent, #6366f1);
+  border-color: var(--color-accent, #6366f1);
+  color: #fff;
+  margin-left: 8px;
+}
+
+.file-picker-btn-select-dir:hover {
+  opacity: 0.9;
+}
+
 .file-picker-btn-confirm {
   background: var(--color-primary);
   border-color: var(--color-primary);

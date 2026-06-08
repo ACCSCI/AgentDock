@@ -163,12 +163,16 @@ export function createResourceSyncService(): ResourceSyncService {
           success: true,
         };
       }
-      // dest doesn't exist — copy the file
-      const destDir = path.dirname(destPath);
-      if (!existsSync(destDir)) {
-        mkdirSync(destDir, { recursive: true });
+      // dest doesn't exist — copy the file or directory
+      if (isDir) {
+        copyDirSync(srcPath, destPath);
+      } else {
+        const destDir = path.dirname(destPath);
+        if (!existsSync(destDir)) {
+          mkdirSync(destDir, { recursive: true });
+        }
+        copyFileSync(srcPath, destPath);
       }
-      copyFileSync(srcPath, destPath);
       return {
         source: resource.source,
         target: resource.source,
