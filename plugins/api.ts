@@ -6,14 +6,33 @@ import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
 import { isGitRepo, removeWorktree, renameWorktree, scanDiskWorktrees } from "./worktree.js";
 import { validateProjectPath } from "./path-validation.js";
-import { loadGlobalAllocatedPorts, releaseSessionPorts, reassignSessionPorts } from "./port-registry.js";
 import { loadConfig } from "./config.js";
-import { createSessionLifecycle } from "./session-lifecycle.js";
+import { createSessionLifecycle, type PortService } from "./session-lifecycle.js";
 import { DaemonManager } from "./daemon-manager.js";
-import { setPortAllocator } from "./port-pool.js";
+import type { DaemonClient } from "./daemon-client.js";
+import { writePortsToEnv } from "./port-write-env.js";
 
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
+let _daemonClient: DaemonClient | null = null;
+// Stable clientId based on cwd — reuses same ID across restarts from same directory
+let _clientId: string = "client_" + process.cwd().replace(/[^a-zA-Z0-9]/g, "_").slice(-20);
+// Disk scan throttling: only scan once per project per 30 seconds
+const _lastScanTime = new Map<string, number>();
+const SCAN_THROTTLE_MS = 30_000;
+
+/**
+ * Create a PortService adapter from the DaemonClient for session lifecycle.
+ */
+function createPortService(client: DaemonClient): PortService {
+  return {
+    allocateSession: (params) => client.allocateSession({
+      clientId: _clientId,
+      ...params,
+    }),
+    releaseSession: (sessionId) => client.releaseSession(_clientId, sessionId).then(() => {}),
+  };
+}
 
 function getDb(): DrizzleDb {
   if (!db) { db = createDb(process.cwd()); }
@@ -43,37 +62,63 @@ export function apiPlugin(): Plugin {
     configureServer(server) {
       const cwd = process.cwd();
 
-      // Initialize daemon: detect or start, register directory
+      // Initialize daemon: detect or start, register client, declare sessions
       const initDaemon = async () => {
         try {
           const manager = new DaemonManager();
           const { client, started } = await manager.init();
-          setPortAllocator(client);
+          _daemonClient = client;
 
-          // Register this directory with daemon
-          await client.register(cwd, process.pid);
-          console.log(`  ?? Registered directory: ${cwd} (PID: ${process.pid})`);
+          // Register this client with daemon
+          await client.registerClient(_clientId, process.pid, [cwd]);
+          console.log(`  Registered client: ${_clientId} (PID: ${process.pid})`);
 
           if (started) {
-            console.log(`  ?? Port daemon started on port 20000`);
+            console.log(`  Port daemon started on port 20000`);
           } else {
-            console.log(`  ?? Connected to existing port daemon`);
+            console.log(`  Connected to existing port daemon`);
           }
 
-          // Unregister on exit
-          process.on("exit", () => {
-            client.unregister(cwd, process.pid).catch(() => {});
-          });
-          process.on("SIGINT", () => {
-            client.unregister(cwd, process.pid).catch(() => {});
-            process.exit(0);
-          });
-          process.on("SIGTERM", () => {
-            client.unregister(cwd, process.pid).catch(() => {});
-            process.exit(0);
-          });
+          // Startup sync: declare existing sessions
+          try {
+            const d = getDb();
+            const allProjects = d.select().from(projects).all();
+            const declaredSessions: Array<{ sessionId: string; worktreePath: string; projectPath: string; ports?: any }> = [];
+            for (const p of allProjects) {
+              const pSessions = d.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
+              for (const s of pSessions) {
+                declaredSessions.push({
+                  sessionId: s.id,
+                  worktreePath: s.worktreePath,
+                  projectPath: p.path,
+                  ports: s.ports ? JSON.parse(s.ports) : null,
+                });
+              }
+            }
+
+            if (declaredSessions.length > 0) {
+              const syncResult = await client.declareSessions(_clientId, declaredSessions);
+              console.log(`  Startup sync: ${syncResult.results.length} sessions declared, ${syncResult.orphans.length} orphans`);
+
+              // Write ports for newly allocated sessions
+              for (const r of syncResult.results) {
+                if (r.status === "allocated" && r.ports) {
+                  const s = declaredSessions.find((d) => d.sessionId === r.sessionId);
+                  if (s) {
+                    writePortsToEnv(s.worktreePath, r.ports);
+                    // Update DB with ports
+                    d.update(sessions).set({ ports: JSON.stringify(r.ports) }).where(eq(sessions.id, r.sessionId)).run();
+                  }
+                }
+              }
+            }
+          } catch (syncErr) {
+            console.warn(`  Startup sync failed: ${syncErr instanceof Error ? syncErr.message : syncErr}`);
+          }
+
+          // Daemon detects client death via heartbeat timeout
         } catch (err) {
-          console.warn(`  ? Daemon unavailable: ${err instanceof Error ? err.message : err}`);
+          console.warn(`  Daemon unavailable: ${err instanceof Error ? err.message : err}`);
         }
       };
       initDaemon();
@@ -123,20 +168,57 @@ export function apiPlugin(): Plugin {
           try {
             const d = getDb();
             // Auto-sync: scan disk worktrees not yet in DB
+            // Also fetch ports from Daemon for sessions missing ports
+            let daemonSessions: Map<string, any> = new Map();
+            if (_daemonClient) {
+              try {
+                const list = await _daemonClient.listSessions();
+                for (const s of list) daemonSessions.set(s.sessionId, s);
+              } catch {}
+            }
+
             const allProjects = d.select().from(projects).all();
             for (const p of allProjects) {
+              // Throttle disk scan: only scan once per project per 30 seconds
+              const now = Date.now();
+              const lastScan = _lastScanTime.get(p.id) ?? 0;
+              if (now - lastScan < SCAN_THROTTLE_MS) continue;
+              _lastScanTime.set(p.id, now);
+
               const diskWts = scanDiskWorktrees(p.path);
               const existingSessions = d.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
               const existingIds = new Set(existingSessions.map((s) => s.id));
               for (const wt of diskWts) {
                 if (!existingIds.has(wt.sessionId)) {
+                  const daemonSession = daemonSessions.get(wt.sessionId);
                   d.insert(sessions).values({
                     id: wt.sessionId,
                     projectId: p.id,
                     name: `Session ${wt.sessionId}`,
                     branch: wt.branch,
                     worktreePath: wt.worktreePath,
+                    ports: daemonSession ? JSON.stringify(daemonSession.ports) : null,
                   }).run();
+                }
+              }
+              // Update existing sessions missing ports
+              for (const s of existingSessions) {
+                if (!s.ports) {
+                  const daemonSession = daemonSessions.get(s.id);
+                  if (daemonSession) {
+                    d.update(sessions).set({ ports: JSON.stringify(daemonSession.ports) }).where(eq(sessions.id, s.id)).run();
+                  }
+                }
+              }
+              // Clean up sessions whose worktree no longer exists on disk
+              const diskWtIds = new Set(diskWts.map((w) => w.sessionId));
+              for (const s of existingSessions) {
+                if (!diskWtIds.has(s.id)) {
+                  // Worktree deleted from disk — release ports and remove from DB
+                  if (_daemonClient) {
+                    try { await _daemonClient.releaseSession(_clientId, s.id); } catch {}
+                  }
+                  d.delete(sessions).where(eq(sessions.id, s.id)).run();
                 }
               }
             }
@@ -172,12 +254,21 @@ export function apiPlugin(): Plugin {
             let synced = 0;
             for (const wt of diskWts) {
               if (!existingIds.has(wt.sessionId)) {
+                let portsJson: string | null = null;
+                if (_daemonClient) {
+                  try {
+                    const list = await _daemonClient.listSessions();
+                    const daemonSession = list.find((ds) => ds.sessionId === wt.sessionId);
+                    if (daemonSession) portsJson = JSON.stringify(daemonSession.ports);
+                  } catch {}
+                }
                 d.insert(sessions).values({
                   id: wt.sessionId,
                   projectId: project.id,
                   name: `Session ${wt.sessionId}`,
                   branch: wt.branch,
                   worktreePath: wt.worktreePath,
+                  ports: portsJson,
                 }).run();
                 synced++;
               }
@@ -213,8 +304,10 @@ export function apiPlugin(): Plugin {
             const ps = d.select().from(sessions).where(eq(sessions.projectId, id)).all();
             const p = d.select().from(projects).where(eq(projects.id, id)).get();
             if (p) { for (const s of ps) { try { await removeWorktree(p.path, s.id, true); } catch {} } }
-            // Release all ports for this project's sessions
-            if (p) { for (const s of ps) { try { await releaseSessionPorts(p.path, s.id); } catch {} } }
+            // Release all ports for this project's sessions via daemon
+            if (_daemonClient) {
+              for (const s of ps) { try { await _daemonClient.releaseSession(_clientId, s.id); } catch {} }
+            }
             d.delete(sessions).where(eq(sessions.projectId, id)).run();
             d.delete(projects).where(eq(projects.id, id)).run();
             json(res, 200, { success: true });
@@ -241,10 +334,10 @@ export function apiPlugin(): Plugin {
             if (!wantsSSE) {
               // Fallback: non-SSE request (backward compatible)
               const id = nanoid(8);
-              const allProjectPaths = d.select().from(projects).all().map((proj) => proj.path);
-              const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
               const config = loadConfig(p.path);
-              const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
+              const lifecycle = createSessionLifecycle({
+                portService: _daemonClient ? createPortService(_daemonClient) : undefined,
+              });
               try {
                 const result = await lifecycle.create({
                   projectId, projectPath: p.path, sessionId: id, sessionName, baseBranch, config,
@@ -274,10 +367,10 @@ export function apiPlugin(): Plugin {
             };
 
             const id = nanoid(8);
-            const allProjectPaths = d.select().from(projects).all().map((proj) => proj.path);
-            const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
             const config = loadConfig(p.path);
-            const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
+            const lifecycle = createSessionLifecycle({
+              portService: _daemonClient ? createPortService(_daemonClient) : undefined,
+            });
 
             try {
               // Set backgroundHookStatus to "running" if any afterCreateSession hook is async
@@ -332,7 +425,9 @@ export function apiPlugin(): Plugin {
                 // (releases file locks on Windows)
                 const { terminalManager: tm } = await import("./terminal-manager.js");
                 tm.killBySession(id);
-                const lifecycle = createSessionLifecycle();
+                const lifecycle = createSessionLifecycle({
+                  portService: _daemonClient ? createPortService(_daemonClient) : undefined,
+                });
                 await lifecycle.remove({
                   sessionId: id,
                   projectPath: p.path,
@@ -360,7 +455,9 @@ export function apiPlugin(): Plugin {
                 const { terminalManager: tm } = await import("./terminal-manager.js");
                 tm.killBySession(id);
                 const config = loadConfig(p.path);
-                const lifecycle = createSessionLifecycle();
+                const lifecycle = createSessionLifecycle({
+                  portService: _daemonClient ? createPortService(_daemonClient) : undefined,
+                });
                 await lifecycle.remove({
                   sessionId: id,
                   projectPath: p.path,
@@ -413,9 +510,10 @@ export function apiPlugin(): Plugin {
             if (!s) { json(res, 404, { error: "Session not found" }); return; }
             const p = d.select().from(projects).where(eq(projects.id, s.projectId)).get();
             if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const allProjectPaths = d.select().from(projects).all().map((proj) => proj.path);
-            const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
-            const ports = await reassignSessionPorts(p.path, id, s.worktreePath, globalExcluded);
+
+            if (!_daemonClient) { json(res, 500, { error: "Daemon not available" }); return; }
+            const ports = await _daemonClient.reassignSession(_clientId, id);
+            writePortsToEnv(s.worktreePath, ports);
             d.update(sessions).set({ ports: JSON.stringify(ports) }).where(eq(sessions.id, id)).run();
             const updated = d.select().from(sessions).where(eq(sessions.id, id)).get();
             json(res, 200, { success: true, session: { ...updated, ports } });

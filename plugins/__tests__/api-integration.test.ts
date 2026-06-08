@@ -12,15 +12,36 @@ import { eq } from "drizzle-orm";
 // and constructing a minimal HTTP test server.
 import { isGitRepo, renameWorktree } from "../worktree.js";
 import { loadConfig } from "../config.js";
-import { createSessionLifecycle } from "../session-lifecycle.js";
-import { loadGlobalAllocatedPorts } from "../port-registry.js";
+import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
 import { nanoid } from "nanoid";
+import type { SessionPorts } from "../daemon-state.js";
 
 let projectDir: string;
 let db: DrizzleDb;
 let dbDir: string;
 let server: ReturnType<typeof createServer>;
 let baseUrl: string;
+
+// Simple in-memory port service mock for integration tests
+let allocatedPorts = new Set<number>();
+function createMockPortService(): PortService {
+  return {
+    async allocateSession(params) {
+      const ports: SessionPorts = {
+        FRONTEND_PORT: 30000 + allocatedPorts.size * 5,
+        BACKEND_PORT: 30001 + allocatedPorts.size * 5,
+        WS_PORT: 30002 + allocatedPorts.size * 5,
+        DEBUG_PORT: 30003 + allocatedPorts.size * 5,
+        PREVIEW_PORT: 30004 + allocatedPorts.size * 5,
+      };
+      for (const v of Object.values(ports)) allocatedPorts.add(v);
+      return ports;
+    },
+    async releaseSession(_sessionId) {
+      // no-op for tests
+    },
+  };
+}
 
 function initGitRepo(dir: string) {
   execSync("git init", { cwd: dir, stdio: "pipe" });
@@ -66,10 +87,8 @@ function startTestServer(port: number): Promise<void> {
           if (!p) { json(res, 404, { error: "Project not found" }); return; }
           if (!isGitRepo(p.path)) { json(res, 400, { error: "Not a git repository" }); return; }
           const id = nanoid(8);
-          const allProjectPaths = db.select().from(projects).all().map((proj) => proj.path);
-          const globalExcluded = loadGlobalAllocatedPorts(allProjectPaths);
           const config = loadConfig(p.path);
-          const lifecycle = createSessionLifecycle({ globalExcludedPorts: globalExcluded });
+          const lifecycle = createSessionLifecycle({ portService: createMockPortService() });
           const result = await lifecycle.create({
             projectId, projectPath: p.path, sessionId: id, sessionName, baseBranch, config,
           });

@@ -5,8 +5,9 @@ import path from "node:path";
 import os from "node:os";
 import process from "node:process";
 import type { AgentDockConfig } from "../config.js";
-import { createSessionLifecycle } from "../session-lifecycle.js";
+import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
 import { getWorktreePath } from "../worktree.js";
+import type { SessionPorts } from "../daemon-state.js";
 
 const isWin = process.platform === "win32";
 function echoCmd(msg: string) { return `echo ${msg}`; }
@@ -16,6 +17,27 @@ function sleepCmd(seconds: number) {
 }
 
 let projectDir: string;
+
+// Mock port service for tests
+let portCounter = 0;
+function mockPortService(): PortService {
+  return {
+    async allocateSession(_params) {
+      const base = 40000 + portCounter * 5;
+      portCounter++;
+      return {
+        FRONTEND_PORT: base,
+        BACKEND_PORT: base + 1,
+        WS_PORT: base + 2,
+        DEBUG_PORT: base + 3,
+        PREVIEW_PORT: base + 4,
+      };
+    },
+    async releaseSession(_sessionId) {
+      // no-op
+    },
+  };
+}
 
 function initGitRepo(dir: string) {
   execSync("git init", { cwd: dir, stdio: "pipe" });
@@ -38,6 +60,7 @@ beforeEach(() => {
   projectDir = path.join(os.tmpdir(), `ad-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(projectDir, { recursive: true });
   initGitRepo(projectDir);
+  portCounter = 0;
 });
 
 afterEach(() => {
@@ -51,7 +74,7 @@ afterEach(() => {
 // ============================================================
 describe("create — 正常流程", () => {
   it("D1: 创建 session 返回完整结果", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -69,7 +92,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D2: worktree 在磁盘上被创建", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -83,7 +106,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D3: branch 命名规则", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -95,7 +118,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D4: worktreePath 命名规则", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -107,7 +130,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D5: 端口被分配且写入 .env", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -133,7 +156,7 @@ describe("create — 正常流程", () => {
     const config = defaultConfig();
     config.resources.sync = [{ source: ".env", strategy: "overwrite", skipIfMissing: true }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -150,7 +173,7 @@ describe("create — 正常流程", () => {
     const config = defaultConfig();
     config.resources.sync = [{ source: "dev.db", strategy: "overwrite", skipIfMissing: true }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -166,7 +189,7 @@ describe("create — 正常流程", () => {
     const config = defaultConfig();
     config.hooks.afterCreateSession = [{ run: echoCmd("done"), required: false, timeout: 30000, cwd: "worktree" }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -185,7 +208,7 @@ describe("create — 正常流程", () => {
     const config = defaultConfig();
     config.hooks.beforeCreateSession = [{ run: echoCmd("ready"), required: false, timeout: 30000, cwd: "project" }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -199,7 +222,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D10: 无 config 时 pipeline 正常完成", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -216,7 +239,7 @@ describe("create — 正常流程", () => {
   });
 
   it("D11: duration 记录正数", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -236,7 +259,7 @@ describe("create — 失败与 rollback", () => {
     const config = defaultConfig();
     config.hooks.beforeCreateSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
       lifecycle.create({
         projectId: "proj1",
@@ -254,7 +277,7 @@ describe("create — 失败与 rollback", () => {
     const config = defaultConfig();
     config.hooks.afterCreateSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
       lifecycle.create({
         projectId: "proj1",
@@ -272,7 +295,7 @@ describe("create — 失败与 rollback", () => {
     const config = defaultConfig();
     config.hooks.afterCreateSession = [{ run: exitCmd(1), required: false, timeout: 30000, cwd: "worktree" }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -290,7 +313,7 @@ describe("create — 失败与 rollback", () => {
     const config = defaultConfig();
     config.resources.sync = [{ source: "dev.db", strategy: "overwrite", skipIfMissing: false }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
       lifecycle.create({
         projectId: "proj1",
@@ -308,7 +331,7 @@ describe("create — 失败与 rollback", () => {
     const config = defaultConfig();
     config.resources.sync = [{ source: "dev.db", strategy: "overwrite", skipIfMissing: false }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     // First attempt fails
     await expect(
       lifecycle.create({
@@ -358,7 +381,7 @@ describe("create — 执行顺序验证", () => {
       required: false, timeout: 30000, cwd: "worktree",
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -391,7 +414,7 @@ describe("create — 执行顺序验证", () => {
       required: false, timeout: 30000, cwd: "worktree",
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -412,7 +435,7 @@ describe("create — 执行顺序验证", () => {
 // ============================================================
 describe("remove — 正常流程", () => {
   it("D19: 删除 session 清理 worktree", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -432,7 +455,7 @@ describe("remove — 正常流程", () => {
   });
 
   it("D20: 删除 session 释放端口后可重新创建", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -461,7 +484,7 @@ describe("remove — 正常流程", () => {
   });
 
   it("D21: beforeDeleteSession hook 执行", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -485,7 +508,7 @@ describe("remove — 正常流程", () => {
   });
 
   it("D22: afterDeleteSession hook 执行", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -509,7 +532,7 @@ describe("remove — 正常流程", () => {
   });
 
   it("D23: 无 config 时 remove 正常完成", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -529,7 +552,7 @@ describe("remove — 正常流程", () => {
   });
 
   it("D24: remove 返回 success=true", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -554,7 +577,7 @@ describe("remove — 正常流程", () => {
 // ============================================================
 describe("remove — hook 失败", () => {
   it("D25: beforeDeleteSession required hook 失败中断删除", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -579,7 +602,7 @@ describe("remove — hook 失败", () => {
   });
 
   it("D26: afterDeleteSession hook 失败不影响结果", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -604,7 +627,7 @@ describe("remove — hook 失败", () => {
   });
 
   it("D27: beforeDeleteSession optional hook 失败继续删除", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -641,7 +664,7 @@ describe("create — async afterCreateSession", () => {
       async: true,
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const start = Date.now();
     const result = await lifecycle.create({
       projectId: "proj1",
@@ -674,7 +697,7 @@ describe("create — async afterCreateSession", () => {
       async: true,
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -700,7 +723,7 @@ describe("create — async afterCreateSession", () => {
     }];
 
     let completedReport: any = null;
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -729,7 +752,7 @@ describe("create — async afterCreateSession", () => {
     }];
 
     let completedReport: any = null;
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -759,7 +782,7 @@ describe("create — async afterCreateSession", () => {
       async: true,
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -792,7 +815,7 @@ describe("create — async afterCreateSession", () => {
       async: true,
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
       lifecycle.create({
         projectId: "proj1",
@@ -806,7 +829,7 @@ describe("create — async afterCreateSession", () => {
   });
 
   it("D34: 无 afterCreateSession hook 时 backgroundHookPromise 立即 resolve", async () => {
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
@@ -830,7 +853,7 @@ describe("create — async afterCreateSession", () => {
       async: false,
     }];
 
-    const lifecycle = createSessionLifecycle();
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
       projectPath: projectDir,
