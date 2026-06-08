@@ -481,7 +481,10 @@ export function apiPlugin(): Plugin {
             const untracked = new Set(raw.trim().split("\n").filter(Boolean));
             const raw2 = execSync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8" });
             const modified = new Set(raw2.trim().split("\n").filter(Boolean));
-            const entries = readdirSync(targetDir, { withFileTypes: true }).map((entry) => {
+            const entries = readdirSync(targetDir, { withFileTypes: true }).filter((entry) => {
+              if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".agentdock") return false;
+              return true;
+            }).map((entry) => {
               const fullPath = path.join(targetDir, entry.name);
               const relPath = path.relative(p.path, fullPath).replace(/\\/g, "/");
               const isDir = entry.isDirectory();
@@ -491,7 +494,7 @@ export function apiPlugin(): Plugin {
               return { name: entry.name, path: relPath, isDir, status };
             });
             entries.sort((a, b) => { if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; return a.name.localeCompare(b.name); });
-            json(res, 200, { entries, currentPath: path.relative(p.path, targetDir).replace(/\\/g, "/") });
+            json(res, 200, { success: true, entries, currentPath: path.relative(p.path, targetDir).replace(/\\/g, "/") });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }

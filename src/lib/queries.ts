@@ -653,8 +653,8 @@ export function useSaveConfig(projectId: string) {
 export interface FileEntry {
   name: string;
   path: string;
-  type: "file" | "dir";
-  tracked: boolean;
+  isDir: boolean;
+  status: "untracked" | "modified" | "tracked";
 }
 
 // GET /api/projects/:id/files?path=...
