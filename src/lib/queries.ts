@@ -10,6 +10,8 @@ export interface ProjectData {
   sessions: SessionListItem[];
 }
 
+export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
+
 export interface SessionPorts {
   FRONTEND_PORT: number;
   BACKEND_PORT: number;
@@ -380,6 +382,25 @@ export function useRenameSession() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data.session as SessionData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// PUT /api/sessions/reorder — reorder sessions for a project
+export function useReorderSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, sessionIds }: { projectId: string; sessionIds: string[] }) => {
+      const res = await fetch("/api/sessions/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, sessionIds }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Plugin } from "vite";
 import { type DrizzleDb, createDb } from "./db/index.js";
@@ -330,7 +330,7 @@ export function apiPlugin(): Plugin {
             const refreshed = d.select().from(projects).all();
             const result = refreshed.map((p) => ({
               ...p,
-              sessions: d.select().from(sessions).where(eq(sessions.projectId, p.id)).all().map((s) => {
+              sessions: d.select().from(sessions).where(eq(sessions.projectId, p.id)).orderBy(asc(sessions.sortOrder)).all().map((s) => {
                 const daemonSession = daemonSessions.get(s.id);
                 const status = getSessionUiStatus(s.id, daemonSession?.ownerClientId ?? null);
                 return {
@@ -776,6 +776,34 @@ export function apiPlugin(): Plugin {
             } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
             return;
           }
+        }
+
+        // PUT /api/sessions/reorder — reorder sessions for a project
+        if (pathname === "/api/sessions/reorder" && method === "PUT") {
+          try {
+            const body = await parseBody(req);
+            const { projectId, sessionIds } = body as { projectId?: string; sessionIds?: string[] };
+            if (!projectId || !Array.isArray(sessionIds) || sessionIds.length === 0) {
+              json(res, 400, { error: "projectId and sessionIds array are required" }); return;
+            }
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, projectId)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const projectSessions = d.select().from(sessions).where(eq(sessions.projectId, projectId)).all();
+            const projectSessionIds = new Set(projectSessions.map((s) => s.id));
+            for (const sid of sessionIds) {
+              if (!projectSessionIds.has(sid)) {
+                json(res, 400, { error: `Session ${sid} not found in project` }); return;
+              }
+            }
+            d.transaction((tx) => {
+              for (let i = 0; i < sessionIds.length; i++) {
+                tx.update(sessions).set({ sortOrder: i + 1 }).where(eq(sessions.id, sessionIds[i])).run();
+              }
+            });
+            json(res, 200, { success: true });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
         }
 
         // POST /api/sessions/:id/reassign-ports

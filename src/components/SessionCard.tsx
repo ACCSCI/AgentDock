@@ -66,6 +66,8 @@ interface SessionCardProps {
   onReassignPorts: (sessionId: string) => void;
   onRetryHooks: (sessionId: string) => void;
   onHover?: (sessionId: string) => void;
+  onDragStart?: (sessionId: string) => void;
+  onDragEnd?: () => void;
 }
 
 export function SessionCard({
@@ -78,6 +80,8 @@ export function SessionCard({
   onReassignPorts,
   onRetryHooks,
   onHover,
+  onDragStart,
+  onDragEnd,
 }: SessionCardProps) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -280,6 +284,13 @@ export function SessionCard({
     <>
       <div
         className={`session-card ${isActive ? "session-card-active" : ""}`}
+        draggable={!!onDragStart}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", session.id);
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart?.(session.id);
+        }}
+        onDragEnd={() => onDragEnd?.()}
         onClick={() => onSelect(session.id)}
         onMouseEnter={() => onHover?.(session.id)}
         onContextMenu={handleContextMenu}
