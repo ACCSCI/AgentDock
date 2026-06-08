@@ -869,4 +869,54 @@ describe("create — async afterCreateSession", () => {
     const bgReport = await result.backgroundHookPromise;
     expect(bgReport).toBe(afterReport);
   });
+
+  // --- S: backgroundHookStatus crash recovery ---
+
+  it("S1: async hook 运行中中断后，onWorktreeReady 已被调用但 backgroundHookPromise 未完成", { timeout: 15000 }, async () => {
+    const config = defaultConfig();
+    config.hooks.afterCreateSession = [{
+      run: sleepCmd(3), // 3秒模拟长时间 hook
+      required: false,
+      timeout: 30000,
+      cwd: "worktree",
+      async: true,
+    }];
+
+    let worktreeReadyCalled = false;
+    let worktreeReadyPath = "";
+    let worktreeReadyBranch = "";
+
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
+    const result = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess-crash",
+      sessionName: "CrashTest",
+      config,
+      onWorktreeReady: (wtPath, branch) => {
+        worktreeReadyCalled = true;
+        worktreeReadyPath = wtPath;
+        worktreeReadyBranch = branch;
+      },
+    });
+
+    // onWorktreeReady 应该在 createWorktree 之后立即被调用
+    expect(worktreeReadyCalled).toBe(true);
+    expect(worktreeReadyBranch).toBe("agentdock/sess-crash");
+
+    // worktree 应该存在于磁盘
+    expect(existsSync(worktreeReadyPath)).toBe(true);
+
+    // backgroundHookPromise 不应该完成（hook 还在 sleep）
+    let promiseResolved = false;
+    result.backgroundHookPromise.then(() => { promiseResolved = true; });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(promiseResolved).toBe(false);
+
+    // 模拟"服务器被杀"：不等待 backgroundHookPromise
+    // 在真实场景中，此时 DB 中 backgroundHookStatus = "running"
+
+    // 等待 background hook 完成以便 afterEach 清理目录
+    await result.backgroundHookPromise;
+  });
 });

@@ -528,3 +528,66 @@ export function useBackgroundHookStatus(sessionId: string | null, enabled = true
 export function isBackgroundHookRunning(s: SessionData | CreatingSession | DeletingSession): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
 }
+
+/** Check if a session's async background hook has failed */
+export function isBackgroundHookFailed(s: SessionData | CreatingSession | DeletingSession): boolean {
+  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
+}
+
+// POST /api/sessions/:id/retry-hooks
+export function useRetryHook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      const res = await fetch(`/api/sessions/${sessionId}/retry-hooks`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to retry hooks");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// --- Orphan worktree types & hooks ---
+
+export interface OrphanDir {
+  sessionId: string;
+  worktreePath: string;
+  reason: "no-git-file" | "empty-dir";
+}
+
+// GET /api/projects/:id/orphans
+export function useOrphans(projectId: string | null) {
+  return useQuery({
+    queryKey: ["orphans", projectId],
+    queryFn: async (): Promise<OrphanDir[]> => {
+      const res = await fetch(`/api/projects/${projectId}/orphans`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch orphans");
+      return data.orphans;
+    },
+    enabled: !!projectId,
+  });
+}
+
+// POST /api/orphans/delete
+export function useDeleteOrphans() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (paths: string[]) => {
+      const res = await fetch("/api/orphans/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete orphans");
+      return data as { deleted: string[]; failed: Array<{ path: string; error: string }> };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orphans"] });
+    },
+  });
+}

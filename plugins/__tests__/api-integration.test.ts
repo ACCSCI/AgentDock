@@ -10,7 +10,8 @@ import { eq } from "drizzle-orm";
 
 // We test the handler logic by importing the pieces directly
 // and constructing a minimal HTTP test server.
-import { isGitRepo, renameWorktree } from "../worktree.js";
+import { isGitRepo, renameWorktree, scanDiskWorktrees } from "../worktree.js";
+import { createHookEngine, createHookRegistry } from "../hook-engine.js";
 import { loadConfig } from "../config.js";
 import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
 import { nanoid } from "nanoid";
@@ -145,6 +146,89 @@ function startTestServer(port: number): Promise<void> {
           }).where(eq(sessions.id, id)).run();
           const updated = db.select().from(sessions).where(eq(sessions.id, id)).get();
           json(res, 200, { success: true, session: updated });
+        } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+        return;
+      }
+
+      // GET /api/projects — with auto-sync (simplified from api.ts)
+      if (pathname === "/api/projects" && method === "GET") {
+        try {
+          const allProjects = db.select().from(projects).all();
+          for (const p of allProjects) {
+            const diskWts = scanDiskWorktrees(p.path);
+            const existingSessions = db.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
+            const existingIds = new Set(existingSessions.map((s) => s.id));
+            // Add missing sessions from disk
+            for (const wt of diskWts) {
+              if (!existingIds.has(wt.sessionId)) {
+                db.insert(sessions).values({
+                  id: wt.sessionId, projectId: p.id, name: `Session ${wt.sessionId}`,
+                  branch: wt.branch, worktreePath: wt.worktreePath,
+                }).run();
+              }
+            }
+            // Clean up sessions whose worktree no longer exists
+            const diskWtIds = new Set(diskWts.map((w) => w.sessionId));
+            for (const s of existingSessions) {
+              if (!diskWtIds.has(s.id)) {
+                db.delete(sessions).where(eq(sessions.id, s.id)).run();
+              }
+            }
+            // Reset stale backgroundHookStatus
+            for (const s of existingSessions) {
+              if (s.backgroundHookStatus === "running") {
+                db.update(sessions).set({ backgroundHookStatus: null }).where(eq(sessions.id, s.id)).run();
+              }
+            }
+          }
+          const result = db.select().from(projects).all().map((p) => ({
+            ...p,
+            sessions: db.select().from(sessions).where(eq(sessions.projectId, p.id)).all().map((s) => ({
+              ...s, ports: s.ports ? JSON.parse(s.ports) : null,
+            })),
+          }));
+          json(res, 200, { success: true, projects: result });
+        } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+        return;
+      }
+
+      // POST /api/sessions/:id/retry-hooks — re-run afterCreateSession hooks
+      const retryMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/retry-hooks$/);
+      if (retryMatch && method === "POST") {
+        const id = retryMatch[1];
+        try {
+          const s = db.select().from(sessions).where(eq(sessions.id, id)).get();
+          if (!s) { json(res, 404, { error: "Session not found" }); return; }
+          if (s.backgroundHookStatus !== "failed") {
+            json(res, 400, { error: "Session is not in failed state" }); return;
+          }
+          const p = db.select().from(projects).where(eq(projects.id, s.projectId)).get();
+          if (!p) { json(res, 404, { error: "Project not found" }); return; }
+
+          // Set status to "running" immediately
+          db.update(sessions).set({ backgroundHookStatus: "running" }).where(eq(sessions.id, id)).run();
+
+          // Re-run hooks asynchronously
+          const config = loadConfig(p.path);
+          const registry = createHookRegistry();
+          const engine = createHookEngine(registry);
+          registry.loadFromConfig(config.hooks as any);
+          const ctx = {
+            event: "afterCreateSession" as const,
+            sessionId: id,
+            projectId: s.projectId,
+            projectPath: p.path,
+            worktreePath: s.worktreePath,
+            payload: {},
+          };
+          engine.execute("afterCreateSession", ctx).then((report) => {
+            const status = report.success ? "completed" : "failed";
+            db.update(sessions).set({ backgroundHookStatus: status }).where(eq(sessions.id, id)).run();
+          }).catch(() => {
+            db.update(sessions).set({ backgroundHookStatus: "failed" }).where(eq(sessions.id, id)).run();
+          });
+
+          json(res, 200, { success: true });
         } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
         return;
       }
@@ -556,5 +640,122 @@ describe("PATCH /api/sessions/:id", () => {
     expect(res2.status).toBe(200);
     expect(res2.data.session.name).toBe("Second");
     expect(res2.data.session.branch).toBe("agentdock/Second");
+  });
+});
+
+// --- S: backgroundHookStatus crash recovery ---
+
+describe("S: backgroundHookStatus restart recovery", () => {
+  it("S2: 重启后 auto-sync 重置卡死的 backgroundHookStatus", async () => {
+    // 创建一个正常的 session
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Test" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 模拟服务器在 async hook 运行中被杀：
+    // 直接在 DB 中将 backgroundHookStatus 设为 "running"
+    db.update(sessions).set({ backgroundHookStatus: "running" }).where(eq(sessions.id, sid)).run();
+
+    // 验证当前状态确实是 "running"
+    const before = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(before?.backgroundHookStatus).toBe("running");
+
+    // 调用 GET /api/projects（触发 auto-sync）
+    const listRes = await api("GET", "/api/projects");
+    expect(listRes.status).toBe(200);
+
+    // 验证 backgroundHookStatus 被重置为 null
+    const after = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(after?.backgroundHookStatus).toBeNull();
+  });
+
+  it("S3: 没有 async hook 的 session 不受影响", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Normal" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 验证初始状态为 null
+    const before = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(before?.backgroundHookStatus).toBeNull();
+
+    // 调用 GET /api/projects（触发 auto-sync）
+    await api("GET", "/api/projects");
+
+    // 状态仍为 null
+    const after = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(after?.backgroundHookStatus).toBeNull();
+  });
+
+  it("S4: 已完成的 async hook session 不被重置", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Done" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 模拟 async hook 已完成
+    db.update(sessions).set({ backgroundHookStatus: "completed" }).where(eq(sessions.id, sid)).run();
+
+    // 调用 GET /api/projects（触发 auto-sync）
+    await api("GET", "/api/projects");
+
+    // "completed" 不应被重置（只重置 "running"）
+    const after = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(after?.backgroundHookStatus).toBe("completed");
+  });
+
+  it("S5: 失败的 async hook session 不被重置", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Failed" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 模拟 async hook 失败
+    db.update(sessions).set({ backgroundHookStatus: "failed" }).where(eq(sessions.id, sid)).run();
+
+    // 调用 GET /api/projects（触发 auto-sync）
+    await api("GET", "/api/projects");
+
+    // "failed" 不应被重置
+    const after = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(after?.backgroundHookStatus).toBe("failed");
+  });
+});
+
+// --- R: retry-hooks ---
+
+describe("R: POST /api/sessions/:id/retry-hooks", () => {
+  it("R6: 正常重试 failed hook", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Retry" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 模拟 hook 失败
+    db.update(sessions).set({ backgroundHookStatus: "failed" }).where(eq(sessions.id, sid)).run();
+
+    // 重试
+    const retryRes = await api("POST", `/api/sessions/${sid}/retry-hooks`);
+    expect(retryRes.status).toBe(200);
+    expect(retryRes.data.success).toBe(true);
+
+    // 等待异步 hook 完成（测试项目无 hook，瞬间完成）
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 最终状态应为 "completed"（空 hook 报告 success=true）
+    const after = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(after?.backgroundHookStatus).toBe("completed");
+  });
+
+  it("R7: 非 failed 状态重试返回 400", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Normal" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    // 状态为 null，不是 failed
+    const retryRes = await api("POST", `/api/sessions/${sid}/retry-hooks`);
+    expect(retryRes.status).toBe(400);
+    expect(retryRes.data.error).toContain("not in failed state");
+  });
+
+  it("R8: 不存在的 session 重试返回 404", async () => {
+    const retryRes = await api("POST", "/api/sessions/nonexistent/retry-hooks");
+    expect(retryRes.status).toBe(404);
   });
 });

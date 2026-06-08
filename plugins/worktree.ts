@@ -357,3 +357,56 @@ export function scanDiskWorktrees(projectPath: string): DiskWorktree[] {
 
   return result;
 }
+
+export interface OrphanDir {
+  sessionId: string;
+  worktreePath: string;
+  reason: "no-git-file" | "empty-dir";
+}
+
+/**
+ * Scan .agentdock/worktrees/ for directories that are NOT valid git worktrees
+ * (i.e. missing .git file). These are orphaned residual directories.
+ */
+export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
+  const baseDir = getWorktreeBase(projectPath);
+  if (!existsSync(baseDir)) return [];
+
+  const entries = readdirSync(baseDir, { withFileTypes: true });
+  const result: OrphanDir[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const sessionId = entry.name;
+    const wtPath = path.join(baseDir, sessionId);
+    const gitFile = path.join(wtPath, ".git");
+
+    // Skip valid worktrees (has .git file)
+    if (existsSync(gitFile)) continue;
+
+    // Check if directory is empty
+    let dirContents: string[] = [];
+    try {
+      dirContents = readdirSync(wtPath);
+    } catch {
+      continue;
+    }
+    const reason: OrphanDir["reason"] = dirContents.length === 0 ? "empty-dir" : "no-git-file";
+
+    result.push({ sessionId, worktreePath: wtPath, reason });
+  }
+
+  return result;
+}
+
+/**
+ * Remove an orphan directory. Kills any processes under the path first,
+ * then deletes the directory recursively. Does NOT call git commands
+ * since these are not registered git worktrees.
+ */
+export async function removeOrphanDir(dirPath: string): Promise<void> {
+  if (!existsSync(dirPath)) return;
+
+  await killProcessesUnderPath(dirPath);
+  await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}

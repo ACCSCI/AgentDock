@@ -1,4 +1,5 @@
 import { Outlet, createFileRoute } from "@tanstack/react-router";
+import { IconSidebar } from "../components/IconSidebar";
 import { SessionSidebar } from "../components/SessionSidebar";
 import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
@@ -14,6 +15,7 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
+      {project && <IconSidebar />}
       {project && <SessionSidebar />}
       <div className="app-workspace">
         <Outlet />
