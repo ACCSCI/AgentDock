@@ -409,6 +409,92 @@ export function apiPlugin(): Plugin {
           return;
         }
 
+        // GET /api/projects/:id/config — read agentdock.config.yaml
+        const configReadMatch = pathname.match(/^\/api\/projects\/([^/]+)\/config$/);
+        if (configReadMatch && method === "GET") {
+          const id = configReadMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const { loadConfig } = await import("./config.js");
+            const { existsSync, readFileSync } = await import("node:fs");
+            const yamlPath = path.join(p.path, "agentdock.config.yaml");
+            const exists = existsSync(yamlPath);
+            const config = loadConfig(p.path);
+            const yaml = exists ? readFileSync(yamlPath, "utf-8") : "";
+            json(res, 200, { success: true, config, exists, yaml });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // POST /api/projects/:id/config — write agentdock.config.yaml
+        if (configReadMatch && method === "POST") {
+          const id = configReadMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const body = await parseBody(req);
+            const { AgentDockConfigSchema } = await import("./config.js");
+            const parsed = AgentDockConfigSchema.parse(body.config);
+            const { stringify, Scalar } = await import("yaml");
+            const hooksForYaml: Record<string, unknown[]> = {};
+            if (parsed.hooks) {
+              for (const event of Object.keys(parsed.hooks)) {
+                hooksForYaml[event] = parsed.hooks[event].map((h) => {
+                  const s = new Scalar(h.run);
+                  s.type = Scalar.QUOTE_DOUBLE;
+                  return { ...h, run: s };
+                });
+              }
+            }
+            const yamlContent = stringify({ ...parsed, hooks: hooksForYaml }, { indent: 2 });
+            const { writeFileSync } = await import("node:fs");
+            const yamlPath = path.join(p.path, "agentdock.config.yaml");
+            writeFileSync(yamlPath, yamlContent, "utf-8");
+            json(res, 200, { success: true, yaml: yamlContent });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // GET /api/projects/:id/files?path= — list files with git-tracked status
+        const filesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/files$/);
+        if (filesMatch && method === "GET") {
+          const id = filesMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const { execSync } = await import("node:child_process");
+            const { readdirSync, statSync, existsSync } = await import("node:fs");
+            const queryPath = url.searchParams.get("path") || "";
+            const targetDir = path.resolve(p.path, queryPath);
+            if (!targetDir.startsWith(path.resolve(p.path))) {
+              json(res, 403, { error: "Path is outside project root" }); return;
+            }
+            if (!existsSync(targetDir)) {
+              json(res, 404, { error: "Path does not exist" }); return;
+            }
+            const raw = execSync("git ls-files --others --exclude-standard --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8" });
+            const untracked = new Set(raw.trim().split("\n").filter(Boolean));
+            const raw2 = execSync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8" });
+            const modified = new Set(raw2.trim().split("\n").filter(Boolean));
+            const entries = readdirSync(targetDir, { withFileTypes: true }).map((entry) => {
+              const fullPath = path.join(targetDir, entry.name);
+              const relPath = path.relative(p.path, fullPath).replace(/\\/g, "/");
+              const isDir = entry.isDirectory();
+              let status: "untracked" | "modified" | "tracked" = "tracked";
+              if (untracked.has(relPath) || untracked.has(relPath + "/")) status = "untracked";
+              else if (modified.has(relPath)) status = "modified";
+              return { name: entry.name, path: relPath, isDir, status };
+            });
+            entries.sort((a, b) => { if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; return a.name.localeCompare(b.name); });
+            json(res, 200, { entries, currentPath: path.relative(p.path, targetDir).replace(/\\/g, "/") });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
         // GET /api/browse-dirs?path=... — list subdirectories for project picker
         if (pathname === "/api/browse-dirs" && method === "GET") {
           const url = new URL(req.url!, `http://${req.headers.host}`);
