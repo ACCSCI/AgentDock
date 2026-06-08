@@ -30,7 +30,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   }, [open]);
 
   const handleNavigate = useCallback((entry: FileEntry) => {
-    if (entry.type === "dir") {
+    if (entry.isDir) {
       setCurrentPath(entry.path);
       setSelected(null);
       setSearch("");
@@ -115,15 +115,15 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
                 className={`file-picker-entry ${selected === entry.path ? "file-picker-entry-selected" : ""}`}
                 onClick={() => handleNavigate(entry)}
                 onDoubleClick={() => {
-                  if (entry.type === "file") onConfirm(entry.path);
+                  if (!entry.isDir) onConfirm(entry.path);
                 }}
               >
                 <span className="file-picker-entry-icon">
-                  {entry.type === "dir" ? "📁" : "📄"}
+                  {entry.isDir ? "📁" : "📄"}
                 </span>
                 <span className="file-picker-entry-name">{entry.name}</span>
-                <span className={`file-picker-git-badge ${entry.tracked ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
-                  {entry.tracked ? "已跟踪" : "未跟踪"}
+                <span className={`file-picker-git-badge ${entry.status !== "untracked" ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
+                  {entry.status !== "untracked" ? "已跟踪" : "未跟踪"}
                 </span>
               </div>
             ))

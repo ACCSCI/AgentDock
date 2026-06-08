@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useRetryHook } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
@@ -14,6 +14,7 @@ export function SessionSidebar() {
   const renameSession = useRenameSession();
   const reassignPorts = useReassignPorts();
   const retryHook = useRetryHook();
+  const [showForeign, setShowForeign] = useState(false);
 
   const activeProject = projects?.find((p) => p.id === activeProjectId);
 
@@ -124,6 +125,16 @@ export function SessionSidebar() {
     });
   };
 
+  const visibleSessions = activeProject.sessions.filter((session) => session.status !== "foreign");
+  const foreignSessions = activeProject.sessions.filter((session) => session.status === "foreign");
+
+  useEffect(() => {
+    if (activeSessionId && foreignSessions.some((session) => session.id === activeSessionId)) {
+      const fallback = visibleSessions.find((session) => session.canSelect !== false)?.id ?? null;
+      setActiveSession(fallback);
+    }
+  }, [activeSessionId, foreignSessions, visibleSessions, setActiveSession]);
+
   if (sidebarCollapsed) {
     return (
       <div className="session-sidebar session-sidebar-collapsed">
@@ -153,7 +164,7 @@ export function SessionSidebar() {
         </button>
       </div>
       <div className="session-list">
-        {activeProject.sessions.map((session) => (
+        {visibleSessions.map((session) => (
           <SessionCard
             key={session.id}
             session={session}
@@ -167,6 +178,31 @@ export function SessionSidebar() {
             onHover={prefetchTerminals}
           />
         ))}
+        {foreignSessions.length > 0 && (
+          <div className="session-foreign-group">
+            <button type="button" className="session-foreign-toggle" onClick={() => setShowForeign((v) => !v)}>
+              {showForeign ? "▼" : "▶"} Foreign Sessions ({foreignSessions.length})
+            </button>
+            {showForeign && (
+              <div className="session-foreign-list">
+                {foreignSessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    isActive={false}
+                    onSelect={setActiveSession}
+                    onDelete={handleDeleteSession}
+                    onRename={handleRenameSession}
+                    onOpenInExplorer={handleOpenInExplorer}
+                    onReassignPorts={handleReassignPorts}
+                    onRetryHooks={handleRetryHooks}
+                    onHover={prefetchTerminals}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <button
         type="button"

@@ -1,40 +1,33 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useDeleteProject, useProjects } from "../lib/queries";
+import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
 
 export function TabBar() {
   const navigate = useNavigate();
-  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession } = useStore();
+  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession, closedProjectIds, closeProject } = useStore();
   const { data: projects } = useProjects();
-  const deleteProject = useDeleteProject();
   const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
+  const openProjects = projects?.filter((p) => !closedProjectIds.includes(p.id)) ?? [];
 
-  const handleRemoveProject = async (projectId: string) => {
-    try {
-      await deleteProject.mutateAsync(projectId);
-      if (activeProjectId === projectId) {
-        setActiveProject(null);
-      }
-    } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
-    }
+  const handleRemoveProject = (projectId: string) => {
+    closeProject(projectId);
+    try { navigate({ to: "/" }); } catch {}
   };
 
   const handleTabClick = (projectId: string) => {
+    if (closedProjectIds.includes(projectId)) {
+      closeProject(projectId);
+    }
     if (projectId === activeProjectId) {
-      // Clicking active project tab
       if (activeSessionId) {
-        // Session is active → clear session, show project config
         setActiveSession(null);
       } else {
-        // No session → deactivate project entirely
         setActiveProject(null);
-        navigate({ to: "/app" });
+        try { navigate({ to: "/" }); } catch {}
       }
     } else {
-      // Clicking a different project → activate it
       setActiveProject(projectId);
       navigate({ to: "/app/$projectId", params: { projectId } });
     }
@@ -42,7 +35,7 @@ export function TabBar() {
 
   return (
     <div className="tab-bar">
-      {(projects || []).map((project) => (
+      {openProjects.map((project) => (
         <div
           key={project.id}
           className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
