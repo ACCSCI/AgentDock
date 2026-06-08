@@ -484,9 +484,9 @@ export function apiPlugin(): Plugin {
               execAsync("git ls-files --others --exclude-standard --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
               execAsync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
             ]);
-            const tracked = new Set(cachedOut.stdout.trim().split("\n").filter(Boolean));
-            const untracked = new Set(untrackedOut.stdout.trim().split("\n").filter(Boolean));
-            const modified = new Set(modifiedOut.stdout.trim().split("\n").filter(Boolean));
+            const trackedFiles = cachedOut.stdout.trim().split("\n").filter(Boolean);
+            const untrackedSet = new Set(untrackedOut.stdout.trim().split("\n").filter(Boolean));
+            const modifiedSet = new Set(modifiedOut.stdout.trim().split("\n").filter(Boolean));
             const dirEntries = await readdir(targetDir, { withFileTypes: true });
             const entries = dirEntries.filter((entry) => {
               if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".agentdock") return false;
@@ -495,9 +495,13 @@ export function apiPlugin(): Plugin {
               const fullPath = path.join(targetDir, entry.name);
               const relPath = path.relative(p.path, fullPath).replace(/\\/g, "/");
               const isDir = entry.isDirectory();
-              let status: "untracked" | "modified" | "tracked" = "untracked";
-              if (tracked.has(relPath) || tracked.has(relPath + "/")) status = "tracked";
-              if (modified.has(relPath)) status = "modified";
+              let status: "untracked" | "modified" | "tracked";
+              if (isDir) {
+                status = trackedFiles.some((f) => f.startsWith(relPath + "/")) ? "tracked" : "untracked";
+              } else {
+                status = trackedFiles.includes(relPath) ? "tracked" : "untracked";
+              }
+              if (modifiedSet.has(relPath) && status === "tracked") status = "modified";
               return { name: entry.name, path: relPath, isDir, status };
             });
             entries.sort((a, b) => { if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; return a.name.localeCompare(b.name); });
