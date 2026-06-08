@@ -191,8 +191,13 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
     if (!config) return;
     setSaveStatus("idle");
     setSaveError("");
+    // Normalize: strip empty ports so Zod default kicks in (avoid min(1) rejection)
+    const saveConfig = { ...config };
+    if (!saveConfig.env?.ports?.length) {
+      delete saveConfig.env;
+    }
     try {
-      await saveMutation.mutateAsync(config);
+      await saveMutation.mutateAsync(saveConfig);
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 3000);
     } catch (err) {

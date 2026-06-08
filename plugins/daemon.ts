@@ -469,9 +469,9 @@ export class AgentDockDaemon {
 
           // Allocate ports
           const excluded = this.state.getExcludedPorts();
-          const keys = Array.isArray(body.portKeys) && body.portKeys.length > 0
-            ? body.portKeys
-            : PORT_KEYS_DEFAULT;
+          const rawKeys = Array.isArray(body.portKeys) ? body.portKeys : [];
+          const keys = [...new Set(rawKeys)].filter((k) => k.trim().length > 0);
+          if (keys.length === 0) keys.push(...PORT_KEYS_DEFAULT);
           const allocated = await this.state.allocatePorts(keys.length, excluded);
           const ports: SessionPorts = {};
           keys.forEach((key, i) => { ports[key] = allocated[i]; });
@@ -605,9 +605,9 @@ export class AgentDockDaemon {
 
             // New session — use provided ports or allocate new ones
             let ports: SessionPorts;
-            const keys = Array.isArray(decl.portKeys) && decl.portKeys.length > 0
-              ? decl.portKeys
-              : Object.keys(decl.ports ?? {});
+            const rawKeys = Array.isArray(decl.portKeys) ? decl.portKeys : [];
+            const dedupedKeys = [...new Set(rawKeys)].filter((k) => k.trim().length > 0);
+            const keys = dedupedKeys.length > 0 ? dedupedKeys : Object.keys(decl.ports ?? {});
             const effectiveKeys = keys.length > 0 ? keys : PORT_KEYS_DEFAULT;
             const hasAllPorts = !!(decl.ports && effectiveKeys.every((key) => typeof decl.ports![key] === "number"));
             const needsRealloc = !hasAllPorts || effectiveKeys.some((key) => this.state.isPortAllocated(decl.ports![key]));
