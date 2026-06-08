@@ -5,7 +5,7 @@ import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
-  const { activeProjectId, activeSessionId, setActiveSession } = useStore();
+  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar } = useStore();
   const { data: projects } = useProjects();
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
@@ -87,8 +87,34 @@ export function SessionSidebar() {
     });
   };
 
+  if (sidebarCollapsed) {
+    return (
+      <div className="session-sidebar session-sidebar-collapsed">
+        <button
+          type="button"
+          className="session-sidebar-expand-btn"
+          onClick={toggleSidebar}
+          title="展开 Session 侧栏"
+        >
+          ▶
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="session-sidebar">
+      <div className="session-sidebar-header">
+        <span className="session-sidebar-title">Sessions</span>
+        <button
+          type="button"
+          className="session-sidebar-collapse-btn"
+          onClick={toggleSidebar}
+          title="收起侧栏"
+        >
+          ◀
+        </button>
+      </div>
       <div className="session-list">
         {activeProject.sessions.map((session) => (
           <SessionCard

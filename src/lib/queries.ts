@@ -591,3 +591,73 @@ export function useDeleteOrphans() {
     },
   });
 }
+
+// ---- Config API ----
+
+export interface ProjectConfigData {
+  config: {
+    version: string;
+    resources: { sync: Array<{ source: string; strategy: string; skipIfMissing: boolean }> };
+    hooks: Record<string, Array<{ run: string; required: boolean; timeout: number; cwd: string; async: boolean }>>;
+  };
+  exists: boolean;
+  yaml: string;
+}
+
+// GET /api/projects/:id/config
+export function useProjectConfig(projectId: string) {
+  return useQuery({
+    queryKey: ["projectConfig", projectId],
+    queryFn: async (): Promise<ProjectConfigData> => {
+      const res = await fetch(`/api/projects/${projectId}/config`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return { config: data.config, exists: data.exists, yaml: data.yaml };
+    },
+    enabled: !!projectId,
+    staleTime: 10_000,
+  });
+}
+
+// POST /api/projects/:id/config
+export function useSaveConfig(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (config: ProjectConfigData["config"]) => {
+      const res = await fetch(`/api/projects/${projectId}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.yaml as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projectConfig", projectId] });
+    },
+  });
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  tracked: boolean;
+}
+
+// GET /api/projects/:id/files?path=...
+export function useProjectFiles(projectId: string, relPath: string, enabled = true) {
+  return useQuery({
+    queryKey: ["projectFiles", projectId, relPath],
+    queryFn: async (): Promise<FileEntry[]> => {
+      const url = `/api/projects/${projectId}/files${relPath ? `?path=${encodeURIComponent(relPath)}` : ""}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.entries;
+    },
+    enabled: enabled && !!projectId,
+    staleTime: 5_000,
+  });
+}
