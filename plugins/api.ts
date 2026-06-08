@@ -466,22 +466,27 @@ export function apiPlugin(): Plugin {
             const d = getDb();
             const p = d.select().from(projects).where(eq(projects.id, id)).get();
             if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const { execSync } = await import("node:child_process");
-            const { readdirSync, statSync, existsSync } = await import("node:fs");
+            const { exec } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const { readdir, stat } = await import("node:fs/promises");
+            const execAsync = promisify(exec);
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const queryPath = url.searchParams.get("path") || "";
             const targetDir = path.resolve(p.path, queryPath);
             if (!targetDir.startsWith(path.resolve(p.path))) {
               json(res, 403, { error: "Path is outside project root" }); return;
             }
-            if (!existsSync(targetDir)) {
+            try { await stat(targetDir); } catch {
               json(res, 404, { error: "Path does not exist" }); return;
             }
-            const raw = execSync("git ls-files --others --exclude-standard --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8" });
-            const untracked = new Set(raw.trim().split("\n").filter(Boolean));
-            const raw2 = execSync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8" });
-            const modified = new Set(raw2.trim().split("\n").filter(Boolean));
-            const entries = readdirSync(targetDir, { withFileTypes: true }).filter((entry) => {
+            const [untrackedOut, modifiedOut] = await Promise.all([
+              execAsync("git ls-files --others --exclude-standard --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
+              execAsync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
+            ]);
+            const untracked = new Set(untrackedOut.stdout.trim().split("\n").filter(Boolean));
+            const modified = new Set(modifiedOut.stdout.trim().split("\n").filter(Boolean));
+            const dirEntries = await readdir(targetDir, { withFileTypes: true });
+            const entries = dirEntries.filter((entry) => {
               if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".agentdock") return false;
               return true;
             }).map((entry) => {
