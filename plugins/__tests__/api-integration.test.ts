@@ -744,8 +744,8 @@ env:
     expect(res.status).toBe(200);
     const ports = res.data.session.ports;
     expect(Object.keys(ports)).toHaveLength(2);
-    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("EP2: 配置自定义端口变量名", async () => {
@@ -761,9 +761,9 @@ env:
     expect(res.status).toBe(200);
     const ports = res.data.session.ports;
     expect(Object.keys(ports)).toHaveLength(3);
-    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("EP3: worktree .env 文件只包含配置的端口变量", async () => {
@@ -793,11 +793,11 @@ env:
     expect(res.status).toBe(200);
     const ports = res.data.session.ports;
     expect(Object.keys(ports)).toHaveLength(5);
-    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("EP5: 配置 1 个端口变量只分配 1 个端口", async () => {
@@ -811,7 +811,7 @@ env:
     expect(res.status).toBe(200);
     const ports = res.data.session.ports;
     expect(Object.keys(ports)).toHaveLength(1);
-    expect(ports.SINGLE_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.SINGLE_PORT).toBeGreaterThanOrEqual(30000);
   });
 });
 
@@ -831,7 +831,7 @@ describe("P: port reconciliation and external discovery", () => {
     const session = project.sessions.find((s: any) => s.id === foreignId);
     expect(session).toBeDefined();
     expect(session.ports).toBeDefined();
-    expect(session.ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(session.ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
 
     const row = db.select().from(sessions).where(eq(sessions.id, foreignId)).get();
     expect(row?.ports).not.toBeNull();

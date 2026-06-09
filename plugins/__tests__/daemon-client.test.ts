@@ -50,14 +50,14 @@ describe("DaemonClient", () => {
     const ports = await client.allocate(3);
     expect(ports).toHaveLength(3);
     for (const p of ports) {
-      expect(p).toBeGreaterThanOrEqual(20000);
+      expect(p).toBeGreaterThanOrEqual(30000);
       expect(p).toBeLessThanOrEqual(65535);
     }
   });
 
   it("allocate respects exclude set", async () => {
-    const ports = await client.allocate(1, new Set([20000]));
-    expect(ports[0]).not.toBe(20000);
+    const ports = await client.allocate(1, new Set([30000]));
+    expect(ports[0]).not.toBe(30000);
   });
 
   it("release does not throw", async () => {
@@ -141,11 +141,11 @@ describe("DaemonClient Session Methods", () => {
       projectPath: "/project/a",
       worktreePath: "/wt/s1",
     });
-    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(30000);
 
     const all = [ports.FRONTEND_PORT, ports.BACKEND_PORT, ports.WS_PORT, ports.DEBUG_PORT, ports.PREVIEW_PORT];
     expect(new Set(all).size).toBe(5);
@@ -210,8 +210,8 @@ describe("DaemonClient Session Methods", () => {
       portKeys: ["FRONTEND_PORT", "METRICS_PORT"],
     });
     expect(Object.keys(ports)).toHaveLength(2);
-    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("allocateSession with single portKey returns one port", async () => {
@@ -224,7 +224,7 @@ describe("DaemonClient Session Methods", () => {
       portKeys: ["MY_API_PORT"],
     });
     expect(Object.keys(ports)).toHaveLength(1);
-    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("declareSessions with portKeys allocates custom ports", async () => {
@@ -236,7 +236,7 @@ describe("DaemonClient Session Methods", () => {
     expect(result.results[0].status).toBe("allocated");
     const ports = result.results[0].ports;
     expect(Object.keys(ports)).toHaveLength(2);
-    expect(ports.A_PORT).toBeGreaterThanOrEqual(20000);
-    expect(ports.B_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.A_PORT).toBeGreaterThanOrEqual(30000);
+    expect(ports.B_PORT).toBeGreaterThanOrEqual(30000);
   });
 });

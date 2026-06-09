@@ -5,7 +5,7 @@ import { DaemonState, type SessionPorts } from "../daemon-state.js";
 // Helpers
 // ============================================================
 
-let portCounter = 20000;
+let portCounter = 30000;
 function nextPorts(): SessionPorts {
   const base = portCounter;
   portCounter += 5;
@@ -19,7 +19,7 @@ function nextPorts(): SessionPorts {
 }
 
 function resetPortCounter() {
-  portCounter = 20000;
+  portCounter = 30000;
 }
 
 function checkInvariants(state: DaemonState) {

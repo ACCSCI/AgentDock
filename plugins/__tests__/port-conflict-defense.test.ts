@@ -12,7 +12,7 @@ import os from "node:os";
 // Helpers
 // ============================================================
 
-let portCounter = 20000;
+let portCounter = 30000;
 function nextPorts(): SessionPorts {
   const base = portCounter;
   portCounter += 5;
@@ -36,7 +36,7 @@ function makePorts(start: number): SessionPorts {
 }
 
 function resetPortCounter() {
-  portCounter = 20000;
+  portCounter = 30000;
 }
 
 function tmpDir(): string {

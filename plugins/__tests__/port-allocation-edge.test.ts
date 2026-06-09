@@ -137,7 +137,7 @@ describe("Port allocation edge cases", () => {
 
   it("boundary: first allocatable port is PORT_RANGE_START", async () => {
     const ports = await state.allocatePorts(1);
-    // The first available port should be PORT_RANGE_START (20000)
+    // The first available port should be PORT_RANGE_START (30000)
     // unless something else is using it
     expect(ports[0]).toBeGreaterThanOrEqual(PORT_RANGE_START);
   });

@@ -144,7 +144,7 @@ describe("Daemon Debug Endpoints", () => {
       expect(res.status).toBe(200);
       expect(res.data.success).toBe(true);
       expect(res.data.totalAllocated).toBe(0);
-      expect(res.data.range.start).toBe(20000);
+      expect(res.data.range.start).toBe(30000);
       expect(res.data.range.end).toBe(65535);
       expect(res.data.bySession).toEqual({});
     });
@@ -159,7 +159,7 @@ describe("Daemon Debug Endpoints", () => {
       expect(res.data.totalAllocated).toBe(5);
       expect(res.data.bySession.s1).toBeDefined();
       expect(res.data.bySession.s1.ports).toHaveLength(5);
-      expect(res.data.bySession.s1.named.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+      expect(res.data.bySession.s1.named.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
     });
   });
 

@@ -42,7 +42,7 @@ describe("PoolPortAllocator", () => {
   it("ports are in valid range (20000-65535)", async () => {
     const ports = await allocator.allocate(5);
     for (const port of ports) {
-      expect(port).toBeGreaterThanOrEqual(20000);
+      expect(port).toBeGreaterThanOrEqual(30000);
       expect(port).toBeLessThanOrEqual(65535);
     }
   });
@@ -92,7 +92,7 @@ describe("FilePortAllocator", () => {
   it("ports are in valid range (20000-65535)", async () => {
     const ports = await allocator.allocate(5);
     for (const port of ports) {
-      expect(port).toBeGreaterThanOrEqual(20000);
+      expect(port).toBeGreaterThanOrEqual(30000);
       expect(port).toBeLessThanOrEqual(65535);
     }
   });

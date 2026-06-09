@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { DaemonState, PORT_KEYS, type SessionPorts } from "../daemon-state.js";
 
-let portCounter = 20000;
+let portCounter = 30000;
 
 function nextPorts(): SessionPorts {
   const base = portCounter;
@@ -38,7 +38,7 @@ describe("Port invariants", () => {
 
   beforeEach(() => {
     state = new DaemonState();
-    portCounter = 20000;
+    portCounter = 30000;
   });
 
   it("10 sessions = 50 allocated ports", () => {
