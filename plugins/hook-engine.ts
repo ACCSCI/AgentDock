@@ -85,7 +85,8 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
       } catch (e) {
         // EBUSY/EPERM — still locked, retry
         // ENOENT — directory already removed, stop waiting
-        const code = (e as NodeJS.ErrnoException).code;
+        // Use optional chaining in case e is not an Error instance
+        const code = (e as NodeJS.ErrnoException | undefined)?.code;
         if (code === "ENOENT") return;
       }
     }

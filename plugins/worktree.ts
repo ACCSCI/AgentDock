@@ -110,12 +110,13 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
     if (process.platform === "win32") {
       // Build the PowerShell script as a string, then encode to base64
       // to safely pass through cmd.exe without any interpolation risk.
-      // The $dir parameter receives the path as a proper argument, so a
-      // malicious path with quotes/semicolons cannot break out of the
-      // PowerShell string context (fixes command injection reported in
-      // review on PR #34).
+      // The path is read from $env:AGENTDOCK_TARGET_DIR (set via env on
+      // execAsync), since -EncodedCommand does not support trailing
+      // arguments like `-dir` (review feedback on PR #35).
+      // A malicious path cannot break out because the script only reads
+      // the value via $env, never as part of the script text.
       const psScript =
-        `param($dir); ` +
+        `$dir = $env:AGENTDOCK_TARGET_DIR; ` +
         `$e = $dir -replace '\\\\\\\\', '\\\\\\\\' -replace "'", "''"; ` +
         `$c = if ($e.EndsWith('\\\\')) { $e } else { $e + '\\\\' }; ` +
         `Get-CimInstance Win32_Process | Where-Object { ` +
@@ -126,10 +127,10 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
 
       // Encode to UTF-16LE base64 for PowerShell's -EncodedCommand
       const encoded = Buffer.from(psScript, "utf16le").toString("base64");
-      await execAsync(
-        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded} -dir "${normalized.replace(/"/g, '""')}"`,
-        { encoding: "utf-8" },
-      ).catch(() => {});
+      await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, {
+        encoding: "utf-8",
+        env: { ...process.env, AGENTDOCK_TARGET_DIR: normalized },
+      }).catch(() => {});
 
       // Give processes a moment to release their directory handles.
       await new Promise((resolve) => setTimeout(resolve, 300));
