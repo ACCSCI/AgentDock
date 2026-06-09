@@ -70,6 +70,10 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
 
   // Wait for OS to release handles (up to ~10s on Windows)
   if (process.platform === "win32") {
+    // If directory already gone, no need to wait
+    const { existsSync } = await import("node:fs");
+    if (!existsSync(dirPath)) return;
+
     const { opendir } = await import("node:fs/promises");
     await new Promise((r) => setTimeout(r, 500));
     for (let i = 0; i < 20; i++) {
@@ -78,8 +82,11 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
         const handle = await opendir(dirPath);
         await handle.close();
         return;
-      } catch {
+      } catch (e) {
         // EBUSY/EPERM — still locked, retry
+        // ENOENT — directory already removed, stop waiting
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return;
       }
     }
   }

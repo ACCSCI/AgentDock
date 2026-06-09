@@ -108,18 +108,28 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
   const normalized = path.resolve(dirPath);
   try {
     if (process.platform === "win32") {
-      const escaped = normalized.replace(/\\/g, "\\\\").replace(/'/g, "''");
-      // Win32_Process.CurrentDirectory may end with a backslash; normalize for comparison.
-      const cdEscaped = escaped.endsWith("\\\\") ? escaped : escaped + "\\\\";
+      // Build the PowerShell script as a string, then encode to base64
+      // to safely pass through cmd.exe without any interpolation risk.
+      // The $dir parameter receives the path as a proper argument, so a
+      // malicious path with quotes/semicolons cannot break out of the
+      // PowerShell string context (fixes command injection reported in
+      // review on PR #34).
+      const psScript =
+        `param($dir); ` +
+        `$e = $dir -replace '\\\\\\\\', '\\\\\\\\' -replace "'", "''"; ` +
+        `$c = if ($e.EndsWith('\\\\')) { $e } else { $e + '\\\\' }; ` +
+        `Get-CimInstance Win32_Process | Where-Object { ` +
+        `$_.ExecutablePath -like "$e\\\\*" -or ` +
+        `$_.CommandLine -like "*$e*" -or ` +
+        `$_.CurrentDirectory -like "$c*" } | ` +
+        `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
 
-      // Single WMI query matching:
-      //   - ExecutablePath: binaries inside the dir (node_modules, etc.)
-      //   - CommandLine:     command text containing the path
-      //   - CurrentDirectory: process CWD set to the dir (exec() cwd option)
-      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' -or $_.CommandLine -like '*${escaped}*' -or $_.CurrentDirectory -like '${cdEscaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`, {
-        encoding: "utf-8",
-      }).catch(() => {});
+      // Encode to UTF-16LE base64 for PowerShell's -EncodedCommand
+      const encoded = Buffer.from(psScript, "utf16le").toString("base64");
+      await execAsync(
+        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded} -dir "${normalized.replace(/"/g, '""')}"`,
+        { encoding: "utf-8" },
+      ).catch(() => {});
 
       // Give processes a moment to release their directory handles.
       await new Promise((resolve) => setTimeout(resolve, 300));
