@@ -567,9 +567,12 @@ export function apiPlugin(): Plugin {
                   }).run();
                 },
                 onBackgroundHookComplete: (report) => {
-                  const status = report.success ? "completed" : "failed";
+                  // For async hooks, any individual failure (even non-required)
+                  // should be surfaced to the user as a "failed" status.
+                  const anyFailure = report.results.some((r) => !r.success);
+                  const status = anyFailure ? "failed" : "completed";
                   const update: Record<string, unknown> = { backgroundHookStatus: status };
-                  if (!report.success) {
+                  if (anyFailure) {
                     update.backgroundHookErrors = JSON.stringify(
                       report.results.filter((r) => !r.success).map((r) => ({
                         run: r.hook.run,
@@ -763,9 +766,10 @@ export function apiPlugin(): Plugin {
               payload: {},
             };
             engine.execute("afterCreateSession", ctx).then((report) => {
-              const status = report.success ? "completed" : "failed";
+              const anyFailure = report.results.some((r) => !r.success);
+              const status = anyFailure ? "failed" : "completed";
               const update: Record<string, unknown> = { backgroundHookStatus: status };
-              if (!report.success) {
+              if (anyFailure) {
                 update.backgroundHookErrors = JSON.stringify(
                   report.results.filter((r) => !r.success).map((r) => ({
                     run: r.hook.run,
