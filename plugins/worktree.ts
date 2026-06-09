@@ -86,24 +86,48 @@ export function validateBranchName(name: string): void {
 }
 
 /**
- * Best-effort termination of any process whose executable lives under `dirPath`.
+ * Best-effort termination of any process whose executable lives under `dirPath`,
+ * as well as processes whose command-line references the path (i.e. shell/child
+ * processes that have the worktree as their CWD).
  *
  * Session worktrees may contain their own node_modules with long-lived binaries
  * (e.g. @biomejs/.../biome.exe started by background hooks). On Windows these
  * processes hold an open handle to their own .exe, which makes the file
  * impossible to unlink — fs.rm then fails with EPERM no matter how many times
  * it retries. We terminate those processes before deleting the directory.
+ *
+ * Additionally, shell processes (cmd.exe, powershell.exe, bash.exe) spawned by
+ * the PTY host have their CWD set to the worktree directory, so the OS holds a
+ * handle on the directory itself (causing EBUSY on rmdir). Those processes are
+ * not caught by the ExecutablePath check because their binary lives under
+ * C:\Windows or C:\Program Files — we detect them via CommandLine match.
  */
 export async function killProcessesUnderPath(dirPath: string): Promise<void> {
   const normalized = path.resolve(dirPath);
   try {
     if (process.platform === "win32") {
-      // Query processes whose ExecutablePath is inside the worktree dir, then kill them.
       const escaped = normalized.replace(/\\/g, "\\\\").replace(/'/g, "''");
-      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`, {
+
+      // 1. Kill processes whose ExecutablePath is inside the worktree
+      //    (catches node_modules/.bin/*.exe binaries).
+      const ps1 = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps1.replace(/"/g, '\\"')}"`, {
         encoding: "utf-8",
-      });
+      }).catch(() => {});
+
+      // 2. Kill processes whose CommandLine references the worktree path.
+      //    The worktree ID (random short string) is extremely unlikely to appear
+      //    in an unrelated process command line, so risk of false kill is negligible.
+      //    This catches shell processes (cmd.exe/powershell.exe/bash.exe) spawned
+      //    by the PTY host with cwd=worktreePath, which hold a CWD handle that
+      //    would cause EBUSY on rmdir.
+      const ps2 = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps2.replace(/"/g, '\\"')}"`, {
+        encoding: "utf-8",
+      }).catch(() => {});
+
+      // Give processes a moment to release their directory handles.
+      await new Promise((resolve) => setTimeout(resolve, 300));
     } else {
       // lsof lists processes with open files under the dir; kill their PIDs.
       const { stdout } = await execAsync(`lsof -t +D "${normalized}" 2>/dev/null || true`, {
@@ -232,13 +256,33 @@ export async function removeWorktree(
 
   // Always ensure directory is removed (handles git failure or non-worktree directories)
   if (existsSync(worktreePath)) {
-    // Terminate any long-lived process (e.g. biome.exe started by hooks) that
-    // holds a handle to a file inside the worktree, otherwise unlink fails with
-    // EPERM/EBUSY on Windows and the retries below would never succeed.
-    await killProcessesUnderPath(worktreePath);
-    // On Windows, files may still be transiently locked right after the holder
-    // exits; maxRetries + retryDelay make fs.rm retry those transient failures.
-    await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // Retry loop: kill processes and attempt removal up to 3 times.
+    // On Windows, shell processes spawned by the PTY host hold the worktree
+    // directory as their CWD, which causes EBUSY on rmdir even after they've
+    // been told to exit — the handle takes a moment to release.
+    const MAX_DIR_REMOVE_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {
+      if (!existsSync(worktreePath)) break;
+
+      // Kill any process holding handles on the worktree (ExecutablePath and
+      // CommandLine match — see killProcessesUnderPath for details).
+      await killProcessesUnderPath(worktreePath);
+
+      try {
+        // maxRetries + retryDelay: Node.js's fs.rm retries internally on
+        // EBUSY/EPERM/ENOTEMPTY, handling transient locks (e.g. AV scanner).
+        await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        break; // success
+      } catch (err) {
+        if (attempt < MAX_DIR_REMOVE_ATTEMPTS) {
+          // Back off with increasing delay before retrying — filesystem
+          // handles may need more time on Windows.
+          await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+        } else {
+          throw err; // final attempt failed, propagate
+        }
+      }
+    }
   }
 
   return { removed: worktreePath };
