@@ -245,3 +245,77 @@ resources:
     expect(() => loadConfig(tmpDir)).toThrow();
   });
 });
+
+// ============================================================
+// P1–P6: env.ports configuration
+// ============================================================
+describe("env.ports 配置", () => {
+  it("P1: 不配置 env.ports 时默认 5 个端口", () => {
+    writeConfig('version: "1"');
+    const config = loadConfig(tmpDir);
+    expect(config.env.ports).toEqual([
+      "FRONTEND_PORT",
+      "BACKEND_PORT",
+      "WS_PORT",
+      "DEBUG_PORT",
+      "PREVIEW_PORT",
+    ]);
+  });
+
+  it("P2: 显式配置 env.ports 列表", () => {
+    writeConfig(`
+version: "1"
+env:
+  ports:
+    - FRONTEND_PORT
+    - BACKEND_PORT
+`);
+    const config = loadConfig(tmpDir);
+    expect(config.env.ports).toHaveLength(2);
+    expect(config.env.ports).toEqual(["FRONTEND_PORT", "BACKEND_PORT"]);
+  });
+
+  it("P3: 自定义端口变量名（非标准名）", () => {
+    writeConfig(`
+version: "1"
+env:
+  ports:
+    - MY_CUSTOM_API_PORT
+    - METRICS_PORT
+    - WS_PORT
+`);
+    const config = loadConfig(tmpDir);
+    expect(config.env.ports).toHaveLength(3);
+    expect(config.env.ports).toContain("MY_CUSTOM_API_PORT");
+    expect(config.env.ports).toContain("METRICS_PORT");
+  });
+
+  it("P4: env.ports 为空数组时拒绝", () => {
+    writeConfig(`
+version: "1"
+env:
+  ports: []
+`);
+    expect(() => loadConfig(tmpDir)).toThrow();
+  });
+
+  it("P5: 端口变量名只能大写字母、数字、下划线", () => {
+    writeConfig(`
+version: "1"
+env:
+  ports:
+    - frontend-port
+`);
+    expect(() => loadConfig(tmpDir)).toThrow();
+  });
+
+  it("P6: AgentDockConfigSchema 直接校验 env.ports", () => {
+    const result = AgentDockConfigSchema.parse({
+      version: "1",
+      env: {
+        ports: ["FRONTEND_PORT", "BACKEND_PORT"],
+      },
+    });
+    expect(result.env.ports).toEqual(["FRONTEND_PORT", "BACKEND_PORT"]);
+  });
+});

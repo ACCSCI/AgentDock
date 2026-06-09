@@ -89,14 +89,16 @@ export class DaemonClient implements PortAllocator {
   }
 
   /**
-   * Allocate a session with 5 named ports.
+   * Allocate a session with named ports.
    * Idempotent — returns existing ports if session already exists.
+   * @param portKeys - Optional list of port variable names. Defaults to 5 standard ports.
    */
   async allocateSession(params: {
     clientId: string;
     sessionId: string;
     projectPath: string;
     worktreePath: string;
+    portKeys?: string[];
   }): Promise<SessionPorts> {
     const res = await this.post("/sessions/allocate", params);
     return res.ports;
@@ -127,6 +129,7 @@ export class DaemonClient implements PortAllocator {
     worktreePath: string;
     projectPath: string;
     ports?: SessionPorts | null;
+    portKeys?: string[];
   }>): Promise<{
     results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
     orphans: string[];

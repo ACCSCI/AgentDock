@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { FilePortAllocator, isPortAvailable, type PortAllocator } from "./port-allocator.js";
 import { Mutex } from "./mutex.js";
-import { DaemonState, PORT_KEYS, PORT_RANGE_START, PORT_RANGE_END, type SessionPorts } from "./daemon-state.js";
+import { DaemonState, PORT_KEYS_DEFAULT, PORT_RANGE_START, PORT_RANGE_END, type SessionPorts } from "./daemon-state.js";
 import { DaemonWAL } from "./daemon-wal.js";
 
 // ============================================================
@@ -61,6 +61,7 @@ interface SessionAllocateRequest {
   sessionId?: string;
   projectPath?: string;
   worktreePath?: string;
+  portKeys?: string[];
 }
 
 interface SessionReleaseRequest {
@@ -80,6 +81,7 @@ interface SyncDeclareRequest {
     worktreePath: string;
     projectPath: string;
     ports?: SessionPorts | null;
+    portKeys?: string[];
   }>;
 }
 
@@ -478,14 +480,12 @@ export class AgentDockDaemon {
 
           // Allocate ports
           const excluded = this.state.getExcludedPorts();
-          const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
-          const ports: SessionPorts = {
-            FRONTEND_PORT: allocated[0],
-            BACKEND_PORT: allocated[1],
-            WS_PORT: allocated[2],
-            DEBUG_PORT: allocated[3],
-            PREVIEW_PORT: allocated[4],
-          };
+          const rawKeys = Array.isArray(body.portKeys) ? body.portKeys : [];
+          const keys = [...new Set(rawKeys)].filter((k) => k.trim().length > 0);
+          if (keys.length === 0) keys.push(...PORT_KEYS_DEFAULT);
+          const allocated = await this.state.allocatePorts(keys.length, excluded);
+          const ports: SessionPorts = {};
+          keys.forEach((key, i) => { ports[key] = allocated[i]; });
 
           this.state.allocateSession({
             sessionId,
@@ -577,18 +577,14 @@ export class AgentDockDaemon {
           // Build exclusion set: all currently allocated ports + old ports
           const excluded = this.state.getExcludedPorts();
           const oldPorts = session.ports;
-          for (const key of PORT_KEYS) {
+          const oldKeys = Object.keys(oldPorts);
+          for (const key of oldKeys) {
             excluded.add(oldPorts[key]);
           }
 
-          const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
-          const newPorts: SessionPorts = {
-            FRONTEND_PORT: allocated[0],
-            BACKEND_PORT: allocated[1],
-            WS_PORT: allocated[2],
-            DEBUG_PORT: allocated[3],
-            PREVIEW_PORT: allocated[4],
-          };
+          const allocated = await this.state.allocatePorts(oldKeys.length, excluded);
+          const newPorts: SessionPorts = {};
+          oldKeys.forEach((key, i) => { newPorts[key] = allocated[i]; });
 
           if (ownership === "reclaimable") {
             this.state.claimSession(sessionId, clientId, this.state.getClient(clientId)?.pid ?? session.ownerPid);
@@ -684,13 +680,17 @@ export class AgentDockDaemon {
 
             // New session — use provided ports or allocate new ones
             let ports: SessionPorts;
-            const hasAllPorts = !!(decl.ports && PORT_KEYS.every((key) => typeof decl.ports![key] === "number"));
+            const rawKeys = Array.isArray(decl.portKeys) ? decl.portKeys : [];
+            const dedupedKeys = [...new Set(rawKeys)].filter((k) => k.trim().length > 0);
+            const keys = dedupedKeys.length > 0 ? dedupedKeys : Object.keys(decl.ports ?? {});
+            const effectiveKeys = keys.length > 0 ? keys : PORT_KEYS_DEFAULT;
+            const hasAllPorts = !!(decl.ports && effectiveKeys.every((key) => typeof decl.ports![key] === "number"));
             const providedPortsAreBindable = hasAllPorts
-              ? (await Promise.all(PORT_KEYS.map((key) => isPortAvailable(decl.ports![key])))).every(Boolean)
+              ? (await Promise.all(effectiveKeys.map((key) => isPortAvailable(decl.ports![key])))).every(Boolean)
               : false;
             const needsRealloc = !hasAllPorts
               || !providedPortsAreBindable
-              || PORT_KEYS.some((key) => this.state.isPortAllocated(decl.ports![key]));
+              || effectiveKeys.some((key) => this.state.isPortAllocated(decl.ports![key]));
 
             if (hasAllPorts && !needsRealloc) {
               // Use provided ports (from database) — no conflict
@@ -700,16 +700,11 @@ export class AgentDockDaemon {
               const excluded = this.state.getExcludedPorts();
               if (hasAllPorts) {
                 // Also exclude the conflicting DB ports so they're not re-picked
-                for (const key of PORT_KEYS) excluded.add(decl.ports![key]);
+                for (const key of effectiveKeys) excluded.add(decl.ports![key]);
               }
-              const allocated = await this.state.allocatePorts(PORT_KEYS.length, excluded);
-              ports = {
-                FRONTEND_PORT: allocated[0],
-                BACKEND_PORT: allocated[1],
-                WS_PORT: allocated[2],
-                DEBUG_PORT: allocated[3],
-                PREVIEW_PORT: allocated[4],
-              };
+              const allocated = await this.state.allocatePorts(effectiveKeys.length, excluded);
+              ports = {} as SessionPorts;
+              effectiveKeys.forEach((key, i) => { ports[key] = allocated[i]; });
             }
 
             this.state.allocateSession({
@@ -817,7 +812,7 @@ export class AgentDockDaemon {
       const bySession: Record<string, unknown> = {};
       for (const s of sessions) {
         bySession[s.sessionId] = {
-          ports: PORT_KEYS.map((k) => s.ports[k]),
+          ports: Object.values(s.ports),
           named: s.ports,
         };
       }

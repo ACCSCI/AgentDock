@@ -27,6 +27,7 @@ export interface PortService {
     sessionId: string;
     projectPath: string;
     worktreePath: string;
+    portKeys?: string[];
   }): Promise<SessionPorts>;
   releaseSession(sessionId: string): Promise<void>;
 }
@@ -173,10 +174,12 @@ export function createSessionLifecycle(deps?: {
       emit(onStep, { step: "allocatePorts", status: "running" });
       const portsStepStart = Date.now();
       if (!deps?.portService) throw new Error("portService is required");
-      const ports = await deps.portService.allocateSession({ sessionId, projectPath, worktreePath: wt.worktreePath });
+      const portKeys = config.env?.ports?.length ? config.env.ports : undefined;
+      const ports = await deps.portService.allocateSession({ sessionId, projectPath, worktreePath: wt.worktreePath, portKeys });
       writePortsToEnv(wt.worktreePath, ports);
       const portsDuration = Date.now() - portsStepStart;
-      log(sessionId, `allocatePorts ✓ ${portsDuration}ms (FRONTEND:${ports.FRONTEND_PORT})`);
+      const firstKey = Object.keys(ports)[0] ?? "?";
+      log(sessionId, `allocatePorts ✓ ${portsDuration}ms (${Object.keys(ports).length} ports, ${firstKey}:${ports[firstKey]})`);
       emit(onStep, { step: "allocatePorts", status: "done", duration: portsDuration });
 
       // Step 5: AfterCreateSession hooks

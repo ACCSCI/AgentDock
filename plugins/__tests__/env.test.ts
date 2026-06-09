@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildScopedChildEnv,
+  discoverPortKeysFromEnv,
   mergeEnv,
   parseEnv,
   readEnvFile,
@@ -225,6 +226,46 @@ describe("updateEnvFile", () => {
       const content = readFileSync(filePath, "utf-8");
       // Comments are stripped by parseEnv; only values remain
       expect(parseEnv(content)).toEqual({ FOO: "bar", BAZ: "qux" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("discoverPortKeysFromEnv", () => {
+  function createTmpDir(): string {
+    const dir = path.join(os.tmpdir(), `agentdock-port-discovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it("D1: 从包含 _PORT 变量的 .env 发现端口名", () => {
+    const dir = createTmpDir();
+    try {
+      writeFileSync(path.join(dir, ".env"), "FRONTEND_PORT=3000\nBACKEND_PORT=3001\nAPI_URL=http://local\nWS_PORT=3002\n");
+      const result = discoverPortKeysFromEnv(path.join(dir, ".env"));
+      expect(result).toEqual(["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("D2: .env 中没有 _PORT 变量时返回空数组", () => {
+    const dir = createTmpDir();
+    try {
+      writeFileSync(path.join(dir, ".env"), "API_URL=http://local\nDEBUG=true\n");
+      const result = discoverPortKeysFromEnv(path.join(dir, ".env"));
+      expect(result).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("D3: .env 文件不存在时返回空数组", () => {
+    const dir = createTmpDir();
+    try {
+      const result = discoverPortKeysFromEnv(path.join(dir, ".env"));
+      expect(result).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

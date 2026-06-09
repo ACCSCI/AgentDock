@@ -13,6 +13,7 @@ import { createSessionLifecycle, type PortService } from "./session-lifecycle.js
 import { DaemonManager } from "./daemon-manager.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { writePortsToEnv } from "./port-write-env.js";
+import { discoverPortKeysFromEnv } from "./env.js";
 
 let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
@@ -409,106 +410,6 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/projects/:id/config — read agentdock.config.yaml
-        const configReadMatch = pathname.match(/^\/api\/projects\/([^/]+)\/config$/);
-        if (configReadMatch && method === "GET") {
-          const id = configReadMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const { loadConfig } = await import("./config.js");
-            const { existsSync, readFileSync } = await import("node:fs");
-            const yamlPath = path.join(p.path, "agentdock.config.yaml");
-            const exists = existsSync(yamlPath);
-            const config = loadConfig(p.path);
-            const yaml = exists ? readFileSync(yamlPath, "utf-8") : "";
-            json(res, 200, { success: true, config, exists, yaml });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
-
-        // POST /api/projects/:id/config — write agentdock.config.yaml
-        if (configReadMatch && method === "POST") {
-          const id = configReadMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const body = await parseBody(req);
-            const { AgentDockConfigSchema } = await import("./config.js");
-            const parsed = AgentDockConfigSchema.parse(body.config);
-            const { stringify, Scalar } = await import("yaml");
-            const hooksForYaml: Record<string, unknown[]> = {};
-            if (parsed.hooks) {
-              for (const event of Object.keys(parsed.hooks)) {
-                hooksForYaml[event] = parsed.hooks[event].map((h) => {
-                  const s = new Scalar(h.run);
-                  s.type = Scalar.QUOTE_DOUBLE;
-                  return { ...h, run: s };
-                });
-              }
-            }
-            const yamlContent = stringify({ ...parsed, hooks: hooksForYaml }, { indent: 2 });
-            const { writeFileSync } = await import("node:fs");
-            const yamlPath = path.join(p.path, "agentdock.config.yaml");
-            writeFileSync(yamlPath, yamlContent, "utf-8");
-            json(res, 200, { success: true, yaml: yamlContent });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
-
-        // GET /api/projects/:id/files?path= — list files with git-tracked status
-        const filesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/files$/);
-        if (filesMatch && method === "GET") {
-          const id = filesMatch[1];
-          try {
-            const d = getDb();
-            const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (!p) { json(res, 404, { error: "Project not found" }); return; }
-            const { exec } = await import("node:child_process");
-            const { promisify } = await import("node:util");
-            const { readdir, stat } = await import("node:fs/promises");
-            const execAsync = promisify(exec);
-            const url = new URL(req.url!, `http://${req.headers.host}`);
-            const queryPath = url.searchParams.get("path") || "";
-            const targetDir = path.resolve(p.path, queryPath);
-            if (!targetDir.startsWith(path.resolve(p.path))) {
-              json(res, 403, { error: "Path is outside project root" }); return;
-            }
-            try { await stat(targetDir); } catch {
-              json(res, 404, { error: "Path does not exist" }); return;
-            }
-            const [cachedOut, untrackedOut, modifiedOut] = await Promise.all([
-              execAsync("git ls-files --cached --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
-              execAsync("git ls-files --others --exclude-standard --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
-              execAsync("git ls-files --modified --full-name " + JSON.stringify(queryPath || "."), { cwd: p.path, encoding: "utf-8", timeout: 5000 }),
-            ]);
-            const trackedFiles = cachedOut.stdout.trim().split("\n").filter(Boolean);
-            const untrackedSet = new Set(untrackedOut.stdout.trim().split("\n").filter(Boolean));
-            const modifiedSet = new Set(modifiedOut.stdout.trim().split("\n").filter(Boolean));
-            const dirEntries = await readdir(targetDir, { withFileTypes: true });
-            const entries = dirEntries.filter((entry) => {
-              if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".agentdock") return false;
-              return true;
-            }).map((entry) => {
-              const fullPath = path.join(targetDir, entry.name);
-              const relPath = path.relative(p.path, fullPath).replace(/\\/g, "/");
-              const isDir = entry.isDirectory();
-              let status: "untracked" | "modified" | "tracked";
-              if (isDir) {
-                status = trackedFiles.some((f) => f.startsWith(relPath + "/")) ? "tracked" : "untracked";
-              } else {
-                status = trackedFiles.includes(relPath) ? "tracked" : "untracked";
-              }
-              if (modifiedSet.has(relPath) && status === "tracked") status = "modified";
-              return { name: entry.name, path: relPath, isDir, status };
-            });
-            entries.sort((a, b) => { if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; return a.name.localeCompare(b.name); });
-            json(res, 200, { success: true, entries, currentPath: path.relative(p.path, targetDir).replace(/\\/g, "/") });
-          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
-          return;
-        }
 
         // GET /api/browse-dirs?path=... — list subdirectories for project picker
         if (pathname === "/api/browse-dirs" && method === "GET") {
@@ -567,6 +468,111 @@ export function apiPlugin(): Plugin {
           }
           return;
         }
+
+        // GET /api/projects/:id/config — read agentdock.config.yaml
+        const configReadMatch = pathname.match(/^\/api\/projects\/([^/]+)\/config$/);
+        if (configReadMatch && method === "GET") {
+          const id = configReadMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const { loadConfig } = await import("./config.js");
+            const { existsSync, readFileSync } = await import("node:fs");
+            const yamlPath = path.join(p.path, "agentdock.config.yaml");
+            const exists = existsSync(yamlPath);
+            const config = loadConfig(p.path);
+            const yaml = exists ? readFileSync(yamlPath, "utf-8") : "";
+            // Detect _PORT variables from project .env for UI hints
+            const envPath = path.join(p.path, ".env");
+            const envPorts = discoverPortKeysFromEnv(envPath);
+            json(res, 200, { success: true, config, exists, yaml, envPorts });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // POST /api/projects/:id/config — write agentdock.config.yaml
+        if (configReadMatch && method === "POST") {
+          const id = configReadMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const body = await parseBody(req);
+            const { AgentDockConfigSchema } = await import("./config.js");
+            const parsed = AgentDockConfigSchema.parse(body.config);
+            const { stringify, Scalar } = await import("yaml");
+            // Force double quotes on all hook run fields
+            const hooksForYaml: Record<string, unknown[]> = {};
+            if (parsed.hooks) {
+              for (const event of Object.keys(parsed.hooks)) {
+                hooksForYaml[event] = parsed.hooks[event].map((h) => {
+                  const s = new Scalar(h.run);
+                  s.type = Scalar.QUOTE_DOUBLE;
+                  return { ...h, run: s };
+                });
+              }
+            }
+            const yamlContent = stringify({ ...parsed, hooks: hooksForYaml }, { indent: 2 });
+            const { writeFileSync } = await import("node:fs");
+            const yamlPath = path.join(p.path, "agentdock.config.yaml");
+            writeFileSync(yamlPath, yamlContent, "utf-8");
+            json(res, 200, { success: true, yaml: yamlContent });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // GET /api/projects/:id/files?path= — list files with git-tracked status
+        const filesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/files$/);
+        if (filesMatch && method === "GET") {
+          const id = filesMatch[1];
+          try {
+            const d = getDb();
+            const p = d.select().from(projects).where(eq(projects.id, id)).get();
+            if (!p) { json(res, 404, { error: "Project not found" }); return; }
+            const url = new URL(req.url!, `http://${req.headers.host}`);
+            const relPath = url.searchParams.get("path") || "";
+            const targetDir = path.resolve(p.path, relPath);
+            // Security: ensure target is within project path
+            const relative = path.relative(p.path, targetDir);
+            if (relative.startsWith("..") || path.isAbsolute(relative)) { json(res, 400, { error: "Invalid path" }); return; }
+            const fs = await import("node:fs/promises");
+            const stat = await fs.stat(targetDir);
+            if (!stat.isDirectory()) { json(res, 400, { error: "Not a directory" }); return; }
+            // Get git-tracked files (async to avoid blocking event loop)
+            const { exec } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const execAsync = promisify(exec);
+            let trackedFiles = new Set<string>();
+            try {
+              const { stdout } = await execAsync("git ls-files", { cwd: p.path, encoding: "utf-8", timeout: 5000 });
+              for (const f of stdout.split("\n").filter(Boolean)) {
+                trackedFiles.add(f.replace(/\\/g, "/"));
+              }
+            } catch {}
+            const items = await fs.readdir(targetDir, { withFileTypes: true });
+            const entries: Array<{ name: string; path: string; type: "file" | "dir"; tracked: boolean }> = [];
+            const trackedFilesArray = Array.from(trackedFiles);
+            for (const item of items) {
+              if (item.name === "node_modules" || item.name === ".git" || item.name === ".agentdock") continue;
+              const itemRelPath = relPath ? `${relPath}/${item.name}` : item.name;
+              const normalizedRel = itemRelPath.replace(/\\/g, "/");
+              const isDir = item.isDirectory();
+              const tracked = isDir
+                ? trackedFilesArray.some(f => f.startsWith(normalizedRel + "/"))
+                : trackedFiles.has(normalizedRel);
+              entries.push({
+                name: item.name,
+                path: itemRelPath,
+                type: isDir ? "dir" : "file",
+                tracked,
+              });
+            }
+            json(res, 200, { success: true, entries, currentPath: relPath });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
 
         // DELETE /api/projects/:id
         const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);

@@ -631,9 +631,11 @@ export interface ProjectConfigData {
     version: string;
     resources: { sync: Array<{ source: string; strategy: string; skipIfMissing: boolean }> };
     hooks: Record<string, Array<{ run: string; required: boolean; timeout: number; cwd: string; async: boolean }>>;
+    env?: { ports?: string[] };
   };
   exists: boolean;
   yaml: string;
+  envPorts?: string[];
 }
 
 // GET /api/projects/:id/config
@@ -644,7 +646,7 @@ export function useProjectConfig(projectId: string) {
       const res = await fetch(`/api/projects/${projectId}/config`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      return { config: data.config, exists: data.exists, yaml: data.yaml };
+      return { config: data.config, exists: data.exists, yaml: data.yaml, envPorts: data.envPorts };
     },
     enabled: !!projectId,
     staleTime: 10_000,

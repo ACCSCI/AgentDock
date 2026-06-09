@@ -53,6 +53,7 @@ function defaultConfig(): AgentDockConfig {
     version: "1",
     resources: { sync: [] },
     hooks: {},
+    env: { ports: ["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT", "DEBUG_PORT", "PREVIEW_PORT"] },
   };
 }
 
