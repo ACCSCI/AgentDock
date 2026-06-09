@@ -3,6 +3,7 @@ import { DaemonState, PORT_KEYS, type SessionPorts } from "../daemon-state.js";
 import { AgentDockDaemon } from "../daemon.js";
 import { DaemonClient } from "../daemon-client.js";
 import http from "node:http";
+import { createServer, type Server } from "node:net";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -71,6 +72,14 @@ function post(port: number, pathname: string, body: unknown): Promise<{ status: 
     req.on("error", reject);
     req.write(json);
     req.end();
+  });
+}
+
+function listenOnPort(port: number): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(port, "127.0.0.1", () => resolve(server));
+    server.on("error", reject);
   });
 }
 
@@ -264,6 +273,23 @@ describe("Layer 1: sync/declare detects and heals port conflicts", () => {
 
     const inv = await get(daemon.getPort(), "/debug/invariants");
     expect(inv.data.valid).toBe(true);
+  });
+
+  it("T6b: DB ports occupied by external listener → reallocates full set", async () => {
+    await client.registerClient("c1", 100, ["/project"]);
+
+    const occupied = await listenOnPort(20030);
+    try {
+      const result = await client.declareSessions("c1", [
+        { sessionId: "s1", worktreePath: "/wt/s1", projectPath: "/project", ports: makePorts(20030) },
+      ]);
+
+      expect(result.results[0].status).toBe("allocated");
+      expect(result.results[0].ports.FRONTEND_PORT).not.toBe(20030);
+      expect(Object.values(result.results[0].ports)).not.toContain(20030);
+    } finally {
+      await new Promise<void>((resolve, reject) => occupied.close((err) => err ? reject(err) : resolve()));
+    }
   });
 
   it("T7: DB port conflicts with already-allocated → reallocates", async () => {

@@ -2,7 +2,7 @@ import http from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { FilePortAllocator, type PortAllocator } from "./port-allocator.js";
+import { FilePortAllocator, isPortAvailable, type PortAllocator } from "./port-allocator.js";
 import { Mutex } from "./mutex.js";
 import { DaemonState, PORT_KEYS_DEFAULT, PORT_RANGE_START, PORT_RANGE_END, type SessionPorts } from "./daemon-state.js";
 import { DaemonWAL } from "./daemon-wal.js";
@@ -110,10 +110,12 @@ export class AgentDockDaemon {
   private state: DaemonState;
   private wal: DaemonWAL;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPersistedHeartbeatAt = new Map<string, number>();
 
   // Heartbeat timeout: clients not sending heartbeat for 90s are considered dead
   private static HEARTBEAT_TIMEOUT = 90_000;
   private static HEARTBEAT_CHECK_INTERVAL = 30_000;
+  private static HEARTBEAT_PERSIST_INTERVAL = 30_000;
 
   constructor(options?: DaemonOptions) {
     this.port = options?.port ?? 20000;
@@ -140,7 +142,9 @@ export class AgentDockDaemon {
       this.server.listen(this.port, "127.0.0.1", () => {
         // Start heartbeat timeout cleanup
         this.heartbeatTimer = setInterval(() => {
-          this.cleanupStaleClients();
+          this.cleanupStaleClients().catch(() => {
+            // Ignore errors in cleanup (e.g., mutex contention)
+          });
         }, AgentDockDaemon.HEARTBEAT_CHECK_INTERVAL);
         resolve();
       });
@@ -168,8 +172,8 @@ export class AgentDockDaemon {
    * Clean up clients that haven't sent heartbeat within the timeout period.
    * Releases all sessions owned by stale clients.
    */
-  private cleanupStaleClients(): void {
-    this.mutex.runExclusive("state", () => {
+  private cleanupStaleClients(): Promise<void> {
+    return this.mutex.runExclusive("state", () => {
       const now = Date.now();
       let changed = false;
       for (const client of this.state.listClients()) {
@@ -182,14 +186,13 @@ export class AgentDockDaemon {
             }
           }
           this.state.unregisterClient(client.clientId);
+          this.lastPersistedHeartbeatAt.delete(client.clientId);
           changed = true;
         }
       }
       if (changed) {
         this.wal.persist(this.state);
       }
-    }).catch(() => {
-      // Ignore errors in cleanup (e.g., mutex contention)
     });
   }
 
@@ -392,6 +395,7 @@ export class AgentDockDaemon {
       }
       await this.mutex.runExclusive("state", () => {
         this.state.registerClient(clientId, pid, projectPaths);
+        this.lastPersistedHeartbeatAt.set(clientId, this.state.getClient(clientId)?.lastHeartbeat ?? Date.now());
         this.wal.persist(this.state);
       });
       this.json(res, 200, { success: true });
@@ -408,6 +412,7 @@ export class AgentDockDaemon {
       }
       await this.mutex.runExclusive("state", () => {
         this.state.unregisterClient(clientId);
+        this.lastPersistedHeartbeatAt.delete(clientId);
         this.wal.persist(this.state);
       });
       this.json(res, 200, { success: true });
@@ -423,8 +428,14 @@ export class AgentDockDaemon {
         return;
       }
       await this.mutex.runExclusive("state", () => {
+        const before = this.state.getClient(clientId)?.lastHeartbeat ?? 0;
         this.state.heartbeat(clientId);
-        // No wal.persist() — heartbeat only updates in-memory timestamp
+        const after = this.state.getClient(clientId)?.lastHeartbeat ?? before;
+        const lastPersisted = this.lastPersistedHeartbeatAt.get(clientId) ?? 0;
+        if (after > before && after - lastPersisted >= AgentDockDaemon.HEARTBEAT_PERSIST_INTERVAL) {
+          this.lastPersistedHeartbeatAt.set(clientId, after);
+          this.wal.persist(this.state);
+        }
       });
       this.json(res, 200, { success: true });
       return;
@@ -508,11 +519,32 @@ export class AgentDockDaemon {
         this.json(res, 400, { success: false, error: "clientId and sessionId required" });
         return;
       }
-      await this.mutex.runExclusive("state", () => {
-        this.state.releaseSession(sessionId);
-        this.wal.persist(this.state);
-      });
-      this.json(res, 200, { success: true });
+          const result = await this.mutex.runExclusive("state", async () => {
+            const ownership = this.state.getSessionOwnership(
+              sessionId,
+              clientId,
+              Date.now(),
+              AgentDockDaemon.HEARTBEAT_TIMEOUT,
+            );
+            if (ownership === "missing") {
+              return { status: "missing" as const };
+            }
+            if (ownership === "foreign") {
+              return { status: "forbidden" as const };
+            }
+
+            this.state.releaseSession(sessionId);
+            this.wal.persist(this.state);
+            return { status: "released" as const };
+          });
+
+          if (result.status === "missing") {
+            this.json(res, 404, { success: false, error: `Session ${sessionId} not found` });
+          } else if (result.status === "forbidden") {
+            this.json(res, 403, { success: false, error: `Session ${sessionId} is owned by another client` });
+          } else {
+            this.json(res, 200, { success: true });
+          }
       return;
     }
 
@@ -526,10 +558,20 @@ export class AgentDockDaemon {
       }
 
       try {
-        const ports = await this.mutex.runExclusive("state", async () => {
+        const result = await this.mutex.runExclusive("state", async () => {
           const session = this.state.getSession(sessionId);
           if (!session) {
-            throw new Error(`Session ${sessionId} not found`);
+            return { status: "missing" as const };
+          }
+
+          const ownership = this.state.getSessionOwnership(
+            sessionId,
+            clientId,
+            Date.now(),
+            AgentDockDaemon.HEARTBEAT_TIMEOUT,
+          );
+          if (ownership === "foreign") {
+            return { status: "forbidden" as const };
           }
 
           // Build exclusion set: all currently allocated ports + old ports
@@ -544,12 +586,22 @@ export class AgentDockDaemon {
           const newPorts: SessionPorts = {};
           oldKeys.forEach((key, i) => { newPorts[key] = allocated[i]; });
 
+          if (ownership === "reclaimable") {
+            this.state.claimSession(sessionId, clientId, this.state.getClient(clientId)?.pid ?? session.ownerPid);
+          }
+
           this.state.reassignSession(sessionId, newPorts);
           this.wal.persist(this.state);
-          return newPorts;
+          return { status: ownership === "reclaimable" ? "reclaimed" as const : "reassigned" as const, ports: newPorts };
         });
 
-        this.json(res, 200, { success: true, ports });
+        if (result.status === "missing") {
+          this.json(res, 404, { success: false, error: `Session ${sessionId} not found` });
+        } else if (result.status === "forbidden") {
+          this.json(res, 403, { success: false, error: `Session ${sessionId} is owned by another client` });
+        } else {
+          this.json(res, 200, { success: true, ports: result.ports, status: result.status });
+        }
       } catch (err) {
         this.json(res, 500, { success: false, error: err instanceof Error ? err.message : "Unknown error" });
       }
@@ -588,11 +640,34 @@ export class AgentDockDaemon {
 
             const existing = this.state.getSession(decl.sessionId);
             if (existing) {
-              // Session already known — return existing ports
-              results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "existing" });
-              // Update ownership
-              existing.ownerClientId = clientId;
-              existing.ownerPid = this.state.getClient(clientId)?.pid ?? existing.ownerPid;
+              const ownership = this.state.getSessionOwnership(
+                decl.sessionId,
+                clientId,
+                Date.now(),
+                AgentDockDaemon.HEARTBEAT_TIMEOUT,
+              );
+
+              if (ownership === "owned") {
+                this.state.claimSession(
+                  decl.sessionId,
+                  clientId,
+                  this.state.getClient(clientId)?.pid ?? existing.ownerPid,
+                );
+                results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "existing" });
+                continue;
+              }
+
+              if (ownership === "reclaimable") {
+                this.state.claimSession(
+                  decl.sessionId,
+                  clientId,
+                  this.state.getClient(clientId)?.pid ?? existing.ownerPid,
+                );
+                results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "reclaimed" });
+                continue;
+              }
+
+              results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "foreign" });
               continue;
             }
 
@@ -610,7 +685,12 @@ export class AgentDockDaemon {
             const keys = dedupedKeys.length > 0 ? dedupedKeys : Object.keys(decl.ports ?? {});
             const effectiveKeys = keys.length > 0 ? keys : PORT_KEYS_DEFAULT;
             const hasAllPorts = !!(decl.ports && effectiveKeys.every((key) => typeof decl.ports![key] === "number"));
-            const needsRealloc = !hasAllPorts || effectiveKeys.some((key) => this.state.isPortAllocated(decl.ports![key]));
+            const providedPortsAreBindable = hasAllPorts
+              ? (await Promise.all(effectiveKeys.map((key) => isPortAvailable(decl.ports![key])))).every(Boolean)
+              : false;
+            const needsRealloc = !hasAllPorts
+              || !providedPortsAreBindable
+              || effectiveKeys.some((key) => this.state.isPortAllocated(decl.ports![key]));
 
             if (hasAllPorts && !needsRealloc) {
               // Use provided ports (from database) — no conflict
@@ -795,6 +875,13 @@ export class AgentDockDaemon {
         success: true,
         message: `Client ${clientId} heartbeat set to 0, will be cleaned up on next check`,
       });
+      return;
+    }
+
+    // POST /debug/trigger-cleanup — manually trigger cleanupStaleClients for testing
+    if (pathname === "/debug/trigger-cleanup" && method === "POST") {
+      await this.cleanupStaleClients();
+      this.json(res, 200, { success: true, message: "Cleanup triggered" });
       return;
     }
 

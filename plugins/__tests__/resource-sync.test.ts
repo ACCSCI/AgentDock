@@ -256,6 +256,26 @@ describe("目录同步 syncOne", () => {
     expect(existsSync(path.join(worktreeDir, "uploads"))).toBe(true);
     expect(readdirSync(path.join(worktreeDir, "uploads"))).toEqual([]);
   });
+
+  it("B14b: skip 策略同步目录到空 worktree — 目标不存在时复制目录", async () => {
+    // Project has a directory, worktree has nothing
+    const uploadsDir = path.join(projectDir, "uploads");
+    mkdirSync(uploadsDir, { recursive: true });
+    writeFileSync(path.join(uploadsDir, "a.txt"), "file-a");
+    writeFileSync(path.join(uploadsDir, "b.txt"), "file-b");
+
+    const result = await service.syncOne(
+      projectDir,
+      worktreeDir,
+      makeResource("uploads/", "skip"),
+    );
+    expect(result.success).toBe(true);
+    expect(result.action).toBe("copied");
+    // Directory should have been copied
+    expect(existsSync(path.join(worktreeDir, "uploads", "a.txt"))).toBe(true);
+    expect(existsSync(path.join(worktreeDir, "uploads", "b.txt"))).toBe(true);
+    expect(readFileSync(path.join(worktreeDir, "uploads", "a.txt"), "utf-8")).toBe("file-a");
+  });
 });
 
 // ============================================================

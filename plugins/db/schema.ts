@@ -1,4 +1,4 @@
-﻿import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+﻿import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -19,6 +19,7 @@ export const sessions = sqliteTable("sessions", {
   worktreePath: text("worktree_path").notNull(),
   ports: text("ports"),
   backgroundHookStatus: text("background_hook_status"),
+  sortOrder: integer("sort_order").$defaultFn(() => Date.now()),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

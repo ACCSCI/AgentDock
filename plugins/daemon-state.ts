@@ -159,6 +159,39 @@ export class DaemonState {
     return this.sessions.get(sessionId) ?? null;
   }
 
+  isSessionOwnedBy(sessionId: string, clientId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    return !!session && session.ownerClientId === clientId;
+  }
+
+  getSessionOwnership(
+    sessionId: string,
+    clientId: string,
+    now: number,
+    staleAfterMs: number,
+  ): "missing" | "owned" | "reclaimable" | "foreign" {
+    const session = this.sessions.get(sessionId);
+    if (!session) return "missing";
+    if (session.ownerClientId === clientId) return "owned";
+
+    const owner = this.clients.get(session.ownerClientId);
+    if (!owner || now - owner.lastHeartbeat > staleAfterMs) {
+      return "reclaimable";
+    }
+
+    return "foreign";
+  }
+
+  claimSession(sessionId: string, clientId: string, ownerPid: number): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    session.ownerClientId = clientId;
+    session.ownerPid = ownerPid;
+  }
+
   listSessions(): SessionEntry[] {
     return [...this.sessions.values()];
   }
