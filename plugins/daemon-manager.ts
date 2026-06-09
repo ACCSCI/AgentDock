@@ -1,7 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { DaemonClient } from "./daemon-client.js";
+import { readDaemonInfo, isProcessAlive, deleteDaemonInfo, writeDaemonInfo, DAEMON_STARTUP_TIMEOUT_MS, DAEMON_STARTUP_POLL_MS, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MAX_MS } from "./daemon-discovery.js";
+import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
 
 // ============================================================
 // Types
@@ -13,50 +16,55 @@ export interface DaemonManagerResult {
 }
 
 // ============================================================
-// DaemonManager — detect / start / connect
+// DaemonManager — discover / elect / start / connect
 // ============================================================
 
-const DAEMON_PORT = 20000;
-const STARTUP_TIMEOUT_MS = 5000;
-const STARTUP_POLL_MS = 100;
+const STARTUP_TIMEOUT_MS = DAEMON_STARTUP_TIMEOUT_MS;
+const STARTUP_POLL_MS = DAEMON_STARTUP_POLL_MS;
 
 /**
  * Manages the lifecycle of the AgentDock daemon process.
  *
- * Startup flow:
- * 1. Detect — check if a daemon is already running (GET /health)
- * 2. Start  — if missing, spawn daemon as a background child process
- * 3. Connect — return a DaemonClient connected to the daemon
- * 4. Allocate — client can now call POST /ports/allocate
+ * Startup flow (dynamic discovery):
+ * 1. Read daemon.json — check if daemon info exists
+ * 2. Verify daemon is alive (PID alive + TCP listening)
+ * 3. If alive → connect to existing daemon
+ * 4. If dead/missing → participate in leader election
+ * 5. Leader: spawn daemon with random port, wait for readiness
+ * 6. Follower: wait for leader to write daemon.json, then connect
+ *
+ * Uses OS-level file locking for leader election to prevent
+ * multiple daemons from starting simultaneously.
  */
 export class DaemonManager {
-  private client: DaemonClient;
+  private client: DaemonClient | null = null;
   private child: ChildProcess | null = null;
-  private daemonPort: number;
+  private baseDir: string;
 
-  constructor(port: number = DAEMON_PORT) {
-    this.daemonPort = port;
-    this.client = new DaemonClient(port);
+  constructor(baseDir?: string) {
+    this.baseDir = baseDir ?? path.join(os.homedir(), ".agentdock");
   }
 
   /**
-   * Detect daemon, start if missing, connect.
+   * Discover daemon, start if missing, connect.
    * Returns the client ready for port allocation.
    */
   async init(): Promise<DaemonManagerResult> {
-    // 1. Detect
-    const healthy = await this.client.health();
-    if (healthy) {
-      return { client: this.client, started: false };
+    // Phase 1: Try to discover an existing daemon
+    const existingInfo = readDaemonInfo();
+    if (existingInfo && isProcessAlive(existingInfo.pid)) {
+      // Info file exists and PID is alive — try to connect
+      const tempClient = new DaemonClient(existingInfo.port);
+      if (await tempClient.health()) {
+        this.client = tempClient;
+        return { client: this.client, started: false };
+      }
+      // Process alive but not listening → stale, fall through to election
     }
 
-    // 2. Start
-    await this.startDaemon();
-
-    // 3. Wait for readiness
-    await this.waitForReady();
-
-    return { client: this.client, started: true };
+    // Phase 2: Leader election
+    const result = await this.runLeaderElection();
+    return result;
   }
 
   /**
@@ -67,19 +75,113 @@ export class DaemonManager {
       this.child.kill();
       this.child = null;
     }
+    this.client = null;
   }
 
   // --- Internal ---
 
-  private async startDaemon(): Promise<void> {
-    // Resolve the daemon entry point
-    // In dev: plugins/daemon.ts (via tsx)
-    // In prod: plugins/daemon.js (compiled)
+  private async runLeaderElection(): Promise<DaemonManagerResult> {
+    const lockPath = path.join(this.baseDir, "daemon-lock");
+
+    // Try to acquire the leader lock
+    let lock: { path: string; release: () => Promise<void> } | null = null;
+    let isLeader = false;
+
+    try {
+      lock = await acquireLock(lockPath, {
+        timeoutMs: LEADER_LOCK_TIMEOUT_MS,
+        retryMs: 50,
+        metadata: { role: "leader-election" },
+      });
+      isLeader = true;
+    } catch (err) {
+      if (err instanceof LockAcquisitionError) {
+        isLeader = false;
+      } else {
+        throw err;
+      }
+    }
+
+    if (!isLeader) {
+      // Follower: wait for leader to start the daemon
+      return this.waitForLeaderDaemon();
+    }
+
+    // Leader: spawn the daemon
+    try {
+      return await this.spawnDaemonAsLeader(() => {
+        lock?.release();
+      });
+    } catch (err) {
+      // If spawning fails, release lock and clean up
+      await lock?.release();
+      deleteDaemonInfoQuiet();
+      throw err;
+    }
+  }
+
+  private async waitForLeaderDaemon(): Promise<DaemonManagerResult> {
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      const info = readDaemonInfo();
+      if (info && isProcessAlive(info.pid)) {
+        const tempClient = new DaemonClient(info.port);
+        if (await tempClient.health()) {
+          return { client: tempClient, started: false };
+        }
+      }
+      await sleep(STARTUP_POLL_MS);
+    }
+
+    // Leader timed out — try to become leader ourselves
+    throw new Error(
+      `Leader daemon did not become ready within ${STARTUP_TIMEOUT_MS}ms`,
+    );
+  }
+
+  private async spawnDaemonAsLeader(
+    onDone: () => void,
+  ): Promise<DaemonManagerResult> {
+    // Random jitter to reduce thundering herd if multiple instances
+    // somehow pass the lock simultaneously
+    const jitter = Math.random() * SPAWN_JITTER_MAX_MS;
+    await sleep(jitter);
+
+    // Re-check: daemon may have been started between election and now
+    const info = readDaemonInfo();
+    if (info && isProcessAlive(info.pid)) {
+      const tempClient = new DaemonClient(info.port);
+      if (await tempClient.health()) {
+        onDone();
+        return { client: tempClient, started: false };
+      }
+    }
+
+    // Spawn daemon with port=0 (OS assigns random available port)
+    await this.startDaemon(0);
+
+    // Wait for daemon to become ready
+    await this.waitForReady();
+
+    // Verify the daemon info file was written correctly
+    const finalInfo = readDaemonInfo();
+    if (!finalInfo || !isProcessAlive(finalInfo.pid)) {
+      throw new Error("Daemon started but did not write daemon.json");
+    }
+
+    // Re-create client with the actual port from daemon.json
+    this.client = new DaemonClient(finalInfo.port);
+
+    onDone();
+    return { client: this.client, started: true };
+  }
+
+  private async startDaemon(port: number): Promise<void> {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     const daemonPath = path.join(__dirname, "daemon.js");
     const daemonPathTs = path.join(__dirname, "daemon.ts");
 
-    // Try compiled JS first, fall back to tsx
     let cmd: string;
     let args: string[];
     const { existsSync } = await import("node:fs");
@@ -93,7 +195,7 @@ export class DaemonManager {
       throw new Error(`Daemon entry point not found: ${daemonPath} or ${daemonPathTs}`);
     }
 
-    const env = { ...process.env, AGENTDOCK_DAEMON_PORT: String(this.daemonPort) };
+    const env = { ...process.env, AGENTDOCK_DAEMON_PORT: String(port) };
 
     this.child = spawn(cmd, args, {
       detached: true,
@@ -118,8 +220,15 @@ export class DaemonManager {
 
     while (Date.now() < deadline) {
       try {
-        const healthy = await this.client.health();
-        if (healthy) return;
+        const info = readDaemonInfo();
+        if (info && isProcessAlive(info.pid)) {
+          const tempClient = new DaemonClient(info.port);
+          const healthy = await tempClient.health();
+          if (healthy) {
+            this.client = tempClient;
+            return;
+          }
+        }
       } catch {
         // Daemon not ready yet
       }
@@ -127,7 +236,7 @@ export class DaemonManager {
     }
 
     throw new Error(
-      `Daemon did not start within ${STARTUP_TIMEOUT_MS}ms (port ${this.daemonPort})`,
+      `Daemon did not start within ${STARTUP_TIMEOUT_MS}ms`,
     );
   }
 }
@@ -170,4 +279,8 @@ export function setDaemonClient(client: DaemonClient): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function deleteDaemonInfoQuiet(): void {
+  try { deleteDaemonInfo(); } catch { /* ignore */ }
 }
