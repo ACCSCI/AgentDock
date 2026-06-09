@@ -20,7 +20,7 @@ function ErrorCard({ error, index }: { error: HookError; index: number }) {
         <span className="hook-error-card-index">{index + 1}.</span>
         <code className="hook-error-card-command">{error.run}</code>
         <span className="hook-error-card-exit">
-          {error.timedOut ? "⏱ 超时" : `exit ${error.exitCode}`}
+          {error.timedOut ? "⏱ 超时" : error.exitCode !== null && error.exitCode !== undefined ? `exit ${error.exitCode}` : "失败"}
         </span>
       </button>
       {expanded && (

@@ -88,7 +88,7 @@ export function loadConfig(projectPath: string): AgentDockConfig {
     for (const event of Object.keys(parsed.hooks)) {
       if (Array.isArray(parsed.hooks[event])) {
         parsed.hooks[event] = parsed.hooks[event].map((h: Record<string, unknown>) => {
-          if (h.async && h.required) {
+          if (h && typeof h === "object" && h.async && h.required) {
             return { ...h, required: false };
           }
           return h;

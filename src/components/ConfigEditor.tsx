@@ -367,7 +367,12 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                         <input
                           type="checkbox"
                           checked={hook.required}
-                          onChange={(e) => updateHook(activeHookTab, i, "required", e.target.checked)}
+                          onChange={(e) => {
+                            updateHook(activeHookTab, i, "required", e.target.checked);
+                            if (e.target.checked && hook.async) {
+                              updateHook(activeHookTab, i, "async", false);
+                            }
+                          }}
                         />
                         <span>失败中断</span>
                       </label>

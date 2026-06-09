@@ -690,7 +690,7 @@ export function apiPlugin(): Plugin {
                         stdout: (r.stdout ?? "").slice(0, 2000),
                         stderr: (r.stderr ?? "").slice(0, 2000),
                         timedOut: r.timedOut,
-                        error: r.error ?? null,
+                        error: r.error ? String(r.error) : null,
                       })),
                     );
                   } else {
