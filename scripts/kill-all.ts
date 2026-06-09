@@ -19,6 +19,7 @@ const AGENTDOCK_DIR = join(os.homedir(), ".agentdock");
 const REGISTRY_PATH = join(AGENTDOCK_DIR, "registry.json");
 const DAEMON_STATE_PATH = join(AGENTDOCK_DIR, "daemon-state.json");
 const DAEMON_INFO_PATH = join(AGENTDOCK_DIR, "daemon.json");
+const DAEMON_LOCK_PATH = join(AGENTDOCK_DIR, "daemon-lock");
 
 function log(msg: string) {
   console.log(`[kill-all] ${msg}`);
@@ -64,6 +65,16 @@ function findDaemonPid(): number | null {
       const info = JSON.parse(readFileSync(DAEMON_INFO_PATH, "utf-8"));
       if (info.pid && isProcessAlive(info.pid)) {
         return info.pid;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Fallback 1: read daemon-lock file (leader election lock holder)
+  if (existsSync(DAEMON_LOCK_PATH)) {
+    try {
+      const lockData = JSON.parse(readFileSync(DAEMON_LOCK_PATH, "utf-8"));
+      if (lockData.pid && isProcessAlive(lockData.pid)) {
+        return lockData.pid;
       }
     } catch { /* ignore */ }
   }

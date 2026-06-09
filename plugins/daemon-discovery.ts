@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createConnection } from "node:net";
 import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
 
 // ============================================================
@@ -109,7 +110,7 @@ export function writeDaemonInfo(pid: number, port: number): void {
     if (existsSync(infoPath)) {
       unlinkSync(infoPath);
     }
-    renameSync(tmpPath, infoPath);
+    atomicRename(tmpPath, infoPath);
   } catch {
     // Fallback: direct write
     writeFileSync(infoPath, JSON.stringify(info, null, 2), "utf-8");
@@ -277,7 +278,7 @@ export async function discoverDaemon(
  */
 async function isDaemonListening(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const socket = require("node:net").createConnection(port, "127.0.0.1", () => {
+    const socket = createConnection(port, "127.0.0.1", () => {
       socket.destroy();
       resolve(true);
     });
@@ -293,13 +294,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function renameSync(from: string, to: string): void {
+function atomicRename(from: string, to: string): void {
   try {
-    const { renameSync } = require("node:fs");
     renameSync(from, to);
   } catch {
-    // On Windows, rename fails if target exists
-    const { unlinkSync, renameSync } = require("node:fs");
+    // On Windows, rename fails if target exists — unlink then retry
     try { unlinkSync(to); } catch { /* ignore */ }
     renameSync(from, to);
   }

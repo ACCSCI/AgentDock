@@ -1,4 +1,4 @@
-import { existsSync, openSync, closeSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 // ============================================================
@@ -53,7 +53,7 @@ export async function acquireLock(
   const lockDir = path.dirname(lockPath);
 
   if (!existsSync(lockDir)) {
-    try { require("node:fs").mkdirSync(lockDir, { recursive: true }); } catch { /* ignore */ }
+    try { mkdirSync(lockDir, { recursive: true }); } catch { /* ignore */ }
   }
 
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
@@ -73,12 +73,13 @@ export async function acquireLock(
     } catch (err: any) {
       lastErr = err instanceof Error ? err : new Error(String(err));
       if (err.code === "EEXIST") {
-        if (timeoutMs === 0 || isLockStale(lockPath)) {
-          // Stale or non-blocking — remove and retry
+        if (timeoutMs === 0) {
+          // Non-blocking: never delete a held lock — just report contention
+          throw new LockAcquisitionError(lockPath, "held by another process");
+        }
+        if (isLockStale(lockPath)) {
+          // Only break stale locks; never delete a live holder
           try { unlinkSync(lockPath); } catch { /* ignore */ }
-          if (timeoutMs === 0) {
-            throw new LockAcquisitionError(lockPath, "held by another process");
-          }
           continue;
         }
         // Lock held by live process — wait

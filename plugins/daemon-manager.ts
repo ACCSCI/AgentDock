@@ -109,8 +109,8 @@ export class DaemonManager {
 
     // Leader: spawn the daemon
     try {
-      return await this.spawnDaemonAsLeader(() => {
-        lock?.release();
+      return await this.spawnDaemonAsLeader(async () => {
+        await lock?.release();
       });
     } catch (err) {
       // If spawning fails, release lock and clean up
