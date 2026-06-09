@@ -54,6 +54,10 @@ const MIGRATIONS: Array<(sqlite: Database.Database) => void> = [
       WHERE sort_order IS NULL
     `);
   },
+  // v5: add sessions.background_hook_errors.
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "sessions", "background_hook_errors", "TEXT");
+  },
 ];
 
 /** Target schema version after all migrations are applied. */

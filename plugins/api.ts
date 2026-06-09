@@ -501,6 +501,15 @@ export function apiPlugin(): Plugin {
             const body = await parseBody(req);
             const { AgentDockConfigSchema } = await import("./config.js");
             const parsed = AgentDockConfigSchema.parse(body.config);
+            // Strip `required` from async hooks to maintain schema consistency.
+            if (parsed.hooks) {
+              for (const event of Object.keys(parsed.hooks)) {
+                parsed.hooks[event] = parsed.hooks[event].map((h) => {
+                  if (h.async && h.required) return { ...h, required: false };
+                  return h;
+                });
+              }
+            }
             const { stringify, Scalar } = await import("yaml");
             // Force double quotes on all hook run fields
             const hooksForYaml: Record<string, unknown[]> = {};
@@ -668,8 +677,26 @@ export function apiPlugin(): Plugin {
                   }).run();
                 },
                 onBackgroundHookComplete: (report) => {
-                  const status = report.success ? "completed" : "failed";
-                  d.update(sessions).set({ backgroundHookStatus: status }).where(eq(sessions.id, id)).run();
+                  // For async hooks, any individual failure (even non-required)
+                  // should be surfaced to the user as a "failed" status.
+                  const anyFailure = report.results.some((r) => !r.success);
+                  const status = anyFailure ? "failed" : "completed";
+                  const update: Record<string, unknown> = { backgroundHookStatus: status };
+                  if (anyFailure) {
+                    update.backgroundHookErrors = JSON.stringify(
+                      report.results.filter((r) => !r.success).map((r) => ({
+                        run: r.hook.run,
+                        exitCode: r.exitCode,
+                        stdout: (r.stdout ?? "").slice(0, 2000),
+                        stderr: (r.stderr ?? "").slice(0, 2000),
+                        timedOut: r.timedOut,
+                        error: r.error ? String(r.error) : null,
+                      })),
+                    );
+                  } else {
+                    update.backgroundHookErrors = null;
+                  }
+                  d.update(sessions).set(update).where(eq(sessions.id, id)).run();
                 },
               });
               d.update(sessions).set({ ports: JSON.stringify(result.ports) }).where(eq(sessions.id, id)).run();
@@ -881,8 +908,24 @@ export function apiPlugin(): Plugin {
               payload: {},
             };
             engine.execute("afterCreateSession", ctx).then((report) => {
-              const status = report.success ? "completed" : "failed";
-              d.update(sessions).set({ backgroundHookStatus: status }).where(eq(sessions.id, id)).run();
+              const anyFailure = report.results.some((r) => !r.success);
+              const status = anyFailure ? "failed" : "completed";
+              const update: Record<string, unknown> = { backgroundHookStatus: status };
+              if (anyFailure) {
+                update.backgroundHookErrors = JSON.stringify(
+                  report.results.filter((r) => !r.success).map((r) => ({
+                    run: r.hook.run,
+                    exitCode: r.exitCode,
+                    stdout: (r.stdout ?? "").slice(0, 2000),
+                    stderr: (r.stderr ?? "").slice(0, 2000),
+                    timedOut: r.timedOut,
+                    error: r.error ?? null,
+                  })),
+                );
+              } else {
+                update.backgroundHookErrors = null;
+              }
+              d.update(sessions).set(update).where(eq(sessions.id, id)).run();
             }).catch(() => {
               d.update(sessions).set({ backgroundHookStatus: "failed" }).where(eq(sessions.id, id)).run();
             });
@@ -901,6 +944,20 @@ export function apiPlugin(): Plugin {
             const s = d.select().from(sessions).where(eq(sessions.id, id)).get();
             if (!s) { json(res, 404, { error: "Session not found" }); return; }
             json(res, 200, { success: true, status: s.backgroundHookStatus ?? null });
+          } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
+        // GET /api/sessions/:id/hook-errors — return detailed error info for failed hooks
+        const hookErrMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/hook-errors$/);
+        if (hookErrMatch && method === "GET") {
+          const id = hookErrMatch[1];
+          try {
+            const d = getDb();
+            const s = d.select().from(sessions).where(eq(sessions.id, id)).get();
+            if (!s) { json(res, 404, { error: "Session not found" }); return; }
+            const errors = s.backgroundHookErrors ? JSON.parse(s.backgroundHookErrors) : [];
+            json(res, 200, { success: true, errors });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }

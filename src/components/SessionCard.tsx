@@ -247,22 +247,65 @@ export function SessionCard({
     );
   }
 
-  // Failed state — async background hook failed, show warning + retry button
+  // Failed state — async background hook failed, show warning + retry + view logs
   if (isBackgroundHookFailed(session)) {
     return (
-      <div className="session-card session-card-failed">
+      <div
+        className="session-card session-card-failed"
+        onClick={() => onSelect(session.id)}
+        onKeyDown={(e) => e.key === "Enter" && onSelect(session.id)}
+        tabIndex={0}
+        role="button"
+        aria-pressed={isActive}
+      >
         <div className="session-card-header">
           <span className="failed-icon">⚠</span>
           <span className="session-name">{session.name}</span>
         </div>
         <div className="failed-hint">环境初始化失败</div>
-        <button
-          type="button"
-          className="failed-retry-btn"
-          onClick={(e) => { e.stopPropagation(); onRetryHooks(session.id); }}
-        >
-          重试
-        </button>
+        <div className="failed-actions">
+          <button
+            type="button"
+            className="failed-log-btn"
+            onClick={(e) => { e.stopPropagation(); onSelect(session.id); }}
+          >
+            查看失败日志
+          </button>
+          <button
+            type="button"
+            className="failed-retry-btn"
+            onClick={(e) => { e.stopPropagation(); onRetryHooks(session.id); }}
+          >
+            重试
+          </button>
+          {confirmingDelete ? (
+            <span className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
+              <span className="session-delete-confirm-text">确认删除?</span>
+              <button
+                type="button"
+                className="session-delete-confirm-btn session-delete-confirm-yes"
+                onClick={() => { setConfirmingDelete(false); onDelete(session.id); }}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="session-delete-confirm-btn session-delete-confirm-no"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="failed-delete-btn"
+              onClick={(e) => { e.stopPropagation(); setConfirmingDelete(true); }}
+            >
+              删除
+            </button>
+          )}
+        </div>
       </div>
     );
   }

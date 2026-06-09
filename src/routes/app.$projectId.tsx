@@ -1,9 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { useProjects, isBackgroundHookRunning } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { TerminalManager } from "../components/TerminalManager";
 import { ConfigEditor } from "../components/ConfigEditor";
+import { HookErrorModal } from "../components/HookErrorModal";
 
 export const Route = createFileRoute("/app/$projectId")({
   component: ProjectWorkspace,
@@ -16,6 +17,8 @@ function ProjectWorkspace() {
   const [dismissedStatuses, setDismissedStatuses] = useState<Record<string, true>>({});
   const project = projects?.find((p) => p.id === projectId);
   const activeSession = project?.sessions.find((s) => s.id === activeSessionId);
+  const [showHookErrors, setShowHookErrors] = useState(false);
+
   const transientStatus = activeSession?.status === "allocated" || activeSession?.status === "reclaimed"
     ? activeSession.status
     : null;
@@ -40,6 +43,15 @@ function ProjectWorkspace() {
         <div className="workspace-session-info">
           <span className="workspace-session-label">{activeSession.name}</span>
           <span className="workspace-session-path">{activeSession.worktreePath}</span>
+          {activeSession.backgroundHookStatus === "failed" && (
+            <button
+              type="button"
+              className="workspace-hook-errors-btn"
+              onClick={() => setShowHookErrors(true)}
+            >
+              ⚠ 查看失败日志
+            </button>
+          )}
           {shouldShowStatus && (
             <button
               type="button"
@@ -74,6 +86,12 @@ function ProjectWorkspace() {
           <ConfigEditor projectId={project.id} projectPath={project.path} />
         )}
       </div>
+      {showHookErrors && activeSession && (
+        <HookErrorModal
+          sessionId={activeSession.id}
+          onClose={() => setShowHookErrors(false)}
+        />
+      )}
     </div>
   );
 }

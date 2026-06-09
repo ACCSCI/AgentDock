@@ -357,20 +357,27 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <button type="button" className="config-btn-delete" onClick={() => removeHook(activeHookTab, i)}>×</button>
                 </div>
                 <div className="config-entry-row config-entry-row-fields">
-                  <div className="config-field">
-                    <label>
-                      required
-                      <span className="config-field-help" title={HELP.required}>?</span>
-                    </label>
-                    <label className="config-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={hook.required}
-                        onChange={(e) => updateHook(activeHookTab, i, "required", e.target.checked)}
-                      />
-                      <span>失败中断</span>
-                    </label>
-                  </div>
+                  {!hook.async && (
+                    <div className="config-field">
+                      <label>
+                        required
+                        <span className="config-field-help" title={HELP.required}>?</span>
+                      </label>
+                      <label className="config-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={hook.required}
+                          onChange={(e) => {
+                            updateHook(activeHookTab, i, "required", e.target.checked);
+                            if (e.target.checked && hook.async) {
+                              updateHook(activeHookTab, i, "async", false);
+                            }
+                          }}
+                        />
+                        <span>失败中断</span>
+                      </label>
+                    </div>
+                  )}
                   <div className="config-field">
                     <label>
                       timeout (ms)
@@ -403,7 +410,13 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                       <input
                         type="checkbox"
                         checked={hook.async}
-                        onChange={(e) => updateHook(activeHookTab, i, "async", e.target.checked)}
+                        onChange={(e) => {
+                          updateHook(activeHookTab, i, "async", e.target.checked);
+                          // async 和 required 互斥 — 勾选 async 时自动去掉 required
+                          if (e.target.checked && hook.required) {
+                            updateHook(activeHookTab, i, "required", false);
+                          }
+                        }}
                       />
                       <span>异步执行</span>
                     </label>

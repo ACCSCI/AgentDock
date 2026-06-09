@@ -551,6 +551,9 @@ export function useBackgroundHookStatus(sessionId: string | null, enabled = true
       }));
       return changed ? next : old;
     });
+    // When the background hook completes or fails, invalidate the hook errors
+    // cache so the UI can fetch the latest details.
+    queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
   }, [sessionId, status, queryClient]);
 
   return query;
@@ -566,6 +569,31 @@ export function isBackgroundHookFailed(s: SessionListItem): boolean {
   return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
 }
 
+// --- Hook error detail types ---
+export interface HookError {
+  run: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  error: string | null;
+}
+
+// GET /api/sessions/:id/hook-errors
+export function useHookErrors(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["hookErrors", sessionId],
+    queryFn: async (): Promise<HookError[]> => {
+      const res = await fetch(`/api/sessions/${sessionId}/hook-errors`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.errors;
+    },
+    enabled: !!sessionId,
+    staleTime: 5_000,
+  });
+}
+
 // POST /api/sessions/:id/retry-hooks
 export function useRetryHook() {
   const queryClient = useQueryClient();
@@ -576,8 +604,9 @@ export function useRetryHook() {
       if (!res.ok) throw new Error(data.error || "Failed to retry hooks");
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, sessionId) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
     },
   });
 }
