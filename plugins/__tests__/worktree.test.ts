@@ -9,9 +9,11 @@ import {
   getWorktreePath,
   isRegisteredWorktree,
   listWorktrees,
+  removeOrphanBranch,
   removeOrphanDir,
   removeWorktree,
   renameWorktree,
+  scanOrphanBranches,
   validateBranchName,
 } from "../worktree.js";
 
@@ -64,7 +66,7 @@ describe("isRegisteredWorktree", () => {
 describe("removeWorktree", () => {
   it("W1: 路径不存在时抛出 Worktree not found", async () => {
     await expect(
-      removeWorktree(projectDir, "nonexistent", true),
+      removeWorktree(projectDir, "nonexistent", { force: true }),
     ).rejects.toThrow("Worktree not found");
   });
 
@@ -76,7 +78,7 @@ describe("removeWorktree", () => {
 
     expect(existsSync(fakePath)).toBe(true);
 
-    const result = await removeWorktree(projectDir, fakeId, true);
+    const result = await removeWorktree(projectDir, fakeId, { force: true });
 
     expect(result.removed).toBe(fakePath);
     expect(existsSync(fakePath)).toBe(false);
@@ -87,7 +89,7 @@ describe("removeWorktree", () => {
 
     expect(await isRegisteredWorktree(projectDir, result.worktreePath)).toBe(true);
 
-    const removed = await removeWorktree(projectDir, "s3", true);
+    const removed = await removeWorktree(projectDir, "s3", { force: true });
 
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
@@ -104,7 +106,7 @@ describe("removeWorktree", () => {
     mkdirSync(fakePath, { recursive: true });
 
     // Should succeed without error — no git command executed
-    const result = await removeWorktree(projectDir, fakeId, true);
+    const result = await removeWorktree(projectDir, fakeId, { force: true });
     expect(result.removed).toBe(fakePath);
     expect(existsSync(fakePath)).toBe(false);
   });
@@ -114,7 +116,7 @@ describe("removeWorktree", () => {
     const fakePath = getWorktreePath(projectDir, fakeId);
     mkdirSync(fakePath, { recursive: true });
 
-    const result = await removeWorktree(projectDir, fakeId, false);
+    const result = await removeWorktree(projectDir, fakeId, { force: false });
     expect(result.removed).toBe(fakePath);
     expect(existsSync(fakePath)).toBe(false);
   });
@@ -124,7 +126,7 @@ describe("removeWorktree", () => {
     const fileInWorktree = path.join(result.worktreePath, "hook-created-file.txt");
     writeFileSync(fileInWorktree, "hook output data\n");
 
-    const removed = await removeWorktree(projectDir, "s5", true);
+    const removed = await removeWorktree(projectDir, "s5", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
   });
@@ -136,7 +138,7 @@ describe("removeWorktree", () => {
     writeFileSync(path.join(nestedDir, "data.json"), "{}");
     writeFileSync(path.join(result.worktreePath, "debug.log"), "some log\n");
 
-    const removed = await removeWorktree(projectDir, "s6", true);
+    const removed = await removeWorktree(projectDir, "s6", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
   });
@@ -145,7 +147,7 @@ describe("removeWorktree", () => {
     const result = createWorktree(projectDir, "s7");
     writeFileSync(path.join(result.worktreePath, "locked-file.dat"), "data");
 
-    const removed = await removeWorktree(projectDir, "s7", true);
+    const removed = await removeWorktree(projectDir, "s7", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
   });
@@ -154,7 +156,7 @@ describe("removeWorktree", () => {
     const result = createWorktree(projectDir, "s8");
     writeFileSync(path.join(result.worktreePath, "temp.txt"), "data");
 
-    await removeWorktree(projectDir, "s8", true);
+    await removeWorktree(projectDir, "s8", { force: true });
     expect(existsSync(result.worktreePath)).toBe(false);
 
     const branches = execSync("git branch --list", { cwd: projectDir, encoding: "utf-8", stdio: "pipe" });
@@ -170,7 +172,7 @@ describe("removeWorktree", () => {
     const lockedFile = path.join(result.worktreePath, "potentially-locked.bin");
     writeFileSync(lockedFile, Buffer.alloc(1024, 0xFF));
 
-    const removed = await removeWorktree(projectDir, "s9", true);
+    const removed = await removeWorktree(projectDir, "s9", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
   });
@@ -343,3 +345,207 @@ describe("renameWorktree newName injection safety", () => {
     expect(result.newBranch).toBe("agentdock/second");
   });
 });
+
+// ============================================================
+// removeWorktree with currentBranch — the rename-then-delete bug
+// (#35 root cause: removeWorktree used to hard-code
+// `agentdock/${sessionId}` and leave the renamed branch dangling)
+// ============================================================
+describe("removeWorktree currentBranch", () => {
+  function listBranches(): string {
+    return execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  }
+
+  it("WRM1: rename 后 remove 必须删掉 renamed branch（不传 currentBranch 会遗留 dangling）", async () => {
+    const created = createWorktree(projectDir, "rmcb1");
+    expect(created.branch).toBe("agentdock/rmcb1");
+
+    const renamed = renameWorktree(projectDir, "rmcb1", "清理孤儿目录");
+    expect(renamed.newBranch).toBe("agentdock/清理孤儿目录");
+    expect(listBranches()).toContain("agentdock/清理孤儿目录");
+
+    // Simulate the API path: pass the stored branch so the right one is deleted.
+    await removeWorktree(projectDir, "rmcb1", {
+      currentBranch: renamed.newBranch,
+      force: true,
+    });
+
+    expect(existsSync(created.worktreePath)).toBe(false);
+    const branches = listBranches();
+    expect(branches).not.toContain("agentdock/rmcb1");
+    expect(branches).not.toContain("agentdock/清理孤儿目录");
+  });
+
+  it("WRM2: 不传 currentBranch 时回退到 agentdock/<id>（向后兼容）", async () => {
+    const created = createWorktree(projectDir, "rmcb2");
+    await removeWorktree(projectDir, "rmcb2", { force: true });
+
+    expect(existsSync(created.worktreePath)).toBe(false);
+    expect(listBranches()).not.toContain("agentdock/rmcb2");
+  });
+
+  it("WRM3: 中文 session 名 rename → remove 链不残留任何分支", async () => {
+    const created = createWorktree(projectDir, "rmcb3");
+    const renamed = renameWorktree(projectDir, "rmcb3", "中文名");
+    await removeWorktree(projectDir, "rmcb3", {
+      currentBranch: renamed.newBranch,
+      force: true,
+    });
+
+    expect(existsSync(created.worktreePath)).toBe(false);
+    const branches = listBranches();
+    expect(branches).not.toContain("agentdock/rmcb3");
+    expect(branches).not.toContain("agentdock/中文名");
+  });
+});
+
+// ============================================================
+// scanOrphanBranches — detect dangling agentdock/* branches
+// ============================================================
+describe("scanOrphanBranches", () => {
+  function listBranches(): string {
+    return execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  }
+
+  it("SOB1: 空仓库 → 没有 orphan branches", () => {
+    const orphans = scanOrphanBranches(projectDir, new Set());
+    expect(orphans).toEqual([]);
+  });
+
+  it("SOB2: knownBranches 覆盖所有分支 → 没有 orphan", () => {
+    createWorktree(projectDir, "sob1");
+    createWorktree(projectDir, "sob2");
+    const known = new Set(["agentdock/sob1", "agentdock/sob2"]);
+    const orphans = scanOrphanBranches(projectDir, known);
+    expect(orphans).toEqual([]);
+  });
+
+  it("SOB3: knownBranches 缺失 → 报告对应 orphan branch", () => {
+    createWorktree(projectDir, "alive");
+    // Create a dangling branch manually
+    execSync("git branch agentdock/ghost-session", {
+      cwd: projectDir,
+      stdio: "pipe",
+    });
+    const orphans = scanOrphanBranches(projectDir, new Set(["agentdock/alive"]));
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0].reason).toBe("orphan-branch");
+    expect(orphans[0].branch).toBe("agentdock/ghost-session");
+    expect(orphans[0].sessionId).toBe("ghost-session");
+    expect(orphans[0].worktreePath).toBe("");
+  });
+
+  it("SOB4: 非 agentdock/ 命名空间的分支被忽略", () => {
+    createWorktree(projectDir, "keep");
+    execSync("git branch some-other-branch", { cwd: projectDir, stdio: "pipe" });
+    const orphans = scanOrphanBranches(projectDir, new Set(["agentdock/keep"]));
+    expect(orphans).toEqual([]);
+    // Sanity: both branches are present
+    const branches = listBranches();
+    expect(branches).toContain("agentdock/keep");
+    expect(branches).toContain("some-other-branch");
+  });
+});
+
+// ============================================================
+// removeOrphanBranch — explicit branch cleanup
+// ============================================================
+describe("removeOrphanBranch", () => {
+  function listBranches(): string {
+    return execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  }
+
+  it("ROB1: 删除 agentdock/* 分支成功", async () => {
+    createWorktree(projectDir, "rob1");
+    execSync("git branch agentdock/dangling", { cwd: projectDir, stdio: "pipe" });
+    expect(listBranches()).toContain("agentdock/dangling");
+
+    await removeOrphanBranch(projectDir, "agentdock/dangling");
+    expect(listBranches()).not.toContain("agentdock/dangling");
+  });
+
+  it("ROB2: 拒绝删除非 agentdock/ 命名空间的分支", async () => {
+    execSync("git branch main-keep", { cwd: projectDir, stdio: "pipe" });
+    await expect(removeOrphanBranch(projectDir, "main-keep")).rejects.toThrow(
+      /Refusing to delete non-agentdock branch/,
+    );
+    expect(listBranches()).toContain("main-keep");
+  });
+
+  it("ROB3: 拒绝非法分支名（命令注入防护）", async () => {
+    await expect(
+      removeOrphanBranch(projectDir, 'agentdock/x"; echo pwned; "'),
+    ).rejects.toThrow();
+  });
+});
+
+// ============================================================
+// Foreign-session false-positive guard
+// The orphan scan unions DB-known branches with branches actually
+// checked out in worktrees (via listWorktrees). A renamed foreign
+// session's local DB row has branch=agentdock/<id> (from
+// scanDiskWorktrees) but the actual git branch is agentdock/<renamed>.
+// Without the worktree-list union, scanOrphanBranches would flag the
+// renamed branch as orphan and `git branch -D` could wipe a branch
+// another AgentDock instance is actively using.
+// ============================================================
+describe("scanOrphanBranches with worktree-list union (foreign session guard)", () => {
+  it("FW1: rename 后的分支 + 实际 worktree → DB 集合不知道它也不算 orphan", () => {
+    // Simulate the foreign-session setup: create + rename a worktree so the
+    // actual git branch is agentdock/<renamed>, but pass an empty knownBranches
+    // to scanOrphanBranches — this is what instance B's stale DB would see.
+    createWorktree(projectDir, "fw1");
+    const renamed = renameWorktree(projectDir, "fw1", "foreign-renamed");
+
+    // The worktree is still on disk and checked out to the renamed branch.
+    // listWorktrees is the second source of truth the orphans endpoint
+    // unions in. Verify it sees the real branch:
+    const liveBranches = listWorktrees(projectDir)
+      .map((w) => w.branch)
+      .filter((b) => b.startsWith("agentdock/"));
+    expect(liveBranches).toContain(renamed.newBranch);
+
+    // The API layer unions DB-known + live-worktree branches. Mirror that:
+    const dbKnown = new Set<string>([]); // stale DB has nothing
+    for (const b of liveBranches) dbKnown.add(b);
+    const orphans = scanOrphanBranches(projectDir, dbKnown);
+    expect(orphans.find((o) => o.branch === renamed.newBranch)).toBeUndefined();
+  });
+
+  it("FW2: 没有任何来源知道 → 仍然算 orphan", () => {
+    // A truly dangling branch: in `agentdock/*` namespace, no worktree,
+    // no DB row. Must still be flagged.
+    createWorktree(projectDir, "fw2");
+    const renamed = renameWorktree(projectDir, "fw2", "truly-dangling");
+    // Pretend the worktree is gone too (e.g. manually deleted, or the bug
+    // case from #35: rename then old-removeWorktree leaves branch behind).
+    const liveBranches = listWorktrees(projectDir)
+      .map((w) => w.branch)
+      .filter((b) => b.startsWith("agentdock/"));
+    const dbKnown = new Set<string>();
+    for (const b of liveBranches) dbKnown.add(b);
+    // fw2's worktree is checked out to truly-dangling, so union picks it up.
+    // To simulate the bug case, we need a branch that has NO worktree:
+    execSync("git branch agentdock/ghost-after-remove", {
+      cwd: projectDir,
+      stdio: "pipe",
+    });
+    const orphans = scanOrphanBranches(projectDir, dbKnown);
+    expect(orphans.find((o) => o.branch === "agentdock/ghost-after-remove")).toBeDefined();
+    // Sanity: the renamed branch with a live worktree is NOT in the list
+    expect(orphans.find((o) => o.branch === renamed.newBranch)).toBeUndefined();
+  });
+});
+

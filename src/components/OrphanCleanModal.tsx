@@ -10,7 +10,13 @@ interface OrphanCleanModalProps {
 const REASON_LABELS: Record<OrphanDir["reason"], string> = {
   "empty-dir": "空目录",
   "no-git-file": "无 .git 文件",
+  "orphan-branch": "孤儿分支",
 };
+
+/** A stable key per orphan item — uses worktreePath for dirs and branch for branches. */
+function orphanKey(o: OrphanDir): string {
+  return o.reason === "orphan-branch" ? `branch:${o.branch}` : `dir:${o.worktreePath}`;
+}
 
 export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   const { activeProjectId } = useStore();
@@ -37,13 +43,13 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   if (!open) return null;
 
   const orphanList = orphans ?? [];
-  const allSelected = orphanList.length > 0 && orphanList.every((o) => selected.has(o.worktreePath));
+  const allSelected = orphanList.length > 0 && orphanList.every((o) => selected.has(orphanKey(o)));
 
-  const toggleSelect = (path: string) => {
+  const toggleSelect = (key: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -52,15 +58,30 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
     if (allSelected) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(orphanList.map((o) => o.worktreePath)));
+      setSelected(new Set(orphanList.map(orphanKey)));
     }
   };
 
   const handleDelete = async () => {
-    const paths = Array.from(selected);
-    if (paths.length === 0) return;
+    if (selected.size === 0) return;
+    // Split selected items by type so the API can route correctly.
+    const paths: string[] = [];
+    const branches: string[] = [];
+    for (const o of orphanList) {
+      if (!selected.has(orphanKey(o))) continue;
+      if (o.reason === "orphan-branch") {
+        if (o.branch) branches.push(o.branch);
+      } else if (o.worktreePath) {
+        paths.push(o.worktreePath);
+      }
+    }
+    if (paths.length === 0 && branches.length === 0) return;
     try {
-      const result = await deleteOrphans.mutateAsync(paths);
+      const result = await deleteOrphans.mutateAsync({
+        paths,
+        branches,
+        projectId: activeProjectId ?? undefined,
+      });
       if (result.failed.length > 0) {
         alert(`删除完成：${result.deleted.length} 成功，${result.failed.length} 失败`);
       }
@@ -76,7 +97,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
       <div className="dir-modal orphan-modal" onClick={(e) => e.stopPropagation()}>
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
-            <h3>🧹 清理孤儿目录</h3>
+            <h3>🧹 清理孤儿</h3>
           </div>
           <button type="button" className="dir-modal-close" onClick={onClose}>
             ✕
@@ -84,7 +105,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
         </div>
 
         <div className="orphan-description">
-          以下目录存在于磁盘上但不是有效的 git worktree，可以安全删除。
+          以下条目是已删除 session 残留的目录或分支，可以安全删除。
         </div>
 
         {/* Select all — above the list */}
@@ -107,26 +128,31 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
           {isLoading && <div className="dir-modal-status">扫描中...</div>}
           {error && <div className="dir-modal-status dir-modal-error">{error.message}</div>}
           {!isLoading && !error && orphanList.length === 0 && (
-            <div className="dir-modal-status orphan-empty">✓ 没有孤儿目录</div>
+            <div className="dir-modal-status orphan-empty">✓ 没有孤儿</div>
           )}
-          {!isLoading && !error && orphanList.map((orphan) => (
-            <div
-              key={orphan.worktreePath}
-              className={`orphan-item ${selected.has(orphan.worktreePath) ? "orphan-item-selected" : ""}`}
-              onClick={() => toggleSelect(orphan.worktreePath)}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(orphan.worktreePath)}
-                onChange={() => toggleSelect(orphan.worktreePath)}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <span className="orphan-name">{orphan.sessionId}</span>
-              <span className={`orphan-reason orphan-reason-${orphan.reason}`}>
-                {REASON_LABELS[orphan.reason]}
-              </span>
-            </div>
-          ))}
+          {!isLoading && !error && orphanList.map((orphan) => {
+            const key = orphanKey(orphan);
+            return (
+              <div
+                key={key}
+                className={`orphan-item ${selected.has(key) ? "orphan-item-selected" : ""}`}
+                onClick={() => toggleSelect(key)}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(key)}
+                  onChange={() => toggleSelect(key)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="orphan-name">
+                  {orphan.reason === "orphan-branch" ? orphan.branch : orphan.sessionId}
+                </span>
+                <span className={`orphan-reason orphan-reason-${orphan.reason}`}>
+                  {REASON_LABELS[orphan.reason]}
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         {/* Actions */}

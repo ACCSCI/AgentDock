@@ -5,7 +5,7 @@ import type { Plugin } from "vite";
 import { type DrizzleDb, createDb } from "./db/index.js";
 import { projects, sessions } from "./db/schema.js";
 import path from "node:path";
-import { isGitRepo, removeOrphanDir, removeWorktree, renameWorktree, scanDiskWorktrees, scanOrphanWorktrees } from "./worktree.js";
+import { isGitRepo, listWorktrees, removeOrphanBranch, removeOrphanDir, removeWorktree, renameWorktree, scanDiskWorktrees, scanOrphanBranches, scanOrphanWorktrees } from "./worktree.js";
 import { validateProjectPath } from "./path-validation.js";
 import { createHookEngine, createHookRegistry } from "./hook-engine.js";
 import { loadConfig } from "./config.js";
@@ -609,7 +609,7 @@ export function apiPlugin(): Plugin {
             const d = getDb();
             const ps = d.select().from(sessions).where(eq(sessions.projectId, id)).all();
             const p = d.select().from(projects).where(eq(projects.id, id)).get();
-            if (p) { for (const s of ps) { try { await removeWorktree(p.path, s.id, true); } catch {} } }
+            if (p) { for (const s of ps) { try { await removeWorktree(p.path, s.id, { currentBranch: s.branch, force: true }); } catch {} } }
             // Release all ports for this project's sessions via daemon
             if (_daemonClient) {
               for (const s of ps) { try { await _daemonClient.releaseSession(_clientId, s.id); } catch {} }
@@ -759,6 +759,7 @@ export function apiPlugin(): Plugin {
                   sessionId: id,
                   projectPath: p.path,
                   worktreePath: s.worktreePath,
+                  currentBranch: s.branch,
                   config,
                 });
                 d.delete(sessions).where(eq(sessions.id, id)).run();
@@ -790,6 +791,7 @@ export function apiPlugin(): Plugin {
                   sessionId: id,
                   projectPath: p.path,
                   worktreePath: s.worktreePath,
+                  currentBranch: s.branch,
                   config,
                   onStep: (event) => sendDelSSE("step", event),
                 });
@@ -1099,7 +1101,7 @@ export function apiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/projects/:id/orphans — list orphan directories for a project
+        // GET /api/projects/:id/orphans — list orphan directories + orphan branches for a project
         const orphansMatch = pathname.match(/^\/api\/projects\/([^/]+)\/orphans$/);
         if (orphansMatch && method === "GET") {
           const projectId = orphansMatch[1];
@@ -1107,45 +1109,91 @@ export function apiPlugin(): Plugin {
             const d = getDb();
             const project = d.select().from(projects).where(eq(projects.id, projectId)).get();
             if (!project) { json(res, 404, { error: "Project not found" }); return; }
-            const orphans = scanOrphanWorktrees(project.path);
-            json(res, 200, { orphans });
+            const dirOrphans = scanOrphanWorktrees(project.path);
+            // A branch is "known" if EITHER:
+            //   (a) a session row in our DB tracks it (sessions.branch), OR
+            //   (b) a git worktree on disk is currently checked out to it.
+            // (b) is critical for foreign sessions: instance B's local DB row
+            // was inserted via scanDiskWorktrees, which always derives branch
+            // as `agentdock/${sessionId}` — so a renamed foreign session's
+            // actual on-disk branch is missing from the DB. Without (b) we'd
+            // false-positive the rename-target branch as orphan and could
+            // `git branch -D` a branch another instance is actively using.
+            const knownBranches = new Set<string>();
+            for (const r of d.select({ branch: sessions.branch })
+              .from(sessions)
+              .where(eq(sessions.projectId, projectId))
+              .all()) {
+              knownBranches.add(r.branch);
+            }
+            for (const wt of listWorktrees(project.path)) {
+              if (wt.branch.startsWith("agentdock/")) knownBranches.add(wt.branch);
+            }
+            const branchOrphans = scanOrphanBranches(project.path, knownBranches);
+            json(res, 200, { orphans: [...dirOrphans, ...branchOrphans] });
           } catch (err) { json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" }); }
           return;
         }
 
-        // POST /api/orphans/delete — delete selected orphan directories
+        // POST /api/orphans/delete — delete selected orphan directories and/or branches
         if (pathname === "/api/orphans/delete" && method === "POST") {
           try {
             const body = await parseBody(req);
-            const { paths } = body as { paths?: string[] };
-            if (!Array.isArray(paths) || paths.length === 0) {
-              json(res, 400, { error: "paths array is required" });
+            const paths = (body as { paths?: unknown }).paths;
+            const branches = (body as { branches?: unknown }).branches;
+            const projectId = (body as { projectId?: unknown }).projectId;
+            const pathList = Array.isArray(paths) ? (paths as unknown[]).filter((x): x is string => typeof x === "string") : [];
+            const branchList = Array.isArray(branches) ? (branches as unknown[]).filter((x): x is string => typeof x === "string") : [];
+            if (pathList.length === 0 && branchList.length === 0) {
+              json(res, 400, { error: "paths or branches array is required" });
               return;
             }
 
-            // Validate: each path must be under a known project's .agentdock/worktrees/
             const d = getDb();
-            const allProjects = d.select().from(projects).all();
-            const validPrefixes = allProjects.map((p) => {
-              const base = path.resolve(p.path, ".agentdock", "worktrees").replace(/\\/g, "/");
-              return base.endsWith("/") ? base : base + "/";
-            });
-
             const deleted: string[] = [];
             const failed: Array<{ path: string; error: string }> = [];
 
-            for (const p of paths) {
-              const resolved = path.resolve(p).replace(/\\/g, "/");
-              const isUnderProject = validPrefixes.some((prefix) => resolved.startsWith(prefix));
-              if (!isUnderProject) {
-                failed.push({ path: p, error: "Path is not under any known project's worktree directory" });
-                continue;
+            if (pathList.length > 0) {
+              // Validate: each dir path must be under a known project's .agentdock/worktrees/
+              const allProjects = d.select().from(projects).all();
+              const validPrefixes = allProjects.map((p) => {
+                const base = path.resolve(p.path, ".agentdock", "worktrees").replace(/\\/g, "/");
+                return base.endsWith("/") ? base : base + "/";
+              });
+              for (const p of pathList) {
+                const resolved = path.resolve(p).replace(/\\/g, "/");
+                const isUnderProject = validPrefixes.some((prefix) => resolved.startsWith(prefix));
+                if (!isUnderProject) {
+                  failed.push({ path: p, error: "Path is not under any known project's worktree directory" });
+                  continue;
+                }
+                try {
+                  await removeOrphanDir(p);
+                  deleted.push(p);
+                } catch (err) {
+                  failed.push({ path: p, error: err instanceof Error ? err.message : "Unknown error" });
+                }
               }
-              try {
-                await removeOrphanDir(p);
-                deleted.push(p);
-              } catch (err) {
-                failed.push({ path: p, error: err instanceof Error ? err.message : "Unknown error" });
+            }
+
+            if (branchList.length > 0) {
+              // Branch deletion is scoped to a project (the modal is per-project).
+              if (typeof projectId !== "string" || projectId.length === 0) {
+                for (const b of branchList) failed.push({ path: b, error: "projectId is required to delete branches" });
+              } else {
+                const project = d.select().from(projects).where(eq(projects.id, projectId)).get();
+                if (!project) {
+                  for (const b of branchList) failed.push({ path: b, error: "Project not found" });
+                } else {
+                  for (const branch of branchList) {
+                    try {
+                      await removeOrphanBranch(project.path, branch);
+                      deleted.push(branch);
+                    } catch (err) {
+                      failed.push({ path: branch, error: err instanceof Error ? err.message : "Unknown error" });
+                    }
+                  }
+                }
               }
             }
 
