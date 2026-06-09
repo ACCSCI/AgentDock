@@ -6,15 +6,16 @@ import { FilePortAllocator, isPortAvailable, type PortAllocator } from "./port-a
 import { Mutex } from "./mutex.js";
 import { DaemonState, PORT_KEYS_DEFAULT, PORT_RANGE_START, PORT_RANGE_END, type SessionPorts } from "./daemon-state.js";
 import { DaemonWAL } from "./daemon-wal.js";
+import { deleteDaemonInfo, writeDaemonInfo } from "./daemon-discovery.js";
 
 // ============================================================
 // Types
 // ============================================================
 
 export interface DaemonOptions {
-  /** Port the daemon listens on. Default: 20000 */
+  /** Port the daemon listens on. Default: 0 (OS assigns random port). */
   port?: number;
-  /** Base directory for FilePortAllocator. Default: ~/.agentdock */
+  /** Base directory for state files. Default: ~/.agentdock */
   baseDir?: string;
 }
 
@@ -111,6 +112,7 @@ export class AgentDockDaemon {
   private wal: DaemonWAL;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private lastPersistedHeartbeatAt = new Map<string, number>();
+  private dataDir: string;
 
   // Heartbeat timeout: clients not sending heartbeat for 90s are considered dead
   private static HEARTBEAT_TIMEOUT = 90_000;
@@ -118,15 +120,26 @@ export class AgentDockDaemon {
   private static HEARTBEAT_PERSIST_INTERVAL = 30_000;
 
   constructor(options?: DaemonOptions) {
-    this.port = options?.port ?? 20000;
+    // Default to port 0 → OS assigns a random available port
+    this.port = options?.port ?? 0;
     this.allocator = new FilePortAllocator(options?.baseDir);
-    const dataDir = options?.baseDir ?? path.join(os.homedir(), ".agentdock");
-    this.registryPath = path.join(dataDir, "registry.json");
+    this.dataDir = options?.baseDir ?? path.join(os.homedir(), ".agentdock");
+    this.registryPath = path.join(this.dataDir, "registry.json");
     this.loadRegistry();
 
     // Load session state from WAL
-    this.wal = new DaemonWAL(dataDir);
+    this.wal = new DaemonWAL(this.dataDir);
     this.state = this.wal.load() ?? new DaemonState();
+
+    // If we were given an explicit port, use it.
+    // port=0 means "random" — don't restore from WAL.
+    // Otherwise, use the restored daemonPort from WAL (if any), or 0 for random.
+    if (options?.port !== undefined) {
+      this.port = options.port; // 0 = random, >0 = explicit
+    } else if (this.state.getDaemonPort() !== null) {
+      this.port = this.state.getDaemonPort()!;
+    }
+    // else: port stays at 0 (random)
   }
 
   /**
@@ -137,9 +150,45 @@ export class AgentDockDaemon {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
 
-      this.server.on("error", reject);
+      const onError = (err: Error) => {
+        // If the restored port is in use, fall back to random port
+        if (err.code === "EADDRINUSE" && this.port !== 0) {
+          this.port = 0;
+          this.server!.listen(this.port, "127.0.0.1", () => {
+            const actualPort = this.getPort();
+            this.state.setDaemonPort(actualPort);
+            this.wal.persist(this.state);
+            try { writeDaemonInfo(process.pid, actualPort); } catch { /* non-fatal */ }
+            this.heartbeatTimer = setInterval(() => {
+              this.cleanupStaleClients().catch(() => {});
+            }, AgentDockDaemon.HEARTBEAT_CHECK_INTERVAL);
+            resolve();
+          });
+          this.server!.removeListener("error", onError);
+          this.server!.once("error", reject);
+        } else {
+          reject(err);
+        }
+      };
+
+      this.server.on("error", onError);
 
       this.server.listen(this.port, "127.0.0.1", () => {
+        this.server!.removeListener("error", onError);
+        const actualPort = this.getPort();
+
+        // Register daemon port so session allocation excludes it
+        this.state.setDaemonPort(actualPort);
+        this.wal.persist(this.state);
+
+        // Write daemon.json so AgentDock instances can discover us
+        try {
+          writeDaemonInfo(process.pid, actualPort);
+        } catch {
+          // Non-fatal: daemon is running but discovery file couldn't be written.
+          // The daemon will still be reachable if the port is known.
+        }
+
         // Start heartbeat timeout cleanup
         this.heartbeatTimer = setInterval(() => {
           this.cleanupStaleClients().catch(() => {
@@ -161,10 +210,14 @@ export class AgentDockDaemon {
         this.heartbeatTimer = null;
       }
       if (!this.server) {
+        this.deleteDaemonInfoQuiet();
         resolve();
         return;
       }
-      this.server.close(() => resolve());
+      this.server.close(() => {
+        this.deleteDaemonInfoQuiet();
+        resolve();
+      });
     });
   }
 
@@ -233,6 +286,13 @@ export class AgentDockDaemon {
     try { process.kill(pid, 0); return true; } catch { return false; }
   }
 
+  // --- Daemon info cleanup ---
+
+  /** Delete daemon.json quietly (ignore errors). */
+  private deleteDaemonInfoQuiet(): void {
+    try { deleteDaemonInfo(); } catch { /* ignore */ }
+  }
+
   // --- Request handling ---
 
   private async handleRequest(
@@ -275,7 +335,7 @@ export class AgentDockDaemon {
 
     // Health check
     if (pathname === "/health" && method === "GET") {
-      this.json(res, 200, { success: true, status: "ok" });
+      this.json(res, 200, { success: true, status: "ok", daemonPort: this.getPort() });
       return;
     }
 
@@ -653,7 +713,36 @@ export class AgentDockDaemon {
                   clientId,
                   this.state.getClient(clientId)?.pid ?? existing.ownerPid,
                 );
-                results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "existing" });
+
+                // Check if the session's ports are still available.
+                // If daemon (or another process) has taken any of them,
+                // reallocate and return "reallocated" so the client knows
+                // to update its .env and notify the user.
+                const portKeys = Object.keys(existing.ports);
+                const portsStillAvailable = await Promise.all(
+                  portKeys.map((key) => isPortAvailable(existing.ports[key])),
+                ).then((results) => results.every(Boolean));
+
+                if (!portsStillAvailable) {
+                  const excluded = this.state.getExcludedPorts();
+                  for (const key of portKeys) {
+                    excluded.add(existing.ports[key]);
+                  }
+                  const allocated = await this.state.allocatePorts(portKeys.length, excluded);
+                  const newPorts = {} as SessionPorts;
+                  portKeys.forEach((key, i) => {
+                    newPorts[key] = allocated[i];
+                  });
+                  this.state.reassignSession(decl.sessionId, newPorts);
+                  this.wal.persist(this.state);
+                  results.push({
+                    sessionId: decl.sessionId,
+                    ports: newPorts,
+                    status: "reallocated",
+                  });
+                } else {
+                  results.push({ sessionId: decl.sessionId, ports: existing.ports, status: "existing" });
+                }
                 continue;
               }
 
@@ -919,7 +1008,7 @@ const isMainModule =
     process.argv[1].endsWith("daemon.js"));
 
 if (isMainModule) {
-  const port = Number(process.env.AGENTDOCK_DAEMON_PORT) || 20000;
+  const port = Number(process.env.AGENTDOCK_DAEMON_PORT) || 0;
   const daemon = new AgentDockDaemon({ port });
   daemon.start().then(() => {
     console.log(`[daemon] listening on http://127.0.0.1:${daemon.getPort()}`);

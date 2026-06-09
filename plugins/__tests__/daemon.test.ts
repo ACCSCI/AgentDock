@@ -124,7 +124,7 @@ describe("AgentDockDaemon", () => {
     expect(res.data.success).toBe(true);
     expect(res.data.data.ports).toHaveLength(3);
     for (const p of res.data.data.ports) {
-      expect(p).toBeGreaterThanOrEqual(20000);
+      expect(p).toBeGreaterThanOrEqual(30000);
       expect(p).toBeLessThanOrEqual(65535);
     }
   });
@@ -147,9 +147,9 @@ describe("AgentDockDaemon", () => {
   });
 
   it("POST /ports/allocate respects exclude set", async () => {
-    const res = await post(port, "/ports/allocate", { count: 1, exclude: [20000] });
+    const res = await post(port, "/ports/allocate", { count: 1, exclude: [30000] });
     expect(res.status).toBe(200);
-    expect(res.data.data.ports[0]).not.toBe(20000);
+    expect(res.data.data.ports[0]).not.toBe(30000);
   });
 
   it("POST /ports/allocate accumulates allocations", async () => {
@@ -254,7 +254,7 @@ describe("AgentDockDaemon", () => {
   });
 
   it("ORG2: 带 Origin 头的 /ports/release 被拒绝 403", async () => {
-    const res = await postWithHeaders(port, "/ports/release", { ports: [20001] }, { Origin: "http://evil.com" });
+    const res = await postWithHeaders(port, "/ports/release", { ports: [30001] }, { Origin: "http://evil.com" });
     expect(res.status).toBe(403);
   });
 

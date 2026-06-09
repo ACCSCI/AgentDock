@@ -18,7 +18,7 @@ function tmpDir(): string {
   return dir;
 }
 
-function makePorts(start: number = 20000): SessionPorts {
+function makePorts(start: number = 30000): SessionPorts {
   return {
     FRONTEND_PORT: start,
     BACKEND_PORT: start + 1,

@@ -19,6 +19,8 @@ let db: DrizzleDb | null = null;
 let _terminalInitialized = false;
 let _daemonClient: DaemonClient | null = null;
 let _sessionStatuses = new Map<string, "allocated" | "reclaimed">();
+/** Sessions whose ports were reallocated during startup sync. */
+let _reallocatedSessions: Array<{ sessionId: string; oldPorts: Record<string, number>; newPorts: Record<string, number> }> = [];
 // Stable clientId based on cwd — reuses same ID across restarts from same directory
 let _clientId: string = "client_" + process.cwd().replace(/[^a-zA-Z0-9]/g, "_").slice(-20);
 // Disk scan throttling: only scan once per project per 30 seconds
@@ -147,9 +149,9 @@ export function apiPlugin(): Plugin {
           console.log(`  Registered client: ${_clientId} (PID: ${process.pid})`);
 
           if (started) {
-            console.log(`  Port daemon started on port 20000`);
+            console.log(`  Daemon started (dynamic port)`);
           } else {
-            console.log(`  Connected to existing port daemon`);
+            console.log(`  Connected to existing daemon`);
           }
 
           // Startup sync: declare existing sessions
@@ -182,6 +184,14 @@ export function apiPlugin(): Plugin {
                     d.update(sessions).set({ ports: JSON.stringify(r.ports) }).where(eq(sessions.id, r.sessionId)).run();
                     if (r.status === "allocated" || r.status === "reclaimed") {
                       _sessionStatuses.set(r.sessionId, r.status);
+                    }
+                    // Collect reallocated sessions for frontend notification
+                    if (r.status === "reallocated" && s.ports) {
+                      _reallocatedSessions.push({
+                        sessionId: r.sessionId,
+                        oldPorts: s.ports,
+                        newPorts: r.ports,
+                      });
                     }
                   }
                 }
@@ -225,6 +235,14 @@ export function apiPlugin(): Plugin {
         const method = req.method || "GET";
 
         if (!pathname.startsWith("/api/")) { next(); return; }
+
+        // GET /api/reallocated — return sessions with reallocated ports (clears after read)
+        if (pathname === "/api/reallocated" && method === "GET") {
+          const list = _reallocatedSessions;
+          _reallocatedSessions = [];
+          json(res, 200, { success: true, sessions: list });
+          return;
+        }
 
         // POST /api/init
         if (pathname === "/api/init" && method === "POST") {

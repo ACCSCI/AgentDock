@@ -136,11 +136,11 @@ describe("Daemon Session API", () => {
       expect(res.status).toBe(200);
       expect(res.data.success).toBe(true);
       expect(res.data.ports).toBeDefined();
-      expect(res.data.ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
-      expect(res.data.ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
-      expect(res.data.ports.WS_PORT).toBeGreaterThanOrEqual(20000);
-      expect(res.data.ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
-      expect(res.data.ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+      expect(res.data.ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+      expect(res.data.ports.BACKEND_PORT).toBeGreaterThanOrEqual(30000);
+      expect(res.data.ports.WS_PORT).toBeGreaterThanOrEqual(30000);
+      expect(res.data.ports.DEBUG_PORT).toBeGreaterThanOrEqual(30000);
+      expect(res.data.ports.PREVIEW_PORT).toBeGreaterThanOrEqual(30000);
 
       // All 5 ports should be unique
       const allPorts = [

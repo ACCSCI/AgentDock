@@ -17,8 +17,30 @@ import type { SessionPorts } from "./daemon-state.js";
 export class DaemonClient implements PortAllocator {
   private baseUrl: string;
 
+  /**
+   * Create a client connected to a known port.
+   * @param port - The daemon's listening port.
+   */
   constructor(port: number = 20000) {
     this.baseUrl = `http://127.0.0.1:${port}`;
+  }
+
+  /**
+   * Create a client via dynamic discovery.
+   * Reads daemon.json, verifies liveness, and returns a connected client.
+   * Throws if no daemon is available.
+   */
+  static async createFromDiscovery(): Promise<DaemonClient> {
+    const { readDaemonInfo, isProcessAlive } = await import("./daemon-discovery.js");
+    const info = readDaemonInfo();
+    if (!info || !isProcessAlive(info.pid)) {
+      throw new Error("No daemon discovered: daemon.json missing or process not alive");
+    }
+    const client = new DaemonClient(info.port);
+    if (!(await client.health())) {
+      throw new Error("No daemon discovered: daemon process not responding");
+    }
+    return client;
   }
 
   async allocate(count: number, exclude?: Set<number>): Promise<number[]> {

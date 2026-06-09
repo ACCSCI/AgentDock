@@ -63,7 +63,7 @@ describe("Heartbeat timeout cleanup", () => {
     // Register client and allocate a session
     await client.registerClient("c1", process.pid, ["/project/a"]);
     const ports = await client.allocateSession({ clientId: "c1", sessionId: "s1", projectPath: "/project/a", worktreePath: "/wt/s1" });
-    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
 
     // Verify session exists
     const list1 = await get(port, "/sessions/list");

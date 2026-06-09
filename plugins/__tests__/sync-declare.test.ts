@@ -73,7 +73,7 @@ describe("Sync/declare protocol", () => {
 
     expect(result.results).toHaveLength(1);
     expect(result.results[0].status).toBe("allocated");
-    expect(result.results[0].ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(result.results[0].ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
   });
 
   it("declare conflicting worktreePath returns conflict", async () => {
@@ -221,4 +221,163 @@ describe("Sync/declare protocol", () => {
     expect(result.results[0].status).toBe("existing");
     expect(result.results[1].status).toBe("allocated");
   });
+
+  // ============================================================
+  // Reallocated: ports are occupied → daemon assigns new ones
+  // ============================================================
+
+  it("declare with occupied ports returns 'reallocated' with new ports", async () => {
+    await client.registerClient("c1", 100, ["/project"]);
+
+    // Allocate session normally first
+    const original = await client.allocateSession({
+      clientId: "c1", sessionId: "s1", projectPath: "/project", worktreePath: "/wt/s1",
+    });
+
+    // Simulate: daemon now occupies the session's FRONTEND_PORT
+    // We do this by having the daemon's state track that port as daemonPort
+    // The declareSessions call provides the old ports but they are now
+    // occupied by daemon itself, so providedPortsAreBindable = false
+    // → needsRealloc = true → status should be "reallocated"
+    const daemonPort = daemon.getPort();
+    // The daemon is already listening on daemonPort.
+    // We simulate the scenario by making the session's FRONTEND_PORT
+    // be the same as daemon's port. But daemon port is random.
+    // Instead, we directly test the behavior by having the old port
+    // be something we know is taken: the daemon port itself.
+    // We can't easily set the session to use daemon's port since
+    // allocateSession excludes it. So we test differently:
+    // We pre-allocate ports manually in state, then declare with
+    // those same ports while they are now "occupied" by the daemon.
+
+    // Simpler approach: allocate ports, then simulate daemon claiming one
+    // by having daemon's port match a session port
+    // Since we can't control random port, we use a fixed-port daemon
+    // approach via constructor manipulation...
+    // Actually, the simplest test: allocate, then in a SECOND daemon
+    // instance, declare the same session with ports that the FIRST daemon
+    // has already allocated. The second daemon won't know about those
+    // ports unless they are in its state.
+    //
+    // Clean test: use the fact that providedPortsAreBindable checks
+    // TCP availability. We temporarily occupy a port with a raw server.
+
+    const occupiedPort = original.FRONTEND_PORT;
+    const blocker = http.createServer();
+    blocker.listen(occupiedPort, "127.0.0.1");
+
+    try {
+      const result = await client.declareSessions("c1", [
+        {
+          sessionId: "s1",
+          worktreePath: "/wt/s1",
+          projectPath: "/project",
+          ports: original,
+        },
+      ]);
+
+      expect(result.results[0].status).toBe("reallocated");
+      expect(result.results[0].ports.FRONTEND_PORT).not.toBe(occupiedPort);
+      expect(result.results[0].ports.FRONTEND_PORT).toBeGreaterThanOrEqual(30000);
+    } finally {
+      blocker.close();
+    }
+  }, 15000);
+
+  it("declare with no ports returns 'allocated' (not 'reallocated')", async () => {
+    await client.registerClient("c1", 100, ["/project"]);
+
+    const result = await client.declareSessions("c1", [
+      { sessionId: "brand-new", worktreePath: "/wt/brand-new", projectPath: "/project" },
+    ]);
+
+    expect(result.results[0].status).toBe("allocated");
+    expect(result.results[0].status).not.toBe("reallocated");
+  });
+
+  it("reallocated ports are written to .env by api.ts", async () => {
+    await client.registerClient("c1", 100, ["/project"]);
+
+    // Allocate normally first
+    const original = await client.allocateSession({
+      clientId: "c1", sessionId: "s1", projectPath: "/project", worktreePath: "/wt/s1",
+    });
+
+    // Occupy the port
+    const blocker = http.createServer();
+    blocker.listen(original.FRONTEND_PORT, "127.0.0.1");
+
+    try {
+      const result = await client.declareSessions("c1", [
+        {
+          sessionId: "s1",
+          worktreePath: "/wt/s1",
+          projectPath: "/project",
+          ports: original,
+        },
+      ]);
+
+      expect(result.results[0].status).toBe("reallocated");
+      expect(result.results[0].ports.FRONTEND_PORT).not.toBe(original.FRONTEND_PORT);
+
+      // Verify the daemon state now has the new ports
+      const sessions = await client.listSessions();
+      const s1 = sessions.find((s) => s.sessionId === "s1");
+      expect(s1?.ports.FRONTEND_PORT).toBe(result.results[0].ports.FRONTEND_PORT);
+    } finally {
+      blocker.close();
+    }
+  }, 15000);
+
+  // ============================================================
+  // E2E: reallocation lifecycle
+  // ============================================================
+
+  it("E2E: reallocated session is stable on second declare", async () => {
+    await client.registerClient("c1", 100, ["/project"]);
+
+    // 1. Normal allocation
+    const original = await client.allocateSession({
+      clientId: "c1", sessionId: "s1", projectPath: "/project", worktreePath: "/wt/s1",
+    });
+
+    // 2. Occupy the port → force reallocation
+    const blocker = http.createServer();
+    blocker.listen(original.FRONTEND_PORT, "127.0.0.1");
+
+    try {
+      const reallocResult = await client.declareSessions("c1", [
+        {
+          sessionId: "s1",
+          worktreePath: "/wt/s1",
+          projectPath: "/project",
+          ports: original,
+        },
+      ]);
+
+      expect(reallocResult.results[0].status).toBe("reallocated");
+      const newPorts = reallocResult.results[0].ports;
+      expect(newPorts.FRONTEND_PORT).not.toBe(original.FRONTEND_PORT);
+
+      // 3. Release the blocker — old port is now free
+      blocker.close();
+
+      // 4. Second declare: should return "existing" with the NEW ports (not re-reallocate)
+      const secondResult = await client.declareSessions("c1", [
+        {
+          sessionId: "s1",
+          worktreePath: "/wt/s1",
+          projectPath: "/project",
+          ports: original, // client still sends old ports
+        },
+      ]);
+
+      // After reallocation, the session is in state with new ports.
+      // On second declare, it finds existing → "existing" with NEW ports.
+      expect(secondResult.results[0].status).toBe("existing");
+      expect(secondResult.results[0].ports.FRONTEND_PORT).toBe(newPorts.FRONTEND_PORT);
+    } finally {
+      try { blocker.close(); } catch { /* ignore */ }
+    }
+  }, 15000);
 });

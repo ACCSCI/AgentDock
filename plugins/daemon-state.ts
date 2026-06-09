@@ -17,7 +17,7 @@ export const PORT_KEYS_DEFAULT = [
 /** @deprecated Use PORT_KEYS_DEFAULT instead */
 export const PORT_KEYS = PORT_KEYS_DEFAULT;
 
-export const PORT_RANGE_START = 20000;
+export const PORT_RANGE_START = 30000;
 export const PORT_RANGE_END = 65535;
 
 export interface SessionEntry {
@@ -57,6 +57,7 @@ export class DaemonState {
   private clients = new Map<string, ClientEntry>();
   private allocatedPorts = new Set<number>();
   private worktreeIndex = new Map<string, string>();
+  private daemonPort: number | null = null;
 
   // --- Client Management ---
 
@@ -220,9 +221,28 @@ export class DaemonState {
 
   /**
    * Get all allocated ports as an exclude set for port allocation.
+   * Also excludes the daemon's listening port to prevent conflicts.
    */
   getExcludedPorts(): Set<number> {
-    return new Set(this.allocatedPorts);
+    const excluded = new Set(this.allocatedPorts);
+    if (this.daemonPort !== null) {
+      excluded.add(this.daemonPort);
+    }
+    return excluded;
+  }
+
+  /**
+   * Set the daemon's listening port so it's excluded from session allocation.
+   */
+  setDaemonPort(port: number): void {
+    this.daemonPort = port;
+  }
+
+  /**
+   * Get the daemon's listening port, if known.
+   */
+  getDaemonPort(): number | null {
+    return this.daemonPort;
   }
 
   // --- Port Allocation (internal) ---
@@ -266,6 +286,7 @@ export class DaemonState {
       clients: Object.fromEntries(this.clients),
       allocatedPorts: [...this.allocatedPorts],
       worktreeIndex: Object.fromEntries(this.worktreeIndex),
+      daemonPort: this.daemonPort,
     };
     return JSON.stringify(data, null, 2);
   }
@@ -297,6 +318,10 @@ export class DaemonState {
         for (const [wt, sid] of Object.entries(data.worktreeIndex)) {
           state.worktreeIndex.set(wt, sid as string);
         }
+      }
+
+      if (typeof data.daemonPort === "number") {
+        state.daemonPort = data.daemonPort;
       }
     } catch {
       // Return empty state on corrupt data

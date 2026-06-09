@@ -5,7 +5,7 @@ import { DaemonState, type SessionPorts } from "../daemon-state.js";
 // Helpers
 // ============================================================
 
-function makePorts(start: number = 20000): SessionPorts {
+function makePorts(start: number = 30000): SessionPorts {
   return {
     FRONTEND_PORT: start,
     BACKEND_PORT: start + 1,
@@ -91,10 +91,10 @@ describe("DaemonState", () => {
         ownerPid: 100,
       });
 
-      expect(state.isPortAllocated(20000)).toBe(true);
-      expect(state.isPortAllocated(20001)).toBe(true);
-      expect(state.isPortAllocated(20004)).toBe(true);
-      expect(state.isPortAllocated(20005)).toBe(false);
+      expect(state.isPortAllocated(30000)).toBe(true);
+      expect(state.isPortAllocated(30001)).toBe(true);
+      expect(state.isPortAllocated(30004)).toBe(true);
+      expect(state.isPortAllocated(30005)).toBe(false);
     });
 
     it("adds worktreePath to worktreeIndex", () => {
@@ -343,6 +343,43 @@ describe("DaemonState", () => {
       expect(excluded.has(20000)).toBe(true);
       expect(excluded.has(20004)).toBe(true);
       expect(excluded.has(20005)).toBe(false);
+    });
+
+    it("also excludes the daemon port", () => {
+      state.registerClient("c1", 100, ["/project/a"]);
+      state.allocateSession({
+        sessionId: "s1",
+        worktreePath: "/wt/s1",
+        projectPath: "/project/a",
+        ports: makePorts(30000),
+        ownerClientId: "c1",
+        ownerPid: 100,
+      });
+      // Set daemon to a port in the session allocation range
+      state.setDaemonPort(45000);
+
+      const excluded = state.getExcludedPorts();
+      expect(excluded.has(45000)).toBe(true);
+      // Session ports still excluded
+      expect(excluded.has(30000)).toBe(true);
+      expect(excluded.has(30004)).toBe(true);
+    });
+
+    it("does not exclude daemon port when not set", () => {
+      state.registerClient("c1", 100, ["/project/a"]);
+      state.allocateSession({
+        sessionId: "s1",
+        worktreePath: "/wt/s1",
+        projectPath: "/project/a",
+        ports: makePorts(30000),
+        ownerClientId: "c1",
+        ownerPid: 100,
+      });
+
+      const excluded = state.getExcludedPorts();
+      // No daemonPort set, so only session ports are excluded
+      expect(excluded.has(45000)).toBe(false);
+      expect(excluded.has(30000)).toBe(true);
     });
   });
 });

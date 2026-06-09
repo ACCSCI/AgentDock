@@ -10,7 +10,7 @@
  *  3. Find daemon process on port 20000 → kill it
  *  4. Clean up registry.json and daemon-state.json
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import os from "node:os";
@@ -18,7 +18,8 @@ import os from "node:os";
 const AGENTDOCK_DIR = join(os.homedir(), ".agentdock");
 const REGISTRY_PATH = join(AGENTDOCK_DIR, "registry.json");
 const DAEMON_STATE_PATH = join(AGENTDOCK_DIR, "daemon-state.json");
-const DAEMON_PORT = 20000;
+const DAEMON_INFO_PATH = join(AGENTDOCK_DIR, "daemon.json");
+const DAEMON_LOCK_PATH = join(AGENTDOCK_DIR, "daemon-lock");
 
 function log(msg: string) {
   console.log(`[kill-all] ${msg}`);
@@ -58,21 +59,45 @@ function killPid(pid: number, label: string): boolean {
 }
 
 function findDaemonPid(): number | null {
-  try {
-    if (process.platform === "win32") {
-      const out = execSync(`netstat -ano | findstr :${DAEMON_PORT} | findstr LISTENING`, {
-        encoding: "utf-8", timeout: 5000,
-      });
-      const match = out.trim().match(/\s(\d+)\s*$/);
-      return match ? parseInt(match[1], 10) : null;
-    } else {
-      const out = execSync(`lsof -i :${DAEMON_PORT} -t`, { encoding: "utf-8", timeout: 5000 });
-      const pid = parseInt(out.trim().split("\n")[0], 10);
-      return isNaN(pid) ? null : pid;
-    }
-  } catch {
-    return null;
+  // Try daemon.json first (dynamic port)
+  if (existsSync(DAEMON_INFO_PATH)) {
+    try {
+      const info = JSON.parse(readFileSync(DAEMON_INFO_PATH, "utf-8"));
+      if (info.pid && isProcessAlive(info.pid)) {
+        return info.pid;
+      }
+    } catch { /* ignore */ }
   }
+
+  // Fallback 1: read daemon-lock file (leader election lock holder)
+  if (existsSync(DAEMON_LOCK_PATH)) {
+    try {
+      const lockData = JSON.parse(readFileSync(DAEMON_LOCK_PATH, "utf-8"));
+      if (lockData.pid && isProcessAlive(lockData.pid)) {
+        return lockData.pid;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Fallback: scan common port range for backward compatibility
+  // (handles case where daemon.json is stale but daemon is still running)
+  const scanPorts = [20000, 30000, 30001, 30002];
+  for (const port of scanPorts) {
+    try {
+      if (process.platform === "win32") {
+        const out = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, {
+          encoding: "utf-8", timeout: 3000,
+        });
+        const match = out.trim().match(/\s(\d+)\s*$/);
+        if (match) return parseInt(match[1], 10);
+      } else {
+        const out = execSync(`lsof -i :${port} -t`, { encoding: "utf-8", timeout: 3000 });
+        const pid = parseInt(out.trim().split("\n")[0], 10);
+        if (!isNaN(pid) && isProcessAlive(pid)) return pid;
+      }
+    } catch { /* port not in use */ }
+  }
+  return null;
 }
 
 /**
@@ -154,7 +179,7 @@ if (vitePids.length > 0) {
   log("Vite processes: none found");
 }
 
-// 3. Kill daemon
+// 3. Kill daemon via daemon.json (dynamic port)
 const daemonPid = findDaemonPid();
 if (daemonPid) {
   if (!seenPids.has(daemonPid)) {
@@ -162,19 +187,21 @@ if (daemonPid) {
     if (killPid(daemonPid, "daemon")) killed++;
   }
 } else {
-  log("Daemon: not found on port " + DAEMON_PORT);
+  log("Daemon: not found (check daemon.json or listening ports)");
 }
 
 // 4. Clean up state files
+// NOTE: do NOT clear daemon-state.json (WAL) — it contains session state
+// that survives daemon restarts. Only clear registry and daemon.json.
 log("");
 log("Cleaning up state files...");
 if (existsSync(REGISTRY_PATH)) {
   writeFileSync(REGISTRY_PATH, "{}", "utf-8");
   log("  registry.json — cleared");
 }
-if (existsSync(DAEMON_STATE_PATH)) {
-  writeFileSync(DAEMON_STATE_PATH, "{}", "utf-8");
-  log("  daemon-state.json — cleared");
+if (existsSync(DAEMON_INFO_PATH)) {
+  try { unlinkSync(DAEMON_INFO_PATH); } catch { /* ignore */ }
+  log("  daemon.json — removed");
 }
 
 log("");

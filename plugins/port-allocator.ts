@@ -16,7 +16,7 @@ import { createServer } from "node:net";
 // Constants
 // ============================================================
 
-const PORT_RANGE_START = 20000;
+const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 65535;
 
 const AGENTDOCK_DIR = ".agentdock";
