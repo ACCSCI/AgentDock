@@ -108,21 +108,11 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
     if (process.platform === "win32") {
       const escaped = normalized.replace(/\\/g, "\\\\").replace(/'/g, "''");
 
-      // 1. Kill processes whose ExecutablePath is inside the worktree
-      //    (catches node_modules/.bin/*.exe binaries).
-      const ps1 = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps1.replace(/"/g, '\\"')}"`, {
-        encoding: "utf-8",
-      }).catch(() => {});
-
-      // 2. Kill processes whose CommandLine references the worktree path.
-      //    The worktree ID (random short string) is extremely unlikely to appear
-      //    in an unrelated process command line, so risk of false kill is negligible.
-      //    This catches shell processes (cmd.exe/powershell.exe/bash.exe) spawned
-      //    by the PTY host with cwd=worktreePath, which hold a CWD handle that
-      //    would cause EBUSY on rmdir.
-      const ps2 = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps2.replace(/"/g, '\\"')}"`, {
+      // Single WMI query matching both ExecutablePath (node_modules binaries)
+      // and CommandLine (shell processes with CWD in worktree). Combined into
+      // one PowerShell invocation to avoid spawning powershell.exe twice.
+      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' -or $_.CommandLine -like '*${escaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`, {
         encoding: "utf-8",
       }).catch(() => {});
 
