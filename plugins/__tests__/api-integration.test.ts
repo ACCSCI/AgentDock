@@ -16,25 +16,29 @@ import { loadConfig } from "../config.js";
 import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
 import { nanoid } from "nanoid";
 import type { SessionPorts } from "../daemon-state.js";
+import { AgentDockDaemon } from "../daemon.js";
+import { DaemonClient } from "../daemon-client.js";
+import { writePortsToEnv } from "../port-write-env.js";
 
 let projectDir: string;
 let db: DrizzleDb;
 let dbDir: string;
 let server: ReturnType<typeof createServer>;
 let baseUrl: string;
+let daemon: AgentDockDaemon | null = null;
+let daemonClient: DaemonClient | null = null;
+const testClientId = "test-api-client";
 
 // Simple in-memory port service mock for integration tests
 let allocatedPorts = new Set<number>();
 function createMockPortService(): PortService {
   return {
     async allocateSession(params) {
-      const ports: SessionPorts = {
-        FRONTEND_PORT: 30000 + allocatedPorts.size * 5,
-        BACKEND_PORT: 30001 + allocatedPorts.size * 5,
-        WS_PORT: 30002 + allocatedPorts.size * 5,
-        DEBUG_PORT: 30003 + allocatedPorts.size * 5,
-        PREVIEW_PORT: 30004 + allocatedPorts.size * 5,
-      };
+      const keys = params.portKeys?.length ? params.portKeys : ["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT", "DEBUG_PORT", "PREVIEW_PORT"];
+      const ports: SessionPorts = {};
+      keys.forEach((key, i) => {
+        ports[key] = 30000 + allocatedPorts.size * keys.length + i;
+      });
       for (const v of Object.values(ports)) allocatedPorts.add(v);
       return ports;
     },
@@ -42,6 +46,44 @@ function createMockPortService(): PortService {
       // no-op for tests
     },
   };
+}
+
+function syncProjectPortsToDb(projectId: string, daemonSessions: Map<string, any>) {
+  const projectSessions = db.select().from(sessions).where(eq(sessions.projectId, projectId)).all();
+  for (const session of projectSessions) {
+    const daemonSession = daemonSessions.get(session.id);
+    if (!daemonSession) continue;
+
+    const dbPorts = session.ports ? JSON.parse(session.ports) : null;
+    const daemonPortsJson = JSON.stringify(daemonSession.ports);
+    if (!dbPorts || JSON.stringify(dbPorts) !== daemonPortsJson) {
+      db.update(sessions).set({ ports: daemonPortsJson }).where(eq(sessions.id, session.id)).run();
+      writePortsToEnv(session.worktreePath, daemonSession.ports);
+    }
+  }
+}
+
+async function declareDiscoveredSession(projectId: string, projectPath: string, wt: { sessionId: string; worktreePath: string; branch: string }) {
+  if (!daemonClient) return null;
+  const result = await daemonClient.declareSessions(testClientId, [{
+    sessionId: wt.sessionId,
+    worktreePath: wt.worktreePath,
+    projectPath,
+    ports: null,
+  }]);
+  const declared = result.results.find((r) => r.sessionId === wt.sessionId);
+  if (!declared?.ports) return null;
+
+  db.insert(sessions).values({
+    id: wt.sessionId,
+    projectId,
+    name: `Session ${wt.sessionId}`,
+    branch: wt.branch,
+    worktreePath: wt.worktreePath,
+    ports: JSON.stringify(declared.ports),
+  }).run();
+  writePortsToEnv(wt.worktreePath, declared.ports);
+  return declared.ports;
 }
 
 function initGitRepo(dir: string) {
@@ -153,20 +195,55 @@ function startTestServer(port: number): Promise<void> {
       // GET /api/projects — with auto-sync (simplified from api.ts)
       if (pathname === "/api/projects" && method === "GET") {
         try {
+          let daemonSessions: Map<string, any> = new Map();
+          if (daemonClient) {
+            const list = await daemonClient.listSessions();
+            for (const s of list) daemonSessions.set(s.sessionId, s);
+          }
+
           const allProjects = db.select().from(projects).all();
           for (const p of allProjects) {
+            syncProjectPortsToDb(p.id, daemonSessions);
+
             const diskWts = scanDiskWorktrees(p.path);
             const existingSessions = db.select().from(sessions).where(eq(sessions.projectId, p.id)).all();
             const existingIds = new Set(existingSessions.map((s) => s.id));
             // Add missing sessions from disk
             for (const wt of diskWts) {
               if (!existingIds.has(wt.sessionId)) {
-                db.insert(sessions).values({
-                  id: wt.sessionId, projectId: p.id, name: `Session ${wt.sessionId}`,
-                  branch: wt.branch, worktreePath: wt.worktreePath,
-                }).run();
+                const daemonSession = daemonSessions.get(wt.sessionId);
+                if (daemonSession) {
+                  db.insert(sessions).values({
+                    id: wt.sessionId,
+                    projectId: p.id,
+                    name: `Session ${wt.sessionId}`,
+                    branch: wt.branch,
+                    worktreePath: wt.worktreePath,
+                    ports: JSON.stringify(daemonSession.ports),
+                  }).run();
+                  writePortsToEnv(wt.worktreePath, daemonSession.ports);
+                } else {
+                  const declaredPorts = await declareDiscoveredSession(p.id, p.path, wt);
+                  if (!declaredPorts) {
+                    db.insert(sessions).values({
+                      id: wt.sessionId,
+                      projectId: p.id,
+                      name: `Session ${wt.sessionId}`,
+                      branch: wt.branch,
+                      worktreePath: wt.worktreePath,
+                    }).run();
+                  } else {
+                    daemonSessions.set(wt.sessionId, {
+                      sessionId: wt.sessionId,
+                      worktreePath: wt.worktreePath,
+                      projectPath: p.path,
+                      ports: declaredPorts,
+                    });
+                  }
+                }
               }
             }
+            syncProjectPortsToDb(p.id, daemonSessions);
             // Clean up sessions whose worktree no longer exists
             const diskWtIds = new Set(diskWts.map((w) => w.sessionId));
             for (const s of existingSessions) {
@@ -258,8 +335,11 @@ beforeEach(async () => {
   dbDir = path.join(os.tmpdir(), `ad-api-db-${id}`);
   mkdirSync(dbDir, { recursive: true });
   db = createDb(dbDir);
+  daemon = new AgentDockDaemon({ port: 0, baseDir: dbDir });
+  await daemon.start();
+  daemonClient = new DaemonClient(daemon.getPort());
+  await daemonClient.registerClient(testClientId, process.pid, [projectDir]);
 
-  // Register the project in DB
   const projId = "testproj";
   db.insert(projects).values({ id: projId, name: "Test Project", path: projectDir }).run();
 
@@ -269,8 +349,13 @@ beforeEach(async () => {
   await startTestServer(port);
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (server) server.close();
+  if (daemon) {
+    await daemon.stop();
+    daemon = null;
+    daemonClient = null;
+  }
   // Close the SQLite connection before cleanup
   try {
     const sqlite = (db as unknown as { $client: { close: () => void } }).$client;
@@ -593,9 +678,9 @@ describe("PATCH /api/sessions/:id", () => {
 
     // 验证数据库 branch 字段也更新了
     const row = db.select().from(sessions).where(eq(sessions.id, sid)).get();
-    expect(row.name).toBe("NewName");
-    expect(row.branch).toBe("agentdock/NewName");
-    expect(row.branch).not.toBe(oldBranch);
+    expect(row?.name).toBe("NewName");
+    expect(row?.branch).toBe("agentdock/NewName");
+    expect(row?.branch).not.toBe(oldBranch);
   });
 
   it("R2: 中文名称重命名成功", async () => {
@@ -609,7 +694,7 @@ describe("PATCH /api/sessions/:id", () => {
 
     // 验证 branch 也更新为中文
     const row = db.select().from(sessions).where(eq(sessions.id, sid)).get();
-    expect(row.branch).toBe("agentdock/测试会话");
+    expect(row?.branch).toBe("agentdock/测试会话");
   });
 
   it("R3: 缺少 name 返回 400", async () => {
@@ -643,7 +728,152 @@ describe("PATCH /api/sessions/:id", () => {
   });
 });
 
-// --- S: backgroundHookStatus crash recovery ---
+// ============================================================
+// EP1-EP5: env.ports 配置 — 自定义端口分配
+// ============================================================
+describe("env.ports 配置 — 自定义端口分配", () => {
+  it("EP1: 配置 2 个端口变量时只分配 2 个端口", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - FRONTEND_PORT
+    - BACKEND_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "2 Ports" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(2);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP2: 配置自定义端口变量名", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - MY_API_PORT
+    - METRICS_PORT
+    - WS_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Custom Names" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(3);
+    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP3: worktree .env 文件只包含配置的端口变量", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - FRONTEND_PORT
+    - WS_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Env Check" });
+    expect(res.status).toBe(200);
+    const envPath = path.join(res.data.session.worktreePath, ".env");
+    const envContent = readFileSync(envPath, "utf-8");
+    expect(envContent).toContain("FRONTEND_PORT=");
+    expect(envContent).toContain("WS_PORT=");
+    expect(envContent).not.toContain("BACKEND_PORT=");
+    expect(envContent).not.toContain("DEBUG_PORT=");
+    expect(envContent).not.toContain("PREVIEW_PORT=");
+  });
+
+  it("EP4: 不配置 env.ports 时仍分配默认 5 端口", async () => {
+    // Remove any existing config file
+    const configPath = path.join(projectDir, "agentdock.config.yaml");
+    if (existsSync(configPath)) rmSync(configPath);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Default" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(5);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.BACKEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.WS_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.DEBUG_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.PREVIEW_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("EP5: 配置 1 个端口变量只分配 1 个端口", async () => {
+    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+version: "1"
+env:
+  ports:
+    - SINGLE_PORT
+`);
+    const res = await api("POST", "/api/projects/testproj/sessions", { name: "Single" });
+    expect(res.status).toBe(200);
+    const ports = res.data.session.ports;
+    expect(Object.keys(ports)).toHaveLength(1);
+    expect(ports.SINGLE_PORT).toBeGreaterThanOrEqual(20000);
+  });
+});
+
+// ============================================================
+// P: port reconciliation and external discovery
+// ============================================================
+describe("P: port reconciliation and external discovery", () => {
+  it("P1: 首次发现外部 session 时立即补登记并返回端口", async () => {
+    const foreignId = "foreign123";
+    const worktreePath = path.join(projectDir, ".agentdock", "worktrees", foreignId);
+    execSync(`git worktree add --detach "${worktreePath}" HEAD`, { cwd: projectDir, stdio: "pipe" });
+
+    const res = await api("GET", "/api/projects");
+    expect(res.status).toBe(200);
+
+    const project = res.data.projects.find((p: any) => p.id === "testproj");
+    const session = project.sessions.find((s: any) => s.id === foreignId);
+    expect(session).toBeDefined();
+    expect(session.ports).toBeDefined();
+    expect(session.ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+
+    const row = db.select().from(sessions).where(eq(sessions.id, foreignId)).get();
+    expect(row?.ports).not.toBeNull();
+
+    const envContent = readFileSync(path.join(worktreePath, ".env"), "utf-8");
+    expect(envContent).toContain(`FRONTEND_PORT=${session.ports.FRONTEND_PORT}`);
+  });
+
+  it("P2: /api/projects 用 daemon ports 覆盖 DB 中的旧非空 ports", async () => {
+    const createRes = await api("POST", "/api/projects/testproj/sessions", { name: "Reconcile" });
+    expect(createRes.status).toBe(200);
+    const sid = createRes.data.session.id;
+
+    await daemonClient!.declareSessions(testClientId, [{
+      sessionId: sid,
+      worktreePath: createRes.data.session.worktreePath,
+      projectPath: projectDir,
+      ports: createRes.data.session.ports,
+    }]);
+    const daemonPorts = await daemonClient!.reassignSession(testClientId, sid);
+    db.update(sessions).set({ ports: JSON.stringify({
+      FRONTEND_PORT: 11111,
+      BACKEND_PORT: 11112,
+      WS_PORT: 11113,
+      DEBUG_PORT: 11114,
+      PREVIEW_PORT: 11115,
+    }) }).where(eq(sessions.id, sid)).run();
+
+    const res = await api("GET", "/api/projects");
+    expect(res.status).toBe(200);
+
+    const project = res.data.projects.find((p: any) => p.id === "testproj");
+    const session = project.sessions.find((s: any) => s.id === sid);
+    expect(session.ports).toEqual(daemonPorts);
+
+    const row = db.select().from(sessions).where(eq(sessions.id, sid)).get();
+    expect(row?.ports ? JSON.parse(row.ports) : null).toEqual(daemonPorts);
+
+    const envContent = readFileSync(path.join(createRes.data.session.worktreePath, ".env"), "utf-8");
+    expect(envContent).toContain(`FRONTEND_PORT=${daemonPorts.FRONTEND_PORT}`);
+  });
+});
 
 describe("S: backgroundHookStatus restart recovery", () => {
   it("S2: 重启后 auto-sync 重置卡死的 backgroundHookStatus", async () => {

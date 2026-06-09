@@ -44,7 +44,17 @@ const MIGRATIONS: Array<(sqlite: Database.Database) => void> = [
   (sqlite) => {
     addColumnIfMissing(sqlite, "sessions", "background_hook_status", "TEXT");
   },
-  // v4: add sessions.background_hook_errors.
+  // v4: add sessions.sort_order for drag-and-drop reordering.
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "sessions", "sort_order", "INTEGER");
+    // Backfill sort_order for existing rows using created_at timestamp
+    sqlite.exec(`
+      UPDATE sessions
+      SET sort_order = CAST(strftime('%s', created_at) AS INTEGER) * 1000
+      WHERE sort_order IS NULL
+    `);
+  },
+  // v5: add sessions.background_hook_errors.
   (sqlite) => {
     addColumnIfMissing(sqlite, "sessions", "background_hook_errors", "TEXT");
   },

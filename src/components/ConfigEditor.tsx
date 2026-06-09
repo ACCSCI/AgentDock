@@ -37,10 +37,11 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
   const [showYamlPreview, setShowYamlPreview] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [saveError, setSaveError] = useState("");
-  const [expandedSections, setExpandedSections] = useState({ resources: true, hooks: true });
+  const [expandedSections, setExpandedSections] = useState({ resources: true, hooks: true, ports: false });
   const [activeHookTab, setActiveHookTab] = useState("afterCreateSession");
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [filePickerTarget, setFilePickerTarget] = useState<number | null>(null);
+  const [newPortKey, setNewPortKey] = useState("");
 
   // Reset config when projectId changes
   useEffect(() => {
@@ -143,6 +144,44 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
     }));
   }, [updateConfig]);
 
+  // --- Port key handlers ---
+  const addPortKey = useCallback((key: string) => {
+    const trimmed = key.trim().toUpperCase();
+    if (!trimmed || !/^[A-Z][A-Z0-9_]*$/.test(trimmed)) return;
+    updateConfig((prev) => {
+      const current = prev.env?.ports ?? [];
+      if (current.includes(trimmed)) return prev;
+      return {
+        ...prev,
+        env: {
+          ...prev.env,
+          ports: [...current, trimmed],
+        },
+      };
+    });
+    setNewPortKey("");
+  }, [updateConfig]);
+
+  const removePortKey = useCallback((index: number) => {
+    updateConfig((prev) => {
+      const current = prev.env?.ports ?? [];
+      return {
+        ...prev,
+        env: {
+          ...prev.env,
+          ports: current.filter((_, i) => i !== index),
+        },
+      };
+    });
+  }, [updateConfig]);
+
+  const handlePortKeyInputKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addPortKey(newPortKey);
+    }
+  }, [addPortKey, newPortKey]);
+
   // --- Actions ---
   const handlePreview = useCallback(() => {
     setShowYamlPreview((prev) => !prev);
@@ -152,8 +191,13 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
     if (!config) return;
     setSaveStatus("idle");
     setSaveError("");
+    // Normalize: strip empty ports so Zod default kicks in (avoid min(1) rejection)
+    const saveConfig = { ...config };
+    if (!saveConfig.env?.ports?.length) {
+      delete saveConfig.env;
+    }
     try {
-      await saveMutation.mutateAsync(config);
+      await saveMutation.mutateAsync(saveConfig);
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 3000);
     } catch (err) {
@@ -378,6 +422,102 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
             <button type="button" className="config-btn-add" onClick={() => addHook(activeHookTab)}>
               + 添加钩子
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* Section: Ports */}
+      <div className="config-section">
+        <button
+          type="button"
+          className="config-section-header"
+          onClick={() => setExpandedSections((s) => ({ ...s, ports: !s.ports }))}
+        >
+          <span className={`config-section-arrow ${expandedSections.ports ? "expanded" : ""}`}>▶</span>
+          <h3>端口分配 (env.ports)</h3>
+          <span className="config-section-count">
+            {(config.env?.ports && config.env.ports.length > 0)
+              ? `${config.env.ports.length} 个端口`
+              : "默认 5 端口"}
+          </span>
+        </button>
+        <p className="config-section-desc">
+          定义此项目需要分配哪些端口变量。分配到 worktree 后写入 .env 文件。
+          不配置时默认分配 FRONTEND_PORT、BACKEND_PORT、WS_PORT、DEBUG_PORT、PREVIEW_PORT。
+        </p>
+
+        {expandedSections.ports && (
+          <div className="config-section-body">
+            {/* Port key tags */}
+            <div className="config-port-list">
+              {(config.env?.ports ?? []).map((key, i) => (
+                <div key={i} className="config-port-tag">
+                  <span className="config-port-tag-label">{key}</span>
+                  <button
+                    type="button"
+                    className="config-port-tag-remove"
+                    onClick={() => removePortKey(i)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {!config.env?.ports?.length && (
+                <div className="config-port-empty">
+                  未配置自定义端口变量，将使用默认 5 端口
+                </div>
+              )}
+            </div>
+
+            {/* Add port key input */}
+            <div className="config-port-add">
+              <input
+                type="text"
+                value={newPortKey}
+                placeholder="输入端口变量名如 METRICS_PORT，按 Enter 添加"
+                onChange={(e) => setNewPortKey(e.target.value)}
+                onKeyDown={handlePortKeyInputKeyDown}
+                className="config-port-input"
+              />
+              <button
+                type="button"
+                className="config-btn-add config-btn-add-port"
+                onClick={() => addPortKey(newPortKey)}
+                disabled={!newPortKey.trim() || !/^[A-Z][A-Z0-9_]*$/i.test(newPortKey.trim())}
+              >
+                + 添加
+              </button>
+            </div>
+
+            {/* .env hints */}
+            {data?.envPorts && data.envPorts.length > 0 && (
+              <div className="config-port-hints">
+                <span className="config-port-hints-label">📋 当前 .env 中的端口变量：</span>
+                <div className="config-port-hint-tags">
+                  {data.envPorts.map((key) => {
+                    const alreadyAdded = (config.env?.ports ?? []).includes(key);
+                    return (
+                      <span
+                        key={key}
+                        className={`config-port-hint-tag ${alreadyAdded ? "added" : ""}`}
+                      >
+                        {key}
+                        {!alreadyAdded && (
+                          <button
+                            type="button"
+                            className="config-port-hint-add"
+                            onClick={() => addPortKey(key)}
+                            title="添加到配置"
+                          >
+                            + 添加
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

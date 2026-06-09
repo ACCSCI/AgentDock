@@ -199,4 +199,44 @@ describe("DaemonClient Session Methods", () => {
     // The /nonexistent endpoint returns 404 which is not JSON, so get() should reject
     await expect(badClient.health()).resolves.toBe(true);
   });
+
+  it("allocateSession with custom portKeys returns only those keys", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const ports = await client.allocateSession({
+      clientId: "c1",
+      sessionId: "s-custom",
+      projectPath: "/project/a",
+      worktreePath: "/wt/s-custom",
+      portKeys: ["FRONTEND_PORT", "METRICS_PORT"],
+    });
+    expect(Object.keys(ports)).toHaveLength(2);
+    expect(ports.FRONTEND_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.METRICS_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("allocateSession with single portKey returns one port", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const ports = await client.allocateSession({
+      clientId: "c1",
+      sessionId: "s-single",
+      projectPath: "/project/a",
+      worktreePath: "/wt/s-single",
+      portKeys: ["MY_API_PORT"],
+    });
+    expect(Object.keys(ports)).toHaveLength(1);
+    expect(ports.MY_API_PORT).toBeGreaterThanOrEqual(20000);
+  });
+
+  it("declareSessions with portKeys allocates custom ports", async () => {
+    await client.registerClient("c1", 100, ["/project/a"]);
+    const result = await client.declareSessions("c1", [
+      { sessionId: "s-d1", worktreePath: "/wt/s-d1", projectPath: "/project/a", portKeys: ["A_PORT", "B_PORT"] },
+    ]);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].status).toBe("allocated");
+    const ports = result.results[0].ports;
+    expect(Object.keys(ports)).toHaveLength(2);
+    expect(ports.A_PORT).toBeGreaterThanOrEqual(20000);
+    expect(ports.B_PORT).toBeGreaterThanOrEqual(20000);
+  });
 });

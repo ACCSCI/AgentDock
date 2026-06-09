@@ -33,6 +33,23 @@ export const HookDefinitionSchema = z.object({
 });
 export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
 
+// --- EnvConfig ---
+const PORT_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
+export const PortVarNameSchema = z.string().regex(PORT_NAME_RE, "端口变量名必须是大写字母、数字、下划线，且以字母开头");
+
+export const PORT_KEYS_DEFAULT = [
+  "FRONTEND_PORT",
+  "BACKEND_PORT",
+  "WS_PORT",
+  "DEBUG_PORT",
+  "PREVIEW_PORT",
+] as const;
+
+export const EnvConfigSchema = z.object({
+  ports: z.array(PortVarNameSchema).min(1, "至少需要 1 个端口变量").default([...PORT_KEYS_DEFAULT]),
+}).default({ ports: [...PORT_KEYS_DEFAULT] });
+export type EnvConfig = z.infer<typeof EnvConfigSchema>;
+
 // --- AgentDockConfig ---
 export const AgentDockConfigSchema = z.object({
   version: z.string().default("1"),
@@ -44,6 +61,7 @@ export const AgentDockConfigSchema = z.object({
   hooks: z
     .record(z.string(), z.array(HookDefinitionSchema))
     .default({}),
+  env: EnvConfigSchema,
 });
 export type AgentDockConfig = z.infer<typeof AgentDockConfigSchema>;
 

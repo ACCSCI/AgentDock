@@ -141,4 +141,137 @@ describe("Port allocation edge cases", () => {
     // unless something else is using it
     expect(ports[0]).toBeGreaterThanOrEqual(PORT_RANGE_START);
   });
+
+  it("DA1: allocateSession with dynamic portKeys (2 ports)", async () => {
+    const ports = await state.allocatePorts(2);
+    const sessionPorts: Record<string, number> = {};
+    const keys = ["MY_PORT_A", "MY_PORT_B"];
+    keys.forEach((key, i) => { sessionPorts[key] = ports[i]; });
+
+    state.allocateSession({
+      sessionId: "dyn-1",
+      worktreePath: "/wt/dyn-1",
+      projectPath: "/project",
+      ports: sessionPorts,
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+    const session = state.getSession("dyn-1");
+    expect(session?.ports.MY_PORT_A).toBeDefined();
+    expect(session?.ports.MY_PORT_B).toBeDefined();
+    expect(Object.keys(session!.ports)).toHaveLength(2);
+  });
+
+  it("DA2: allocateSession with single portKey", async () => {
+    const ports = await state.allocatePorts(1);
+    const sessionPorts: Record<string, number> = { SINGLE_PORT: ports[0] };
+
+    state.allocateSession({
+      sessionId: "dyn-2",
+      worktreePath: "/wt/dyn-2",
+      projectPath: "/project",
+      ports: sessionPorts,
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+    const session = state.getSession("dyn-2");
+    expect(Object.keys(session!.ports)).toHaveLength(1);
+    expect(session?.ports.SINGLE_PORT).toBe(ports[0]);
+  });
+
+  it("DA3: checkInvariants works with variable port counts", async () => {
+    // Create 2 sessions: one with 2 ports, one with 3 ports
+    const p1 = await state.allocatePorts(2);
+    state.allocateSession({
+      sessionId: "s-2port",
+      worktreePath: "/wt/s-2port",
+      projectPath: "/project",
+      ports: { A: p1[0], B: p1[1] },
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+
+    const p2 = await state.allocatePorts(3);
+    state.allocateSession({
+      sessionId: "s-3port",
+      worktreePath: "/wt/s-3port",
+      projectPath: "/project",
+      ports: { X: p2[0], Y: p2[1], Z: p2[2] },
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+
+    const invariants = state.checkInvariants();
+    expect(invariants.valid).toBe(true);
+    // Total ports: 2 + 3 = 5
+    expect(state.getAllAllocatedPorts().size).toBe(5);
+  });
+});
+
+describe("Dynamic port count allocation", () => {
+  let state: DaemonState;
+
+  beforeEach(() => {
+    state = new DaemonState();
+  });
+
+  it("DP1: allocate 2 ports returns 2 values", async () => {
+    const ports = await state.allocatePorts(2);
+    expect(ports).toHaveLength(2);
+    expect(new Set(ports).size).toBe(2);
+  });
+
+  it("DP2: allocate 10 ports returns 10 unique values", async () => {
+    const ports = await state.allocatePorts(10);
+    expect(ports).toHaveLength(10);
+    expect(new Set(ports).size).toBe(10);
+  });
+
+  it("DP3: session with custom port key names", async () => {
+    const allocated = await state.allocatePorts(3);
+    const ports = { API_PORT: allocated[0], WS_PORT: allocated[1], METRICS_PORT: allocated[2] };
+    state.allocateSession({
+      sessionId: "s-dynamic",
+      worktreePath: "/wt/s-dynamic",
+      projectPath: "/project",
+      ports,
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+    const session = state.getSession("s-dynamic");
+    expect(session).not.toBeNull();
+    expect(Object.keys(session!.ports)).toHaveLength(3);
+    expect(session!.ports.API_PORT).toBe(allocated[0]);
+  });
+
+  it("DP4: releaseSession with dynamic ports frees correct count", async () => {
+    const allocated = await state.allocatePorts(3);
+    const ports = { FOO_PORT: allocated[0], BAR_PORT: allocated[1], BAZ_PORT: allocated[2] };
+    state.allocateSession({
+      sessionId: "s-dynamic2",
+      worktreePath: "/wt/s-dynamic2",
+      projectPath: "/project",
+      ports,
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+    expect(state.getAllAllocatedPorts().size).toBe(3);
+    state.releaseSession("s-dynamic2");
+    expect(state.getAllAllocatedPorts().size).toBe(0);
+  });
+
+  it("DP5: session with 1 port uses single value", async () => {
+    const allocated = await state.allocatePorts(1);
+    const ports = { SINGLE_PORT: allocated[0] };
+    state.allocateSession({
+      sessionId: "s-single",
+      worktreePath: "/wt/s-single",
+      projectPath: "/project",
+      ports,
+      ownerClientId: "c1",
+      ownerPid: 1000,
+    });
+    expect(state.getAllAllocatedPorts().size).toBe(1);
+    expect(state.getSession("s-single")!.ports.SINGLE_PORT).toBe(allocated[0]);
+  });
 });

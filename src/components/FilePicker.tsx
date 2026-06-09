@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useProjectFiles, type FileEntry } from "../lib/queries";
 
 interface FilePickerProps {
@@ -12,6 +12,9 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   const [currentPath, setCurrentPath] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  /** Stores the scrollTop for each directory path we've visited. */
+  const scrollPositions = useRef<Map<string, number>>(new Map());
 
   const { data: entries = [], isLoading } = useProjectFiles(projectId, currentPath, open);
 
@@ -20,17 +23,25 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
     ? entries.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
     : entries;
 
-  // Reset state when modal opens
-  useEffect(() => {
-    if (open) {
+  // Reset state when modal closes (avoids re-fetch on next open)
+  useLayoutEffect(() => {
+    if (!open) {
+      scrollPositions.current.clear();
       setCurrentPath("");
       setSelected(null);
       setSearch("");
     }
   }, [open]);
 
+  /** Continuously save the current scroll position for the active directory. */
+  const handleScroll = useCallback(() => {
+    if (listRef.current) {
+      scrollPositions.current.set(currentPath, listRef.current.scrollTop);
+    }
+  }, [currentPath]);
+
   const handleNavigate = useCallback((entry: FileEntry) => {
-    if (entry.type === "dir") {
+    if (entry.isDir) {
       setCurrentPath(entry.path);
       setSelected(null);
       setSearch("");
@@ -53,6 +64,29 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
     }
   }, [selected, onConfirm]);
 
+  const handleSelectDir = useCallback(() => {
+    if (currentPath) {
+      // Append "/" to signal directory selection (resource-sync convention)
+      onConfirm(currentPath.endsWith("/") ? currentPath : `${currentPath}/`);
+    }
+  }, [currentPath, onConfirm]);
+
+  const goToPath = useCallback((path: string) => {
+    setCurrentPath(path);
+    setSelected(null);
+    setSearch("");
+  }, []);
+
+  // Restore scroll position when data for the new directory is ready
+  useLayoutEffect(() => {
+    if (!isLoading && listRef.current) {
+      const saved = scrollPositions.current.get(currentPath);
+      if (saved !== undefined) {
+        listRef.current.scrollTop = saved;
+      }
+    }
+  }, [currentPath, entries, isLoading]);
+
   // Breadcrumb segments
   const breadcrumbs = currentPath ? currentPath.split("/").filter(Boolean) : [];
 
@@ -71,7 +105,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
           <button
             type="button"
             className="file-picker-breadcrumb-item"
-            onClick={() => { setCurrentPath(""); setSelected(null); setSearch(""); }}
+            onClick={() => goToPath("")}
           >
             📁 项目根目录
           </button>
@@ -83,7 +117,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
                 <button
                   type="button"
                   className="file-picker-breadcrumb-item"
-                  onClick={() => { setCurrentPath(segPath); setSelected(null); setSearch(""); }}
+                  onClick={() => goToPath(segPath)}
                 >
                   {seg}
                 </button>
@@ -103,7 +137,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         </div>
 
         {/* File list */}
-        <div className="file-picker-list">
+        <div className="file-picker-list" ref={listRef} onScroll={handleScroll}>
           {isLoading ? (
             <div className="file-picker-loading">加载中...</div>
           ) : displayEntries.length === 0 ? (
@@ -115,15 +149,15 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
                 className={`file-picker-entry ${selected === entry.path ? "file-picker-entry-selected" : ""}`}
                 onClick={() => handleNavigate(entry)}
                 onDoubleClick={() => {
-                  if (entry.type === "file") onConfirm(entry.path);
+                  if (!entry.isDir) onConfirm(entry.path);
                 }}
               >
                 <span className="file-picker-entry-icon">
-                  {entry.type === "dir" ? "📁" : "📄"}
+                  {entry.isDir ? "📁" : "📄"}
                 </span>
                 <span className="file-picker-entry-name">{entry.name}</span>
-                <span className={`file-picker-git-badge ${entry.tracked ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
-                  {entry.tracked ? "已跟踪" : "未跟踪"}
+                <span className={`file-picker-git-badge ${entry.status !== "untracked" ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
+                  {entry.status !== "untracked" ? "已跟踪" : "未跟踪"}
                 </span>
               </div>
             ))
@@ -133,9 +167,18 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         {/* Footer */}
         <div className="file-picker-footer">
           {currentPath && (
-            <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
-              ← 返回上级
-            </button>
+            <>
+              <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
+                ← 返回上级
+              </button>
+              <button
+                type="button"
+                className="file-picker-btn file-picker-btn-select-dir"
+                onClick={handleSelectDir}
+              >
+                📁 选择此目录
+              </button>
+            </>
           )}
           <div className="file-picker-footer-right">
             <button type="button" className="file-picker-btn file-picker-btn-cancel" onClick={onCancel}>
