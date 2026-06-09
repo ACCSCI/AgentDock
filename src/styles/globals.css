@@ -901,6 +901,23 @@ body {
   background: #d97706;
 }
 
+.failed-delete-btn {
+  padding: 4px 10px;
+  background: none;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.failed-delete-btn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
 /* ---- Directory Browser Modal ---- */
 .dir-modal-overlay {
   position: fixed;

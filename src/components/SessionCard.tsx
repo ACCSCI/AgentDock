@@ -262,6 +262,33 @@ export function SessionCard({
           >
             重试
           </button>
+          {confirmingDelete ? (
+            <span className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
+              <span className="session-delete-confirm-text">确认删除?</span>
+              <button
+                type="button"
+                className="session-delete-confirm-btn session-delete-confirm-yes"
+                onClick={() => { setConfirmingDelete(false); onDelete(session.id); }}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="session-delete-confirm-btn session-delete-confirm-no"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="failed-delete-btn"
+              onClick={(e) => { e.stopPropagation(); setConfirmingDelete(true); }}
+            >
+              删除
+            </button>
+          )}
         </div>
       </div>
     );
