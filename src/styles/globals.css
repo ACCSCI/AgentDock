@@ -844,13 +844,13 @@ body {
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
-  cursor: default;
+  cursor: pointer;
   background: #fffbeb;
   border-left: 3px solid #f59e0b;
 }
 
 .session-card-failed:hover {
-  background: #fffbeb;
+  background: #fef3c7;
 }
 
 .failed-icon {
@@ -865,8 +865,28 @@ body {
   padding-left: 4px;
 }
 
+.failed-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.failed-log-btn {
+  padding: 4px 12px;
+  background: var(--color-bg);
+  color: #92400e;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.failed-log-btn:hover {
+  background: #fef3c7;
+}
+
 .failed-retry-btn {
-  align-self: flex-end;
   padding: 4px 12px;
   background: #f59e0b;
   color: #fff;

@@ -313,20 +313,22 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <button type="button" className="config-btn-delete" onClick={() => removeHook(activeHookTab, i)}>×</button>
                 </div>
                 <div className="config-entry-row config-entry-row-fields">
-                  <div className="config-field">
-                    <label>
-                      required
-                      <span className="config-field-help" title={HELP.required}>?</span>
-                    </label>
-                    <label className="config-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={hook.required}
-                        onChange={(e) => updateHook(activeHookTab, i, "required", e.target.checked)}
-                      />
-                      <span>失败中断</span>
-                    </label>
-                  </div>
+                  {!hook.async && (
+                    <div className="config-field">
+                      <label>
+                        required
+                        <span className="config-field-help" title={HELP.required}>?</span>
+                      </label>
+                      <label className="config-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={hook.required}
+                          onChange={(e) => updateHook(activeHookTab, i, "required", e.target.checked)}
+                        />
+                        <span>失败中断</span>
+                      </label>
+                    </div>
+                  )}
                   <div className="config-field">
                     <label>
                       timeout (ms)
