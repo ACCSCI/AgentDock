@@ -1,13 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { execSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 import {
   createWorktree,
   getWorktreePath,
   isRegisteredWorktree,
   listWorktrees,
+  removeOrphanDir,
   removeWorktree,
   renameWorktree,
   validateBranchName,
@@ -171,6 +173,84 @@ describe("removeWorktree", () => {
     const removed = await removeWorktree(projectDir, "s9", true);
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
+  });
+});
+
+// ============================================================
+// W10–W14: removeOrphanDir — 重试与进程锁定
+// ============================================================
+const isWin = process.platform === "win32";
+
+// 独立临时目录，避免 afterEach 清理 projectDir 时因子进程持有句柄而失败
+function orphanTempDir(): string {
+  const dir = path.join(os.tmpdir(), `ad-orphan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+describe("removeOrphanDir", () => {
+  it("W10: 不存在路径时静默返回", async () => {
+    const nonExistent = path.join(projectDir, "does-not-exist", "at-all");
+    await expect(removeOrphanDir(nonExistent)).resolves.toBeUndefined();
+  });
+
+  it("W11: 空目录正常删除", async () => {
+    const orphanDir = path.join(projectDir, ".agentdock", "worktrees", "orphan-w11");
+    mkdirSync(orphanDir, { recursive: true });
+    await removeOrphanDir(orphanDir);
+    expect(existsSync(orphanDir)).toBe(false);
+  });
+
+  it("W12: 带文件的目录正常删除", async () => {
+    const orphanDir = path.join(projectDir, ".agentdock", "worktrees", "orphan-w12");
+    mkdirSync(orphanDir, { recursive: true });
+    writeFileSync(path.join(orphanDir, "file.txt"), "data");
+    await removeOrphanDir(orphanDir);
+    expect(existsSync(orphanDir)).toBe(false);
+  });
+
+  it("W13: 子进程持有目录句柄时，重试后成功删除", { timeout: 60000 }, async () => {
+    const orphanDir = orphanTempDir();
+    writeFileSync(path.join(orphanDir, "file.txt"), "data");
+
+    let child: ReturnType<typeof spawn> | null = null;
+    if (isWin) {
+      child = spawn("cmd.exe", ["/c", "ping -n 10 127.0.0.1 >nul"], { cwd: orphanDir });
+    } else {
+      child = spawn("sleep", ["10"], { cwd: orphanDir });
+    }
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 删除应成功（重试 + killProcessesUnderPath）
+    await expect(removeOrphanDir(orphanDir)).resolves.toBeUndefined();
+    expect(existsSync(orphanDir)).toBe(false);
+
+    try { child?.kill(); } catch {}
+    try { rmSync(orphanDir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("W14: 重试耗尽后抛出错误", { timeout: 60000 }, async () => {
+    const orphanDir = orphanTempDir();
+    writeFileSync(path.join(orphanDir, "file.txt"), "data");
+
+    let child: ReturnType<typeof spawn> | null = null;
+    if (isWin) {
+      child = spawn("cmd.exe", ["/c", "ping -n 60 127.0.0.1 >nul"], { cwd: orphanDir });
+    } else {
+      // detached: 让进程独立于测试进程，kill 时不会被连带杀
+      child = spawn("sleep", ["60"], { cwd: orphanDir, detached: true, stdio: "ignore" });
+      child.unref();
+    }
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 应该失败（超出重试次数）
+    await expect(removeOrphanDir(orphanDir)).rejects.toThrow();
+    expect(existsSync(orphanDir)).toBe(true);
+
+    try { child?.kill(); child?.unref(); } catch {}
+    try { rmSync(orphanDir, { recursive: true, force: true }); } catch {}
   });
 });
 

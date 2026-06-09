@@ -3,6 +3,7 @@ import type { AgentDockConfig, HookLifecycleEvent } from "./config.js";
 import {
   createHookEngine,
   createHookRegistry,
+  killSessionHookProcessesAndWait,
   type HookContext,
   type HookReport,
 } from "./hook-engine.js";
@@ -292,6 +293,9 @@ export function createSessionLifecycle(deps?: {
     emit(onStep, { step: "removeWorktree", status: "running" });
     const wtStepStart = Date.now();
     if (existsSync(worktreePath)) {
+      // Kill any lingering async hook child processes that may hold CWD handles
+      // and wait for OS to release them before attempting directory removal.
+      await killSessionHookProcessesAndWait(sessionId, worktreePath);
       await removeWorktree(projectPath, sessionId, true);
     }
     const wtDuration = Date.now() - wtStepStart;
