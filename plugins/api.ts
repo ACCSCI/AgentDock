@@ -912,6 +912,19 @@ export function apiPlugin(): Plugin {
           return;
         }
 
+        // POST /api/open-terminal
+        if (pathname === "/api/open-terminal" && method === "POST") {
+          const body = await parseBody(req);
+          const { path: dirPath } = body as { path?: string };
+          if (!dirPath) { json(res, 400, { error: "path is required" }); return; }
+          try {
+            const { openInTerminal } = await import("./open-terminal.js");
+            await openInTerminal(dirPath);
+            json(res, 200, { success: true });
+          } catch (err) { json(res, 400, { error: err instanceof Error ? err.message : "Unknown error" }); }
+          return;
+        }
+
         // ---- Terminal REST API ----
 
         // POST /api/sessions/:id/terminals �� Create a new terminal

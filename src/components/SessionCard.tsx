@@ -63,6 +63,7 @@ interface SessionCardProps {
   onDelete: (sessionId: string) => void;
   onRename: (sessionId: string, newName: string) => void;
   onOpenInExplorer: (worktreePath: string) => void;
+  onOpenInTerminal: (worktreePath: string) => void;
   onReassignPorts: (sessionId: string) => void;
   onRetryHooks: (sessionId: string) => void;
   onHover?: (sessionId: string) => void;
@@ -77,6 +78,7 @@ export function SessionCard({
   onDelete,
   onRename,
   onOpenInExplorer,
+  onOpenInTerminal,
   onReassignPorts,
   onRetryHooks,
   onHover,
@@ -195,6 +197,11 @@ export function SessionCard({
     setMenuPos(null);
     onOpenInExplorer(session.worktreePath);
   }, [session.worktreePath, onOpenInExplorer]);
+
+  const handleOpenInTerminal = useCallback(() => {
+    setMenuPos(null);
+    onOpenInTerminal(session.worktreePath);
+  }, [session.worktreePath, onOpenInTerminal]);
 
   const handleDelete = useCallback(() => {
     setMenuPos(null);
@@ -373,6 +380,9 @@ export function SessionCard({
           )}
           <button type="button" className="context-menu-item" onClick={handleOpenInExplorer}>
             在文件管理器中打开
+          </button>
+          <button type="button" className="context-menu-item" onClick={handleOpenInTerminal}>
+            在终端中打开
           </button>
           {session.canReassign !== false && (
             <button type="button" className="context-menu-item" onClick={handleReassignPorts}>

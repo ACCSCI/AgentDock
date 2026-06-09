@@ -208,6 +208,18 @@ export function SessionSidebar() {
     }
   };
 
+  const handleOpenInTerminal = async (worktreePath: string) => {
+    try {
+      await fetch("/api/open-terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: worktreePath }),
+      });
+    } catch {
+      navigator.clipboard.writeText(worktreePath);
+    }
+  };
+
   const handleReassignPorts = async (sessionId: string) => {
     try {
       await reassignPorts.mutateAsync(sessionId);
@@ -265,6 +277,7 @@ export function SessionSidebar() {
               onDelete={handleDeleteSession}
               onRename={handleRenameSession}
               onOpenInExplorer={handleOpenInExplorer}
+              onOpenInTerminal={handleOpenInTerminal}
               onReassignPorts={handleReassignPorts}
               onRetryHooks={handleRetryHooks}
               onHover={prefetchTerminals}
@@ -290,6 +303,7 @@ export function SessionSidebar() {
                     onDelete={handleDeleteSession}
                     onRename={handleRenameSession}
                     onOpenInExplorer={handleOpenInExplorer}
+                    onOpenInTerminal={handleOpenInTerminal}
                     onReassignPorts={handleReassignPorts}
                     onRetryHooks={handleRetryHooks}
                     onHover={prefetchTerminals}
