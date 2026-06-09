@@ -1,6 +1,89 @@
 import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import process from "node:process";
 import type { HookDefinition, HookLifecycleEvent } from "./config.js";
 import { buildScopedChildEnv } from "./env.js";
+
+const execAsync = promisify(exec);
+
+// --- 异步 hook 子进程追踪 ---
+// 用于 session 删除时 kill 仍在运行的 hook 子进程，防止 EBUSY
+const sessionHookPids = new Map<string, Set<number>>();
+
+export function trackHookPid(sessionId: string, pid: number): void {
+  let set = sessionHookPids.get(sessionId);
+  if (!set) { set = new Set(); sessionHookPids.set(sessionId, set); }
+  set.add(pid);
+}
+
+export function killSessionHookProcesses(sessionId: string): void {
+  const pids = sessionHookPids.get(sessionId);
+  if (!pids || pids.size === 0) return;
+
+  for (const pid of pids) {
+    try {
+      if (process.platform === "win32") {
+        // /T 杀整棵进程树, /F 强制
+        exec(`taskkill /PID ${pid} /T /F 2>nul`, () => {});
+      } else {
+        process.kill(pid, "SIGKILL");
+      }
+    } catch {
+      // 进程可能已退出
+    }
+  }
+  sessionHookPids.delete(sessionId);
+}
+
+/**
+ * Kill tracked hook processes and wait for OS to release directory handles.
+ * On Windows, cmd.exe may take >300ms after receiving SIGTERM to release its CWD handle.
+ * We poll up to ~5s, verifying processes are actually gone before returning.
+ */
+export async function killSessionHookProcessesAndWait(sessionId: string, dirPath: string): Promise<void> {
+  const pids = sessionHookPids.get(sessionId);
+  if (!pids || pids.size === 0) {
+    sessionHookPids.delete(sessionId);
+    return;
+  }
+
+  // Strategy 1: taskkill on tracked PIDs (await to ensure completion)
+  if (process.platform === "win32") {
+    for (const pid of pids) {
+      await execAsync(`taskkill /PID ${pid} /T /F`).catch(() => {});
+    }
+  } else {
+    for (const pid of pids) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  }
+
+  sessionHookPids.delete(sessionId);
+
+  // 二次防线：WMI 杀进程（捕获 taskkill 可能遗漏的子进程）
+  try {
+    const { killProcessesUnderPath } = await import("./worktree.js");
+    await killProcessesUnderPath(dirPath);
+  } catch {
+    // best-effort
+  }
+
+  // Wait for OS to release handles (up to ~10s on Windows)
+  if (process.platform === "win32") {
+    const { opendir } = await import("node:fs/promises");
+    await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const handle = await opendir(dirPath);
+        await handle.close();
+        return;
+      } catch {
+        // EBUSY/EPERM — still locked, retry
+      }
+    }
+  }
+}
 
 // --- Hook 执行上下文 ---
 export interface HookContext {
@@ -144,6 +227,11 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
           });
         },
       );
+
+      // Track child PID so session deletion can kill lingering hook processes
+      if (child.pid) {
+        trackHookPid(context.sessionId, child.pid);
+      }
 
       // Handle timeout
       const timer = setTimeout(() => {

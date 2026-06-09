@@ -97,21 +97,26 @@ export function validateBranchName(name: string): void {
  * it retries. We terminate those processes before deleting the directory.
  *
  * Additionally, shell processes (cmd.exe, powershell.exe, bash.exe) spawned by
- * the PTY host have their CWD set to the worktree directory, so the OS holds a
- * handle on the directory itself (causing EBUSY on rmdir). Those processes are
- * not caught by the ExecutablePath check because their binary lives under
- * C:\Windows or C:\Program Files — we detect them via CommandLine match.
+ * the PTY host or by hook commands have their CWD set to the worktree directory,
+ * so the OS holds a handle on the directory itself (causing EBUSY on rmdir).
+ * Those processes are not caught by the ExecutablePath check because their
+ * binary lives under C:\Windows or C:\Program Files. We also match by
+ * CommandLine AND CurrentDirectory to cover cases where exec() sets cwd but
+ * the command string itself doesn't contain the path.
  */
 export async function killProcessesUnderPath(dirPath: string): Promise<void> {
   const normalized = path.resolve(dirPath);
   try {
     if (process.platform === "win32") {
       const escaped = normalized.replace(/\\/g, "\\\\").replace(/'/g, "''");
+      // Win32_Process.CurrentDirectory may end with a backslash; normalize for comparison.
+      const cdEscaped = escaped.endsWith("\\\\") ? escaped : escaped + "\\\\";
 
-      // Single WMI query matching both ExecutablePath (node_modules binaries)
-      // and CommandLine (shell processes with CWD in worktree). Combined into
-      // one PowerShell invocation to avoid spawning powershell.exe twice.
-      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' -or $_.CommandLine -like '*${escaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      // Single WMI query matching:
+      //   - ExecutablePath: binaries inside the dir (node_modules, etc.)
+      //   - CommandLine:     command text containing the path
+      //   - CurrentDirectory: process CWD set to the dir (exec() cwd option)
+      const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${escaped}\\*' -or $_.CommandLine -like '*${escaped}*' -or $_.CurrentDirectory -like '${cdEscaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
       await execAsync(`powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`, {
         encoding: "utf-8",
       }).catch(() => {});
@@ -437,10 +442,28 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
  * Remove an orphan directory. Kills any processes under the path first,
  * then deletes the directory recursively. Does NOT call git commands
  * since these are not registered git worktrees.
+ *
+ * Includes a retry loop (same pattern as removeWorktree) because processes
+ * may take time to release their directory handles after being killed.
  */
 export async function removeOrphanDir(dirPath: string): Promise<void> {
   if (!existsSync(dirPath)) return;
 
-  await killProcessesUnderPath(dirPath);
-  await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  const MAX_DIR_REMOVE_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {
+    if (!existsSync(dirPath)) return;
+
+    await killProcessesUnderPath(dirPath);
+
+    try {
+      await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      return; // success
+    } catch (err) {
+      if (attempt < MAX_DIR_REMOVE_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      } else {
+        throw err; // final attempt failed, propagate
+      }
+    }
+  }
 }
