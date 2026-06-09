@@ -616,7 +616,9 @@ export function useRetryHook() {
 export interface OrphanDir {
   sessionId: string;
   worktreePath: string;
-  reason: "no-git-file" | "empty-dir";
+  reason: "no-git-file" | "empty-dir" | "orphan-branch";
+  /** Branch name; only set when `reason === "orphan-branch"`. */
+  branch?: string;
 }
 
 // GET /api/projects/:id/orphans
@@ -633,15 +635,21 @@ export function useOrphans(projectId: string | null) {
   });
 }
 
+export interface DeleteOrphansInput {
+  paths?: string[];
+  branches?: string[];
+  projectId?: string;
+}
+
 // POST /api/orphans/delete
 export function useDeleteOrphans() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (paths: string[]) => {
+    mutationFn: async (input: DeleteOrphansInput) => {
       const res = await fetch("/api/orphans/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths }),
+        body: JSON.stringify(input),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to delete orphans");

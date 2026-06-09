@@ -78,6 +78,10 @@ export interface DeleteSessionInput {
   projectPath: string;
   worktreePath: string;
   config: AgentDockConfig;
+  /** The branch the session is checked out to. Required to delete the right
+   *  branch after a session rename (branch may no longer be
+   *  `agentdock/${sessionId}`). */
+  currentBranch?: string;
   onStep?: (event: StepEvent) => void;
 }
 
@@ -231,7 +235,7 @@ export function createSessionLifecycle(deps?: {
             await deps.portService.releaseSession(sessionId);
           }
         } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
-        try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
+        try { await removeWorktree(projectPath, sessionId, { currentBranch: wt.branch, force: true }); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
         throw new Error("afterCreateSession hook failed (required)");
       }
       log(sessionId, `afterCreateSession ✓ ${afterDuration}ms`);
@@ -250,13 +254,13 @@ export function createSessionLifecycle(deps?: {
           await deps.portService.releaseSession(sessionId);
         }
       } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
-      try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
+      try { await removeWorktree(projectPath, sessionId, { currentBranch: wt.branch, force: true }); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
       throw err;
     }
   }
 
   async function remove(input: DeleteSessionInput): Promise<DeleteSessionResult> {
-    const { sessionId, projectPath, worktreePath, config, onStep } = input;
+    const { sessionId, projectPath, worktreePath, config, currentBranch, onStep } = input;
     const hookReports: HookReport[] = [];
     const start = Date.now();
 
@@ -296,7 +300,7 @@ export function createSessionLifecycle(deps?: {
       // Kill any lingering async hook child processes that may hold CWD handles
       // and wait for OS to release them before attempting directory removal.
       await killSessionHookProcessesAndWait(sessionId, worktreePath);
-      await removeWorktree(projectPath, sessionId, true);
+      await removeWorktree(projectPath, sessionId, { currentBranch, force: true });
     }
     const wtDuration = Date.now() - wtStepStart;
     log(sessionId, `removeWorktree ✓ ${wtDuration}ms`);

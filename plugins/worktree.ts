@@ -1,10 +1,11 @@
-import { exec, execFileSync, execSync } from "node:child_process";
+import { exec, execFile, execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const WORKTREE_DIR = ".agentdock/worktrees";
 
@@ -207,11 +208,21 @@ export function createWorktree(
   return { worktreePath, branch };
 }
 
+/**
+ * Remove a session's worktree from disk and delete its git branch.
+ *
+ * @param currentBranch The branch name the session is currently checked out
+ *   to (i.e. `sessions.branch` in the DB). After a session rename, the branch
+ *   becomes `agentdock/${newName}` — falling back to `agentdock/${sessionId}`
+ *   would leave the renamed branch dangling. Pass the stored branch name to
+ *   ensure the correct branch is deleted.
+ */
 export async function removeWorktree(
   projectPath: string,
   sessionId: string,
-  force = false,
+  options: { currentBranch?: string; force?: boolean } = {},
 ): Promise<{ removed: string }> {
+  const { currentBranch, force = false } = options;
   validateSessionId(sessionId);
 
   const worktreePath = getWorktreePath(projectPath, sessionId);
@@ -237,6 +248,11 @@ export async function removeWorktree(
     }
   }
 
+  // The branch to delete. Prefer the caller's stored branch (handles
+  // renamed sessions); fall back to the default `agentdock/${sessionId}`
+  // for un-renamed sessions and older callers.
+  const branchToDelete = currentBranch ?? `agentdock/${sessionId}`;
+
   // Only attempt git worktree remove if this is a registered worktree
   if (await isRegisteredWorktree(projectPath, worktreePath)) {
     try {
@@ -250,8 +266,10 @@ export async function removeWorktree(
     }
 
     try {
-      const branch = `agentdock/${sessionId}`;
-      await execAsync(`git branch -D "${branch}"`, {
+      // Use execFileSync (not shell) so the branch name is passed as a
+      // single argv entry. validateBranchName keeps it safe to interpolate.
+      validateBranchName(branchToDelete);
+      await execAsync(`git branch -D "${branchToDelete}"`, {
         cwd: projectPath,
         encoding: "utf-8",
       });
@@ -411,7 +429,9 @@ export function scanDiskWorktrees(projectPath: string): DiskWorktree[] {
 export interface OrphanDir {
   sessionId: string;
   worktreePath: string;
-  reason: "no-git-file" | "empty-dir";
+  reason: "no-git-file" | "empty-dir" | "orphan-branch";
+  /** Branch name; only set when `reason === "orphan-branch"`. */
+  branch?: string;
 }
 
 /**
@@ -450,6 +470,40 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
 }
 
 /**
+ * Find `agentdock/*` branches that have no matching session in `knownBranches`.
+ *
+ * These are dangling branches left behind when a session was deleted but its
+ * branch cleanup missed (e.g., older callers of removeWorktree that hard-coded
+ * the branch name to `agentdock/${sessionId}` rather than the stored branch).
+ */
+export function scanOrphanBranches(
+  projectPath: string,
+  knownBranches: Set<string>,
+): OrphanDir[] {
+  let raw: string;
+  try {
+    raw = execFileSync("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads/agentdock/"], {
+      cwd: projectPath,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  } catch {
+    return [];
+  }
+
+  const result: OrphanDir[] = [];
+  for (const line of raw.split("\n")) {
+    const branch = line.trim();
+    if (!branch) continue;
+    if (knownBranches.has(branch)) continue;
+    // The sessionId is the suffix after the "agentdock/" prefix.
+    const sessionId = branch.startsWith("agentdock/") ? branch.slice("agentdock/".length) : branch;
+    result.push({ sessionId, worktreePath: "", reason: "orphan-branch", branch });
+  }
+  return result;
+}
+
+/**
  * Remove an orphan directory. Kills any processes under the path first,
  * then deletes the directory recursively. Does NOT call git commands
  * since these are not registered git worktrees.
@@ -476,5 +530,31 @@ export async function removeOrphanDir(dirPath: string): Promise<void> {
         throw err; // final attempt failed, propagate
       }
     }
+  }
+}
+
+/**
+ * Force-delete a git branch by name. Validates the name and refuses anything
+ * not in the `agentdock/` namespace to keep this from being a generic
+ * branch-pruning hammer.
+ *
+ * Async via execFile (no shell, no event-loop block) — branch deletion runs
+ * on the same request path as `git worktree remove` and `fs.rm` so a sync
+ * call here would freeze the Node.js event loop until git returns.
+ */
+export async function removeOrphanBranch(projectPath: string, branch: string): Promise<void> {
+  validateBranchName(branch);
+  if (!branch.startsWith("agentdock/")) {
+    throw new Error(`Refusing to delete non-agentdock branch: ${branch}`);
+  }
+  try {
+    await execFileAsync("git", ["branch", "-D", branch], {
+      cwd: projectPath,
+      encoding: "utf-8",
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to delete branch '${branch}': ${err instanceof Error ? err.message : "unknown error"}`,
+    );
   }
 }
