@@ -44,6 +44,10 @@ const MIGRATIONS: Array<(sqlite: Database.Database) => void> = [
   (sqlite) => {
     addColumnIfMissing(sqlite, "sessions", "background_hook_status", "TEXT");
   },
+  // v4: add sessions.background_hook_errors.
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "sessions", "background_hook_errors", "TEXT");
+  },
 ];
 
 /** Target schema version after all migrations are applied. */

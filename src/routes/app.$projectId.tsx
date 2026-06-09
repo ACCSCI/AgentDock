@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { TerminalManager } from "../components/TerminalManager";
 import { ConfigEditor } from "../components/ConfigEditor";
+import { HookErrorModal } from "../components/HookErrorModal";
 
 export const Route = createFileRoute("/app/$projectId")({
   component: ProjectWorkspace,
@@ -14,6 +16,7 @@ function ProjectWorkspace() {
   const { data: projects } = useProjects();
   const project = projects?.find((p) => p.id === projectId);
   const activeSession = project?.sessions.find((s) => s.id === activeSessionId);
+  const [showHookErrors, setShowHookErrors] = useState(false);
 
   if (!project) {
     return (
@@ -33,6 +36,15 @@ function ProjectWorkspace() {
         <div className="workspace-session-info">
           <span className="workspace-session-label">{activeSession.name}</span>
           <span className="workspace-session-path">{activeSession.worktreePath}</span>
+          {activeSession.backgroundHookStatus === "failed" && (
+            <button
+              type="button"
+              className="workspace-hook-errors-btn"
+              onClick={() => setShowHookErrors(true)}
+            >
+              ⚠ 查看失败日志
+            </button>
+          )}
           {activeSession.ports && (
             <span className="workspace-session-ports">
               {Object.entries(activeSession.ports).map(([key, value]) => (
@@ -54,6 +66,12 @@ function ProjectWorkspace() {
           <ConfigEditor projectId={project.id} projectPath={project.path} />
         )}
       </div>
+      {showHookErrors && activeSession && (
+        <HookErrorModal
+          sessionId={activeSession.id}
+          onClose={() => setShowHookErrors(false)}
+        />
+      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@ export const sessions = sqliteTable("sessions", {
   worktreePath: text("worktree_path").notNull(),
   ports: text("ports"),
   backgroundHookStatus: text("background_hook_status"),
+  backgroundHookErrors: text("background_hook_errors"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

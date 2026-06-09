@@ -62,7 +62,22 @@ export function loadConfig(projectPath: string): AgentDockConfig {
   }
 
   const content = readFileSync(configPath, "utf-8");
-  const parsed = parseYaml(content);
+  const parsed = parseYaml(content) ?? {};
 
-  return AgentDockConfigSchema.parse(parsed ?? {});
+  // Backward compatibility: strip `required` from async hooks to avoid
+  // schema validation errors (async + required is now forbidden).
+  if (parsed.hooks) {
+    for (const event of Object.keys(parsed.hooks)) {
+      if (Array.isArray(parsed.hooks[event])) {
+        parsed.hooks[event] = parsed.hooks[event].map((h: Record<string, unknown>) => {
+          if (h.async && h.required) {
+            return { ...h, required: false };
+          }
+          return h;
+        });
+      }
+    }
+  }
+
+  return AgentDockConfigSchema.parse(parsed);
 }

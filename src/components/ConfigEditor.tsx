@@ -359,7 +359,13 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                       <input
                         type="checkbox"
                         checked={hook.async}
-                        onChange={(e) => updateHook(activeHookTab, i, "async", e.target.checked)}
+                        onChange={(e) => {
+                          updateHook(activeHookTab, i, "async", e.target.checked);
+                          // async 和 required 互斥 — 勾选 async 时自动去掉 required
+                          if (e.target.checked && hook.required) {
+                            updateHook(activeHookTab, i, "required", false);
+                          }
+                        }}
                       />
                       <span>异步执行</span>
                     </label>
