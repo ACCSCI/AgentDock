@@ -871,15 +871,23 @@ body {
   justify-content: flex-end;
 }
 
+.failed-log-btn,
+.failed-retry-btn,
+.failed-delete-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  box-sizing: border-box;
+}
+
 .failed-log-btn {
-  padding: 4px 12px;
   background: var(--color-bg);
   color: #92400e;
   border: 1px solid #f59e0b;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s;
 }
 
 .failed-log-btn:hover {
@@ -887,14 +895,9 @@ body {
 }
 
 .failed-retry-btn {
-  padding: 4px 12px;
   background: #f59e0b;
   color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s;
+  border: 1px solid #f59e0b;
 }
 
 .failed-retry-btn:hover {
@@ -902,14 +905,9 @@ body {
 }
 
 .failed-delete-btn {
-  padding: 4px 10px;
   background: none;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border-light);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s, color 0.15s;
 }
 
 .failed-delete-btn:hover {
