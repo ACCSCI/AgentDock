@@ -25,6 +25,9 @@ import {
 } from "./constants.js";
 import type { DaemonStateV2, DaemonLifecycleState } from "./daemon-state-v2.js";
 
+/** How often the daemon's RECOVERING controller ticks (daemon-side). */
+export const RECOVERING_TICK_INTERVAL_MS = 500;
+
 export interface RecoveringConfig {
   expectedSessionIds: ReadonlySet<string>;
   softMinMs?: number; // override RECOVERING_SOFT_MIN_MS

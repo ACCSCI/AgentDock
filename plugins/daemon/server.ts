@@ -10,6 +10,7 @@
  *   - builds a Hono app via createApp(ctx)
  *   - serves it via @hono/node-server on 127.0.0.1
  *   - schedules a heartbeat timer for stale-client cleanup
+ *   - schedules a RECOVERING → READY tick (新架构 §5.2)
  *   - handles EADDRINUSE by retrying on a random port (matches old behavior)
  *
  * The class doesn't own route logic — that's all in plugins/daemon/routes/*.ts.
@@ -25,11 +26,16 @@ import {
   type DaemonContext,
   type DaemonOptions,
 } from "./context.js";
+import {
+  createRecoveringController,
+  RECOVERING_TICK_INTERVAL_MS,
+} from "../recovering-controller.js";
 
 export class AgentDockDaemon {
   private ctx: DaemonContext;
   private server: ServerType | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private recoveringTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: DaemonOptions = {}) {
     this.ctx = makeContext(options);
@@ -69,6 +75,23 @@ export class AgentDockDaemon {
             log.warn({ err }, "stale-client cleanup failed");
           });
         }, HEARTBEAT_CHECK_INTERVAL_MS);
+
+        // 新架构 §5.2 — RECOVERING → READY state machine tick.
+        // Uses the v2 sessionIds set as the "expected" count. For a fresh
+        // install (empty state), expected=0 and softMin triggers early exit.
+        const expected = new Set(this.ctx.stateV2.listSessions().map((s) => s.sessionId));
+        const recovering = createRecoveringController(this.ctx.stateV2, {
+          expectedSessionIds: expected,
+          onTransition: (next, reason) => {
+            log.info({ state: next, reason }, "lifecycle state transition");
+            this.ctx.walV2.persist(this.ctx.stateV2);
+          },
+        });
+        this.recoveringTimer = setInterval(() => {
+          recovering.tick();
+        }, RECOVERING_TICK_INTERVAL_MS);
+        // Tick once immediately so empty installs exit RECOVERING fast.
+        recovering.tick();
 
         log.info({ port: actualPort }, "daemon listening");
         resolve();
@@ -113,6 +136,10 @@ export class AgentDockDaemon {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+    if (this.recoveringTimer) {
+      clearInterval(this.recoveringTimer);
+      this.recoveringTimer = null;
     }
     if (!this.server) {
       try {
