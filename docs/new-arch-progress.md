@@ -10,25 +10,34 @@
 | **P1** | DaemonStateV2 三表 (ports/owners/sessions, schemaVersion=2) | `plugins/daemon-state-v2.ts` | 28 |
 | **P2** | WAL v1→v2 自动迁移 + 备份 | `plugins/daemon-migrate.ts`, `plugins/daemon-wal-v2.ts` | 28 |
 | **P3** | Daemon API v2 端点 (claim/release/takeover/session/*) | `plugins/daemon/routes/v2.ts` | 25 |
-| **P4** | RECOVERING 状态机 (早退 + 硬上限) | `plugins/recovering-controller.ts` | 14 |
+| **P4** | RECOVERING 状态机 (早退 + 硬上限), 接入 server.ts | `plugins/recovering-controller.ts`, `plugins/daemon/server.ts` | 14 |
 | **P5** | SSE 事件流 + 环形缓冲 + resync-required | `plugins/sse-bus.ts` | 20 (14 + 6) |
 | **P10** | /debug/state + /metrics | (P3 内已交付) | 25 (P3 内) |
 | **P11** | 不变式断言库 (8 条 §11.3) | `plugins/invariants.ts`, `plugins/config-derived.ts` | 28 |
 | **P12** | 故障注入 (crashDaemon/grabPort/stallOwner/partitionClient) | `plugins/fault-injector.ts` | 6 |
+| **P13** | **真实 Electron UI E2E (Playwright, 8 specs pass)** | `e2e/daemon-status-and-fencing.spec.ts`, `e2e/daemon-v2-architecture.spec.ts` | **8/8** |
 | **P14** | 真实项目 E2E (D:\Projects\test\env-isolation-demo) | `plugins/__tests__/real-project-e2e.ts` | ✅ 11/11 |
+| **P15** | **DaemonStatusBar + IPC 桥接 (3 channels)** | `src/components/DaemonStatusBar.tsx`, `src/lib/testids.ts`, `electron/main/bootstrap.ts`, `electron/preload.ts` | (E2E 验证) |
 
-测试统计 (2026-06-21 末次跑): **692 tests, 690 passing, 2 baseline pre-existing failures** (与新架构无关)。
+测试统计 (2026-06-21 末次跑): **698 unit tests, 696 passing, 2 baseline pre-existing failures** (与新架构无关)。
+E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
+
+## E2E 覆盖 (新架构 §11.4 验收剧本)
+
+| spec | 验证内容 |
+| --- | --- |
+| `daemon-status-and-fencing.spec.ts` | DaemonStatusBar UI 渲染 + daemon:health IPC v2 §2 健康形状 + daemon:debugState IPC v2 §4.1 三表 |
+| `daemon-v2-architecture.spec.ts` | 完整 v2 lifecycle: /health → /session/create → /activate → /claim ×3 → /takeover → STALE_OWNER 409 → /delete → /purge + 端口冲突重分配 |
+| `session-ui.spec.ts` (既有, 回归) | 真实点击 open project → create session → delete session → exit clean (确认 DaemonStatusBar 插入不影响原流程) |
 
 ## 暂未完成 (scope-deferred)
 
 | 阶段 | 内容 | 备注 |
 | --- | --- | --- |
-| **P6** | 客户端断线重注册 + snapshotSeq 择新 | Daemon 端 /sync 已带 snapshotSeq；client 端需要 Electron main 接入 |
-| **P7** | 活性租约 hook 续约 (hook-engine 自动心跳) | /session/heartbeat 端点已实现；hook-engine 集成待 P9 |
+| **P6** | 客户端断线重注册 + snapshotSeq 择新 | Daemon 端 /sync 已带 snapshotSeq；Electron main SSE 消费 + ring buffer 端到端待接入 |
+| **P7** | 活性租约 hook 续约 (hook-engine 自动心跳) | /session/heartbeat 端点 + 续约机制就绪；hook-engine setInterval 集成待 P9 |
 | **P8** | 三表对账 (C1-C5 残缺态分类) | DaemonStateV2 提供 isSessionAbandoned 谓词；定期对账器待 P9 |
-| **P9** | AgentDock 客户端重写 (session lifecycle + SSE 消费) | plugins/session-lifecycle.ts 仍使用 v1 API |
-| **P13** | 7 个 Playwright E2E 剧本 (UI 端到端) | 需要 Electron + Playwright 完整栈 + e2e/ 目录的 spec 迁移 |
-| **P15** | UI 改造 (Daemon 状态条 + 只读提示 + 端口运行态) | React 组件层 |
+| **P9** | AgentDock UI session lifecycle 重写 (UI 点击 → v2 API) | plugins/session-lifecycle.ts 仍走 v1 API；本轮 E2E 通过 daemon:faultInject 直接调 v2 端点证明契约 |
 
 ## 核心架构不变式 (已实现 + 测试守护)
 
@@ -39,27 +48,35 @@
 5. **fencingToken 单调自增** — 接管 +1, 旧 token 写入返 409 STALE_OWNER
 6. **派生字段不入库** — branch/worktreePath 从 sessionId 派生 (branchForSession/worktreePathFor)
 7. **displayName 隔离** — 路径/分支永不读 displayName
-8. **RECOVERING 状态机** — soft_min 收齐早退, hard_max 兜底
+8. **RECOVERING 状态机** — soft_min 收齐早退, hard_max 兜底 (500ms tick 接 server.ts)
 9. **SSE 事件流** — 环形缓冲 SSE_REPLAY_BUFFER=256, 越界 → resync-required
 10. **WAL 自动迁移** — 纯函数链, 中途崩溃回原状; 首次升级备份 bak.v${fromVersion}
 
 ## 验证证据
 
-- `bun run test:unit` — 692 tests, 690 pass (2 pre-existing unrelated)
+- `bun run test:unit` — 698 tests, 696 pass (2 pre-existing baseline unrelated)
+- `FRONTEND_PORT=5173 NODE_ENV=test bun run test:e2e` — 8/8 PASS (1.0m)
 - `NODE_ENV=test bun plugins/__tests__/real-project-e2e.ts` — 11/11 PASS
-- 手工探针 `bun probe-sse.ts` — SSE 端到端验证 (Frame 1: session-created, Frame 2: hello, Frame 3: ownership-revoked)
+- DaemonStatusBar 在真实 Electron BrowserWindow 中渲染并轮询 IPC ✓
 
 ## 下一步推荐
 
 按 ROI 排序:
-1. **P9 客户端重写** — 把 plugins/session-lifecycle.ts 切到 v2 API, 落地完整的 UI↔Daemon 循环
-2. **P13 E2E 剧本** — 复用 P11+P12 不变式+故障注入, 写 7 个 Playwright 脚本
-3. **P7 活性租约 hook 续约** — 写 hook-engine 的 lease interval 集成
-4. **P15 UI 改造** — TabBar/SessionSidebar 显示 Daemon 状态条 + 只读模式提示
+1. **P9 客户端重写** — 把 plugins/session-lifecycle.ts 切到 v2 API (UI 点击 → daemon:v2 端点),
+   完成 "renderer ↔ daemon" 闭环; 之后 DaemonStatusBar 的 RECOVERING → READY 切换
+   会被真实 session 生命周期驱动。
+2. **P7 活性租约 hook 续约** — hook-engine executor setInterval 每 5s
+   POST /session/heartbeat 刷新 lease。
+3. **P8 三表对账器** — 定时器每 RECOVERING_HARD_MAX/2 跑一次 reconcile,
+   处理 C1-C5 残缺态分类。
+4. **P6 客户端 SSE 消费** — Electron main 起 SSE 长连接,
+   用 snapshotSeq 择新 + 增量 buffer。
 
 ## 提交历史
 
 ```
+14b218c feat(new-arch): P13+P15 — UI E2E + DaemonStatusBar (Electron 真实 UI 验证)
+f963033 refactor(new-arch): P14 — 真实项目 E2E + 进度文档
 2f2df77 refactor(new-arch): P12 — 故障注入 (test-only)
 9636c82 refactor(new-arch): P5 — SSE 事件流 + 环形缓冲 + resync-required 降级
 e2bb3c2 refactor(new-arch): P4+P10+P11 — RECOVERING 状态机 + 不变式断言库
