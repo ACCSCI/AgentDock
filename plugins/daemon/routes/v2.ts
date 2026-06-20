@@ -190,6 +190,11 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           fencingToken: ctx.stateV2.getOwner(sessionId)?.fencingToken ?? 1,
         };
       });
+      // P5: publish event
+      ctx.sseBus.publish("session-created", {
+        sessionId: result.sessionId,
+        displayName: body.displayName ?? result.sessionId.slice(0, 8),
+      });
       return c.json({ success: true, ...result });
     },
   );
@@ -223,6 +228,10 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.renameSession(body.sessionId, body.displayName);
           ctx.walV2.persist(ctx.stateV2);
         });
+        ctx.sseBus.publish("session-renamed", {
+          sessionId: body.sessionId,
+          newDisplayName: body.displayName,
+        });
         return c.json({ success: true });
       } catch (err) {
         return mapError(c, err);
@@ -241,6 +250,7 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.beginDelete(body.sessionId, Date.now() + LEASE_TTL_MS);
           ctx.walV2.persist(ctx.stateV2);
         });
+        ctx.sseBus.publish("session-purged", { sessionId: body.sessionId });
         return c.json({ success: true });
       } catch (err) {
         return mapError(c, err);
@@ -259,6 +269,7 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.purgeSession(body.sessionId);
           ctx.walV2.persist(ctx.stateV2);
         });
+        ctx.sseBus.publish("session-purged", { sessionId: body.sessionId });
         return c.json({ success: true });
       } catch (err) {
         return mapError(c, err);
@@ -313,6 +324,11 @@ export function registerTakeover(app: Hono, ctx: DaemonContext): void {
           ctx.walV2.persist(ctx.stateV2);
           return r;
         });
+        ctx.sseBus.publish("ownership-revoked", {
+          sessionId: body.sessionId,
+          newOwner: body.clientId,
+          fencingToken: result.fencingToken,
+        });
         return c.json({ success: true, ...result });
       } catch (err) {
         return mapError(c, err);
@@ -364,12 +380,21 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
             // Try the requested port first
             const owner = ctx.stateV2.getPortOwner(requested);
             if (owner && owner.sessionId !== body.sessionId) {
-              return await conflictBranch(
+              ctx.metrics.conflictCount++;
+              const r = await conflictBranch(
                 ctx.stateV2,
                 body.sessionId,
                 body.name,
                 body.bindFailed ? requested : undefined,
               );
+              ctx.walV2.persist(ctx.stateV2);
+              // P5: publish port-reassigned event
+              ctx.sseBus.publish("port-reassigned", {
+                sessionId: body.sessionId,
+                oldPort: requested,
+                newPort: r.port,
+              });
+              return r;
             }
             // Idempotent for same session — no probe needed
             if (owner && owner.sessionId === body.sessionId) {
@@ -378,15 +403,24 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
             }
             // Free per registry — bind probe (§3.3)
             if (!(await isPortAvailable(requested))) {
-              return await conflictBranch(
+              ctx.metrics.conflictCount++;
+              const r = await conflictBranch(
                 ctx.stateV2,
                 body.sessionId,
                 body.name,
                 body.bindFailed ? requested : undefined,
               );
+              ctx.walV2.persist(ctx.stateV2);
+              ctx.sseBus.publish("port-reassigned", {
+                sessionId: body.sessionId,
+                oldPort: requested,
+                newPort: r.port,
+              });
+              return r;
             }
             // Reserve it
             ctx.stateV2.claimPort(body.sessionId, requested, body.name);
+            ctx.metrics.claimCount++;
             ctx.walV2.persist(ctx.stateV2);
             return { port: requested, picked: false };
           }
@@ -396,6 +430,7 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
             ctx.stateV2.listAllPorts().map((p) => p.port),
           );
           ctx.stateV2.claimPort(body.sessionId, picked, body.name);
+          ctx.metrics.claimCount++;
           ctx.walV2.persist(ctx.stateV2);
           return { port: picked, picked: true };
         });
@@ -416,6 +451,11 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
           ctx.stateV2.releasePort(body.sessionId, body.port);
           ctx.walV2.persist(ctx.stateV2);
+        });
+        ctx.metrics.releaseCount++;
+        ctx.sseBus.publish("port-released", {
+          sessionId: body.sessionId,
+          port: body.port,
         });
         return c.json({ success: true });
       } catch (err) {
@@ -447,6 +487,19 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
           ctx.walV2.persist(ctx.stateV2);
           return { ports: newPorts, oldPorts };
         });
+        // P5: publish per-port reassigned events
+        for (const oldP of result.oldPorts) {
+          const newP = Object.values(result.ports)[
+            result.oldPorts.indexOf(oldP)
+          ];
+          if (newP !== undefined) {
+            ctx.sseBus.publish("port-reassigned", {
+              sessionId: body.sessionId,
+              oldPort: oldP,
+              newPort: newP,
+            });
+          }
+        }
         return c.json({ success: true, ...result });
       } catch (err) {
         return mapError(c, err);
@@ -478,35 +531,70 @@ export function registerEvents(app: Hono, ctx: DaemonContext): void {
   app.get("/events", (c) => {
     const lastEventId = Number(c.req.header("Last-Event-ID") ?? "0") || 0;
     return streamSSE(c, async (stream) => {
-      // P5 will replace this with a ring-buffer replay + a subscribe loop.
-      // For now, send a single hello frame so clients can probe the channel.
-      await stream.writeSSE({
-        event: "hello",
-        id: String(ctx.lastSeq),
-        data: JSON.stringify({ seq: ctx.lastSeq, state: ctx.stateV2.state }),
-      });
-      // Keep the connection open with periodic heartbeats (5s) so
-      // middleboxes don't drop it. P5 replaces this with the proper
-      // subscription model.
-      const interval = setInterval(() => {
-        stream
-          .writeSSE({
-            event: "heartbeat",
-            id: String(ctx.lastSeq),
-            data: JSON.stringify({ t: Date.now() }),
-          })
-          .catch(() => {
-            /* client gone — interval will be cleared by onAbort below */
+      // Step 1: replay events since lastEventId from ring buffer
+      const replay = ctx.sseBus.replaySince(lastEventId);
+      if (replay === null) {
+        // Buffer overflowed or daemon restart — send resync-required signal
+        await stream.writeSSE({
+          event: "resync-required",
+          id: "0",
+          data: JSON.stringify({ reason: "buffer-overflow" }),
+        });
+        // After resync-required, also stream a snapshot hint so client can
+        // immediately call /sync without waiting for the next event.
+      } else {
+        for (const e of replay) {
+          await stream.writeSSE({
+            event: e.event,
+            id: String(e.seq),
+            data: JSON.stringify(e.data),
           });
-      }, 5_000);
-      stream.onAbort(() => clearInterval(interval));
-      // Block until aborted — the interval keeps the stream alive.
-      await new Promise<void>((resolve) => {
-        stream.onAbort(() => resolve());
+        }
+        // Hello frame confirms replay done, client should treat all replayed
+        // events as already applied.
+        await stream.writeSSE({
+          event: "hello",
+          id: String(ctx.sseBus.lastSeq()),
+          data: JSON.stringify({
+            seq: ctx.sseBus.lastSeq(),
+            state: ctx.stateV2.state,
+            replayedCount: replay.length,
+          }),
+        });
+      }
+
+      // Step 2: subscribe to live events until client aborts
+      ctx.metrics.sseConnections++;
+      const unsub = ctx.sseBus.subscribe(async (e) => {
+        try {
+          await stream.writeSSE({
+            event: e.event,
+            id: String(e.seq),
+            data: JSON.stringify(e.data),
+          });
+        } catch {
+          unsub();
+        }
       });
-      clearInterval(interval);
-      // Suppress "unused" linting on lastEventId — full replay lives in P5.
-      void lastEventId;
+
+      // Periodic heartbeat (5s) so middleboxes don't drop the connection
+      const heartbeatInterval = setInterval(() => {
+        try {
+          ctx.sseBus.publish("heartbeat", { t: Date.now() });
+        } catch {
+          /* bus error is non-fatal */
+        }
+      }, 5_000);
+
+      // Block until client aborts
+      await new Promise<void>((resolve) => {
+        stream.onAbort(() => {
+          clearInterval(heartbeatInterval);
+          unsub();
+          ctx.metrics.sseConnections = Math.max(0, ctx.metrics.sseConnections - 1);
+          resolve();
+        });
+      });
     });
   });
 }
