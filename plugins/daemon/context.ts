@@ -23,6 +23,10 @@ import { DaemonStateV2 } from "../daemon-state-v2.js";
 import { DaemonWAL } from "../daemon-wal.js";
 import { DaemonWALV2 } from "../daemon-wal-v2.js";
 import { SseBus } from "../sse-bus.js";
+import {
+  createFaultInjectorState,
+  type FaultInjectorState,
+} from "../fault-injector.js";
 
 /** Tunables — same constants the old AgentDockDaemon used. */
 export const HEARTBEAT_TIMEOUT_MS = 90_000;
@@ -75,6 +79,8 @@ export interface DaemonContext {
   walV2: DaemonWALV2;
   /** SSE event bus (新架构 §7.3). v2 routes publish on state changes. */
   sseBus: SseBus;
+  /** Fault injection state (新架构 §11.2). Active iff NODE_ENV=test. */
+  faults: FaultInjectorState;
   /** Port allocator (file-locked, OS-assigned range). */
   allocator: PortAllocator;
   /** Process-local mutex for state mutations and port operations. */
@@ -134,6 +140,7 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
     stateV2,
     walV2,
     sseBus: new SseBus(),
+    faults: createFaultInjectorState({ enabled: process.env.NODE_ENV === "test" }),
     allocator,
     mutex,
     lastPersistedHeartbeatAt: new Map<string, number>(),

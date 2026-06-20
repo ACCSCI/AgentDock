@@ -25,6 +25,7 @@ import { registerRegistry } from "./routes/registry.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerSync } from "./routes/sync.js";
 import { registerV2 } from "./routes/v2.js";
+import { registerFaultEndpoints } from "../fault-injector.js";
 
 export function createApp(ctx: DaemonContext): Hono {
   const app = new Hono();
@@ -39,6 +40,9 @@ export function createApp(ctx: DaemonContext): Hono {
   // on overlapping paths (/health, /debug/state). v1 routes remain as
   // backward-compat for any client still using the old API.
   registerV2(app, ctx);
+
+  // Fault injection (新架构 §11.2) — only active when NODE_ENV=test.
+  registerFaultEndpoints(app, ctx.faults);
 
   registerHealth(app, ctx);
   registerPorts(app, ctx);
