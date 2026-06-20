@@ -48,3 +48,8 @@ export const SSE_REPLAY_BUFFER = 256;
 
 /** §11.4 — Default N (number of port keys per session). Pulled from PORT_KEYS_DEFAULT at call sites. */
 export const HEARTBEAT_PERSIST_INTERVAL_MS = 5_000;
+
+/** §2 — Daemon protocol version string. Semantic version; AgentDock only
+ * compares the major version (bump on breaking change). */
+export const PROTOCOL_VERSION = "1";
+export const PROTOCOL_VERSION_MAJOR = 1;

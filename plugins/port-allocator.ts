@@ -296,6 +296,39 @@ export async function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * Pick a single free port using OS port=0 to get a random one (新架构 §3.3).
+ *
+ * Tries up to `maxAttempts` times to bind a random port; returns the first
+ * one that succeeds. Excludes ports in `exclude`. This avoids "increment
+ * through a range" which can collide with consecutive occupied ranges.
+ */
+export async function pickFreePort(
+  exclude: readonly number[] = [],
+  maxAttempts = 50,
+): Promise<number> {
+  const excludeSet = new Set(exclude);
+  for (let i = 0; i < maxAttempts; i++) {
+    const server = createServer();
+    const port = await new Promise<number | null>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        resolve(typeof addr === "object" && addr ? addr.port : null);
+      });
+      server.on("error", () => resolve(null));
+    });
+    // Close immediately so the OS releases the port (it's not in
+    // `excludeSet` yet, so we won't hand it back twice in this call).
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (port !== null && !excludeSet.has(port)) {
+      return port;
+    }
+  }
+  throw new Error(
+    `pickFreePort: failed to find a free port in ${maxAttempts} attempts`,
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
