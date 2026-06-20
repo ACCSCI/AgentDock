@@ -1,3 +1,4 @@
+import { PORT_KEYS_DEFAULT } from "./config.js";
 import { isPortAvailable } from "./port-allocator.js";
 
 // ============================================================
@@ -6,15 +7,10 @@ import { isPortAvailable } from "./port-allocator.js";
 
 export type SessionPorts = Record<string, number>;
 
-export const PORT_KEYS_DEFAULT = [
-  "FRONTEND_PORT",
-  "BACKEND_PORT",
-  "WS_PORT",
-  "DEBUG_PORT",
-  "PREVIEW_PORT",
-];
-
-/** @deprecated Use PORT_KEYS_DEFAULT instead */
+// Single source of truth lives in plugins/config.ts (see 新架构 §14.1).
+// The PORT_KEYS alias is retained as a deprecated re-export for tests that
+// still import from this module; new code should import from config.js.
+/** @deprecated Import from "./config.js" — single source of truth. */
 export const PORT_KEYS = PORT_KEYS_DEFAULT;
 
 export const PORT_RANGE_START = 30000;
