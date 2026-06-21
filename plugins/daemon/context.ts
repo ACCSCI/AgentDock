@@ -275,6 +275,18 @@ export async function cleanupStaleClients(ctx: DaemonContext): Promise<void> {
         changed = true;
       }
     }
+    // F4: clean up v2 owners whose v1 client has been removed (zombie
+    // owners whose client processes crashed are never caught by the
+    // v1-only loop above).  listOwners() / releaseAllPorts() are plain
+    // Map operations — safe to call inside the mutex.
+    for (const owner of ctx.stateV2.listOwners()) {
+      if (!ctx.state.getClient(owner.clientId)) {
+        ctx.stateV2.releaseAllPorts(owner.sessionId);
+        ctx.stateV2.owners.delete(owner.sessionId);
+        ctx.stateV2.sessions.delete(owner.sessionId);
+        changed = true;
+      }
+    }
     if (changed) {
       ctx.wal.persist(ctx.state);
     }
