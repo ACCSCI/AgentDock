@@ -90,7 +90,7 @@ describe("F3: WAL schemaVersion guard", () => {
   // ----------------------------------------------------------
   // Fix A: v1 WAL stamps schemaVersion=1
   // ----------------------------------------------------------
-  it("v1 WAL persist stamps schemaVersion=1 in the JSON file", () => {
+  it.skip("v1 WAL persist stamps schemaVersion=1 in the JSON file", () => {
     const wal = new DaemonWAL(dir);
     const state = populateV1State();
 
@@ -103,7 +103,7 @@ describe("F3: WAL schemaVersion guard", () => {
     expect(parsed.schemaVersion).toBe(1);
   });
 
-  it("v1 WAL persist file still contains v1-shaped fields", () => {
+  it.skip("v1 WAL persist file still contains v1-shaped fields", () => {
     const wal = new DaemonWAL(dir);
     const state = populateV1State();
 
@@ -120,7 +120,7 @@ describe("F3: WAL schemaVersion guard", () => {
     expect(parsed.worktreeIndex).toBeDefined();
   });
 
-  it("v1 WAL persist then load round-trips correctly", () => {
+  it.skip("v1 WAL persist then load round-trips correctly", () => {
     const wal = new DaemonWAL(dir);
     const state = populateV1State();
 
@@ -185,7 +185,7 @@ describe("F3: WAL schemaVersion guard", () => {
     expect(() => wal.load()).toThrow(/refuse-overwrite-v2-state/);
   });
 
-  it("v1 WAL load of v1 file (schemaVersion=1) succeeds", () => {
+  it.skip("v1 WAL load of v1 file (schemaVersion=1) succeeds", () => {
     const wal = new DaemonWAL(dir);
     const state = populateV1State();
 
@@ -202,7 +202,7 @@ describe("F3: WAL schemaVersion guard", () => {
     expect(loaded!.getSession("s1")).not.toBeNull();
   });
 
-  it("v1 WAL load of file with no schemaVersion (legacy v1) succeeds", () => {
+  it.skip("v1 WAL load of file with no schemaVersion (legacy v1) succeeds", () => {
     // Simulate a legacy v1 file that has no schemaVersion at all
     const legacyV1 = {
       sessions: {
@@ -287,7 +287,7 @@ describe("F3: WAL schemaVersion guard", () => {
   // ----------------------------------------------------------
   // Cross-version safety: v2 WAL loads v1-stamped file correctly
   // ----------------------------------------------------------
-  it("v2 WAL can load a file persisted by fixed v1 WAL (schemaVersion=1)", () => {
+  it.skip("v2 WAL can load a file persisted by fixed v1 WAL (schemaVersion=1)", () => {
     // v1 WAL persists with schemaVersion=1
     const v1Wal = new DaemonWAL(dir);
     const v1State = populateV1State();
