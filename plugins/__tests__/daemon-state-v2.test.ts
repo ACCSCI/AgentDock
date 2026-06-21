@@ -356,7 +356,7 @@ describe("DaemonStateV2 — lease (§4.4)", () => {
     expect(s.sessions.get("u1")?.leaseExpiresAt).toBeNull();
   });
 
-  it("isSessionAbandoned requires BOTH lease expired AND heartbeat timed out", () => {
+  it("isSessionAbandoned requires lease expired AND heartbeat timed out (null heartbeat conservatively returns false, §6.1)", () => {
     const s = new DaemonStateV2();
     const now = 1_000_000;
     s.createSession({
@@ -375,8 +375,10 @@ describe("DaemonStateV2 — lease (§4.4)", () => {
     expect(
       s.isSessionAbandoned("u1", now, 90_000, now - 100_000),
     ).toBe(true);
-    // Heartbeat null (owner missing) AND lease expired → abandoned
-    expect(s.isSessionAbandoned("u1", now, 90_000, null)).toBe(true);
+    // F9 §6.1 race window guard: heartbeat=null conservatively returns
+    // false even when lease has expired (avoid premature takeover during
+    // lease renewal). See plugins/__tests__/daemon-state-v2-isabandoned.test.ts
+    expect(s.isSessionAbandoned("u1", now, 90_000, null)).toBe(false);
   });
 
   it("active sessions never abandoned by lease predicate", () => {

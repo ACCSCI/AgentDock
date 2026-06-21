@@ -384,7 +384,10 @@ export class DaemonStateV2 {
     if (s.status === "active") return false;
     if (s.leaseExpiresAt === null) return false;
     if (now < s.leaseExpiresAt) return false;
-    if (ownerLastHeartbeat === null) return true;
+    // §6.1 race window guard: when the owner heartbeat is null (e.g. transient
+    // gap during lease renewal / takeover), conservatively report NOT abandoned
+    // so we never prematurely take over a session actively being deleted.
+    if (ownerLastHeartbeat === null) return false;
     return now - ownerLastHeartbeat > instanceHeartbeatTimeoutMs;
   }
 
