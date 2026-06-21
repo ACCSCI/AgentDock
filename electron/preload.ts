@@ -90,6 +90,20 @@ const api = {
         lastSeq?: number;
         error?: string;
       }>("daemon:sync"),
+    // F11b: Subscribe to daemon v2State push from main process.
+    // Main pushes serialized AppliedState via webContents.send("daemon:v2State", serialized).
+    // Renderer reconstructs Maps from the tuple format and applies to local state.
+    v2State: {
+      subscribe: (cb: (state: {
+        sessions: Array<[string, { sessionId: string; projectRoot: string; displayName: string; status: string; createdAt: number; ports: Record<string, number> }]>;
+        owners: Array<[string, { sessionId: string; clientId: string; pid: number; fencingToken: number }]>;
+        ports: Array<[number, { sessionId: string; name: string }]>;
+        snapshotSeq: number | null;
+        appliedSeq: number;
+      }>) => void) => {
+        return on("daemon:v2State", cb);
+      },
+    },
     faultInject: (path: string, body?: unknown) =>
       invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
         "daemon:faultInject",
