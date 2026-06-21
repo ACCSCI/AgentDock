@@ -187,8 +187,26 @@ export class DaemonStateV2 {
    * Phase 2 of delete — drop the session, owner, and any leftover
    * session-port / session-name bookkeeping. Called after the client has
    * physically cleaned the worktree.
+   *
+   * §13.2 SESSION_NOT_DELETABLE: throws if the session is not in
+   * `deleting` state. The two-phase delete is:
+   *   1. /session/delete (beginDelete) → status=deleting, ports released
+   *   2. /session/purge (purgeSession) → drop 3-table entries
+   * Skipping phase 1 (calling purge on an active session) is a client bug.
    */
   purgeSession(sessionId: string): void {
+    const s = this.sessions.get(sessionId);
+    if (!s) {
+      // 幂等: 已 purge / 不存在, 静默 OK (§4.2 delete 末段)
+      this.releaseAllPorts(sessionId);
+      this.owners.delete(sessionId);
+      this.sessionPorts.delete(sessionId);
+      this.sessionNames.delete(sessionId);
+      return;
+    }
+    if (s.status !== "deleting") {
+      throw new SessionNotDeletableError(sessionId, s.status);
+    }
     this.releaseAllPorts(sessionId);
     this.sessions.delete(sessionId);
     this.owners.delete(sessionId);
@@ -283,7 +301,8 @@ export class DaemonStateV2 {
    * responsible for atomic persist-then-return (§6.1 last paragraph).
    *
    * Throws if no session, or if `providedToken` does not match the current
-   * registry token. Both `null` and mismatch mean STALE_OWNER.
+   * registry token. Both `null` and mismatch mean STALE_OWNER. No owner →
+   * NOT_OWNER (§13.2).
    */
   takeover(
     sessionId: string,
@@ -292,7 +311,7 @@ export class DaemonStateV2 {
     providedToken: number | null,
   ): { fencingToken: number } {
     const owner = this.owners.get(sessionId);
-    if (!owner) throw new Error(`No owner for session ${sessionId}`);
+    if (!owner) throw new NotOwnerError(sessionId);
     if (providedToken !== owner.fencingToken) {
       throw new StaleOwnerError(sessionId, owner.fencingToken, providedToken);
     }
@@ -305,11 +324,13 @@ export class DaemonStateV2 {
   /**
    * Verify the caller holds the current fencing token for a write. Throws
    * StaleOwnerError if not. Does NOT mutate state — purely a gate check.
+   *
+   * If no owner is registered at all, throws NotOwnerError (§13.2 NOT_OWNER).
    */
   assertFencingToken(sessionId: string, providedToken: number | null): void {
     const owner = this.owners.get(sessionId);
     if (!owner) {
-      throw new Error(`No owner for session ${sessionId}`);
+      throw new NotOwnerError(sessionId);
     }
     if (providedToken !== owner.fencingToken) {
       throw new StaleOwnerError(sessionId, owner.fencingToken, providedToken);
@@ -494,6 +515,77 @@ export class StaleOwnerError extends Error {
       `Stale owner for ${sessionId}: current fencingToken=${currentToken}, provided=${providedToken}`,
     );
     this.name = "StaleOwnerError";
+  }
+}
+
+/**
+ * NotOwnerError — §13.2 NOT_OWNER.
+ *
+ * 触发: 没有任何 owner 记录, 但 caller 试图写 (理论上 fencingToken
+ * 不匹配也走 STALE_OWNER; NOT_OWNER 是"owner 根本不存在"分支).
+ */
+export class NotOwnerError extends Error {
+  constructor(public readonly sessionId: string) {
+    super(`No owner for session ${sessionId}`);
+    this.name = "NotOwnerError";
+  }
+}
+
+/**
+ * SessionNotDeletableError — §13.2 SESSION_NOT_DELETABLE.
+ *
+ * 触发: 试图 purge 一个不处于可删状态的 session (active 但还没走
+ * /session/delete; 已 purge 重复 purge). 客户端刷新本地视图后按对账
+ * 结果处理.
+ */
+export class SessionNotDeletableError extends Error {
+  constructor(
+    public readonly sessionId: string,
+    public readonly currentStatus: SessionStatus | "missing",
+  ) {
+    super(
+      `Session ${sessionId} is not deletable (current status: ${currentStatus})`,
+    );
+    this.name = "SessionNotDeletableError";
+  }
+}
+
+/**
+ * RecoveringError — §13.2 RECOVERING.
+ *
+ * 触发: daemon 处于 RECOVERING 期, 陌生 sessionId 的 claim 被闸门拒.
+ * 客户端退避后重试, 等待 daemon 收敛到 READY.
+ */
+export class RecoveringError extends Error {
+  constructor(
+    public readonly sessionId: string | null,
+    message?: string,
+  ) {
+    super(
+      message ??
+        (sessionId
+          ? `Daemon is in RECOVERING; non-recovery claim for ${sessionId} is rejected`
+          : "Daemon is in RECOVERING; retry after READY"),
+    );
+    this.name = "RecoveringError";
+  }
+}
+
+/**
+ * SessionBusyError — §13.2 SESSION_BUSY.
+ *
+ * 触发: lease 未过期(creating/deleting 中)+ 收到试图插入另一条生命周期事务
+ * 的写. 客户端等待续约方完成, 勿强抢.
+ */
+export class SessionBusyError extends Error {
+  constructor(
+    public readonly sessionId: string,
+    public readonly leaseExpiresAt: number,
+  ) {
+    super(
+      `Session ${sessionId} is busy (lease expires at ${leaseExpiresAt})`,
+    );
+    this.name = "SessionBusyError";
   }
 }
 

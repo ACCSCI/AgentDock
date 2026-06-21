@@ -76,6 +76,23 @@ export interface ReconcileReport {
 // 依赖注入
 // ---------------------------------------------------------------------------
 
+/**
+ * scanWorktreeDirs — §4.3 C4. 扫一个 project 的 `.agentdock/worktrees/*`
+ * 列出磁盘上有但 v2 sessions 表里没有的目录. caller 注入此函数以保持
+ * reconciler 纯逻辑 + fs 解耦.
+ *
+ *   - 返回值: 该 project 下的 worktree 目录列表 (含路径 + 推断的 sessionId)
+ *   - 推断规则: 路径末段 == sessionId (按 §4.1 派生约定)
+ *   - caller 应过滤掉 SESSION_ID_RE 不匹配者 (不是 AgentDock 创建的)
+ */
+export type WorktreeDirScan = (projectRoot: string) => WorktreeDirEntry[];
+
+export interface WorktreeDirEntry {
+  /** sessionId parsed from the directory name (last path segment). */
+  sessionIdGuess: string | null;
+  worktreePath: string;
+}
+
 export interface ReconcileDeps {
   /** v2 三表真相源(读 + 状态机变更)。*/
   stateV2: DaemonStateV2;
@@ -102,6 +119,12 @@ export interface ReconcileDeps {
   takeOverDelete?: (sessionId: string, projectRoot: string, worktreePath: string) => Promise<void>;
   /** 可选: rollback C1(via v2 /session/delete + /session/purge). */
   rollbackCreate?: (sessionId: string) => Promise<void>;
+  /** §4.3 C4 — 扫 .agentdock/worktrees/* 找 DB 无记录者. 默认 noop
+   *  (意味着 C4 不报, 与架构 §4.3 描述有偏差). 注入真实扫描以启用. */
+  scanWorktreeDirs?: WorktreeDirScan;
+  /** §4.3 C4 — 列出需要扫的 projectRoots. 默认从 v2 sessions.projectRoot
+   *  去重得出, 加 caller 注入的额外 roots (如多 project 场景). */
+  additionalProjectRoots?: () => string[];
   /** 注入 now() (tests). */
   now?: () => number;
 }
@@ -177,8 +200,34 @@ export function createReconciler(deps: ReconcileDeps): Reconciler {
     }
 
     // ----- 2. C4 — 扫磁盘上 .agentdock/worktrees/* 看是否有 DB 无记录者 -----
-    // 收口: 此扫描由 deps 提供 source 列表 (caller 在 useReconciler() 时注入)
-    //     此处不直接做 fs.scandir, 留给上层决定 (架构 §14.4 设计意图)
+    // §4.3: 永不自动删, 仅 emit C4-orphan-dir 由 UI 决定.
+    if (deps.scanWorktreeDirs) {
+      const roots = new Set<string>();
+      for (const s of deps.stateV2.listSessions()) {
+        if (s.projectRoot) roots.add(s.projectRoot);
+      }
+      for (const r of deps.additionalProjectRoots?.() ?? []) {
+        roots.add(r);
+      }
+      const knownSessionIds = new Set(deps.stateV2.listSessions().map((s) => s.sessionId));
+      for (const projectRoot of roots) {
+        const dirs = deps.scanWorktreeDirs(projectRoot);
+        for (const dir of dirs) {
+          stats.worktreeDirsScanned++;
+          // 过滤: 推断的 sessionId 已经在 DB 里的不算 C4
+          if (dir.sessionIdGuess && knownSessionIds.has(dir.sessionIdGuess)) continue;
+          // 过滤: 无法推断 sessionId 的目录可能不是 AgentDock 创建, 跳过
+          if (!dir.sessionIdGuess) continue;
+          const action: ReconcileAction = {
+            kind: "C4-orphan-dir",
+            sessionIdGuess: dir.sessionIdGuess,
+            worktreePath: dir.worktreePath,
+          };
+          await dispatchAction(action, deps);
+          actions.push(action);
+        }
+      }
+    }
     return { actions, stats };
   }
 

@@ -38,6 +38,12 @@ export interface DaemonOptions {
   port?: number;
   /** Base directory for state files. Default: ~/.agentdock */
   baseDir?: string;
+  /**
+   * §5.2 — RECOVERING softMin override. Tests pass 0 to skip the 2s soft
+   * floor and exit RECOVERING immediately on first tick. Production
+   * defaults to RECOVERING_SOFT_MIN_MS (2s).
+   */
+  recoveringSoftMinMs?: number;
 }
 
 export interface RegistryEntry {
@@ -106,6 +112,26 @@ export interface DaemonContext {
   saveRegistry(): void;
   /** Returns true if a process with the given PID is alive (signal 0 probe). */
   isProcessAlive(pid: number): boolean;
+  /**
+   * §5.2 — RECOVERING 控制器引用. server.ts 在 onListen 时挂上, v2 routes
+   * 通过它判 RECOVERING 期 claim 是否放行.
+   */
+  recovering?: {
+    isRecovering(): boolean;
+    recordReport(sessionId: string): void;
+  };
+  /**
+   * §5.2 — RECOVERING 期的 expected sessionId 集合 (WAL 快照 + 本轮已上报).
+   * 由 server.ts 注入. 用于 gateClaimInRecovering 判定.
+   */
+  expectedSessionIds?: ReadonlySet<string>;
+  /**
+   * §5.2 — RECOVERING 本轮已 recordReport 的 sessionIds. v2 routes 调用
+   * recordReport 后追加. 用于"同一 session 第二次及以后重复上报"放行.
+   */
+  alreadyReportedThisWindow?: Set<string>;
+  /** §5.2 — tests can opt out of softMin wait. */
+  recoveringSoftMinMs?: number;
 }
 
 export function makeContext(options: DaemonOptions = {}): DaemonContext {
@@ -156,6 +182,7 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
       activeSessionCount: 0,
       sseConnections: 0,
     },
+    recoveringSoftMinMs: options.recoveringSoftMinMs,
     loadRegistry() {
       if (!existsSync(registryPath)) return;
       try {
@@ -191,11 +218,40 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
 }
 
 /**
+ * §11.6 — 挂起/休眠的一次性宽限 (防误回收).
+ *
+ * 笔记本合盖 / 系统休眠 / VM 挂起会让 client 进程被冻结, 唤醒后单调
+ * 时钟跳变, 可能瞬间"已丢 ≥3 次心跳"而被误判失联, 触发整批端口回
+ * 收. 规避: cleanupStaleClients 在两次对账 tick 之间的墙钟间隔异常
+ * 大 (如 > 2 × SYNC_INTERVAL, 提示刚从挂起恢复) 时, 对所有 client
+ * **跳过本轮 heartbeat 超时判定**, 给一个完整 SYNC_INTERVAL 宽限窗口
+ * 让冻结的 client 重连上报, 之后再恢复正常判定.
+ */
+const SUSPEND_GRACE_THRESHOLD_MS = 2 * 30_000; // 2 × SYNC_INTERVAL = 60s
+let lastTickAt = Date.now();
+
+export function detectSuspendAndMaybeSkip(): boolean {
+  const now = Date.now();
+  const gap = now - lastTickAt;
+  lastTickAt = now;
+  return gap > SUSPEND_GRACE_THRESHOLD_MS;
+}
+
+export function resetSuspendDetector(): void {
+  lastTickAt = Date.now();
+}
+
+/**
  * Run the heartbeat cleanup: release sessions owned by stale clients,
  * unregister those clients, and persist WAL if anything changed.
  * Called periodically by the server heartbeat timer.
  */
 export async function cleanupStaleClients(ctx: DaemonContext): Promise<void> {
+  // §11.6 — 挂起/休眠宽限: 跳过一次判定
+  if (detectSuspendAndMaybeSkip()) {
+    // 跳过本轮, 但更新 lastTickAt 让下一轮用新的起点
+    return;
+  }
   await ctx.mutex.runExclusive("state", () => {
     const now = Date.now();
     let changed = false;

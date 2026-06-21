@@ -309,6 +309,16 @@ export interface CompositeResult {
 export function checkAllInvariants(
   state: DaemonStateV2,
   runtimeListeners: ReadonlySet<number>,
+  ctx?: {
+    /** §11.3 #3 — preferredPort honored + bind probe ran. */
+    envNotTrusted?: Parameters<typeof assertEnvNotTrusted>;
+    /** §11.3 #6 — last write with stale token should be 409. */
+    staleWriteStatus?: number;
+    /** §11.3 #7 — displayName isolation (UI render path). */
+    displayNameIsolation?: Parameters<typeof assertDisplayNameIsolation>;
+    /** §11.3 #8 — snapshot+stream monotonicity. */
+    snapshotStream?: Parameters<typeof assertSnapshotStreamMonotonic>;
+  },
 ): CompositeResult {
   const results: Record<string, InvariantResult> = {
     listenSubsetReserved: assertListenSubsetReserved(state, runtimeListeners),
@@ -316,6 +326,22 @@ export function checkAllInvariants(
     bindProof: assertBindProof(state),
     worktreeSingleOwner: assertWorktreeSingleOwner(state),
   };
+  // §11.3 #3 — 显式调用时(在 E2E / claim 路径) 跑 envNotTrusted.
+  if (ctx?.envNotTrusted) {
+    results.envNotTrusted = assertEnvNotTrusted(...ctx.envNotTrusted);
+  }
+  // §11.3 #6 — 显式调用时(在 /takeover 后) 跑 noDoubleWrite.
+  if (ctx?.staleWriteStatus !== undefined) {
+    results.noDoubleWrite = assertNoDoubleWrite(ctx.staleWriteStatus);
+  }
+  // §11.3 #7 — 显式调用时(在 UI 渲染 / 创建 session 后) 跑 displayName isolation.
+  if (ctx?.displayNameIsolation) {
+    results.displayNameIsolation = assertDisplayNameIsolation(...ctx.displayNameIsolation);
+  }
+  // §11.3 #8 — 显式调用时(/sync 后) 跑 snapshot+stream 择新.
+  if (ctx?.snapshotStream) {
+    results.snapshotStreamMonotonic = assertSnapshotStreamMonotonic(...ctx.snapshotStream);
+  }
   const failed = Object.entries(results)
     .filter(([, r]) => !r.ok)
     .map(([name, r]) => `${name}: ${r.detail}`);

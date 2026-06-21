@@ -32,6 +32,16 @@ export interface SseConsumerOptions {
   onEvent: (e: { event: string; seq: number; data: unknown }) => void;
   /** Called when the consumer reconnects (after a disconnect). */
   onReconnect?: () => void;
+  /**
+   * §5.3 — Called when the connection is lost (TCP closed, before a
+   * reconnect is scheduled). Host should:
+   *   1. Fetch /sync to get the authoritative three-table snapshot.
+   *   2. Re-register all sessions via /claim to ensure the daemon still
+   *      knows the client's owner identity.
+   * The reconnect itself is automatic; this hook is for the host to do
+   * recovery work that doesn't depend on the new SSE connection.
+   */
+  onDisconnect?: () => void;
   /** Called when the consumer fully stops (after stop() or unrecoverable error). */
   onClose?: () => void;
   /**
@@ -198,7 +208,16 @@ export class SseConsumer {
       try { reader.releaseLock(); } catch { /* already released */ }
     }
     if (this.stopped) return;
-    this.connected = false;
+    // §5.3 — 断线立即触发 onDisconnect (host: fetch /sync, 重新 claim)
+    if (this.connected) {
+      this.connected = false;
+      try {
+        this.opts.onDisconnect?.();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[sse-consumer] onDisconnect threw:", err);
+      }
+    }
     this.scheduleReconnect();
   }
 

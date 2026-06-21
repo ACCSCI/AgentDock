@@ -84,6 +84,9 @@ export const IPC_CHANNELS = {
   "daemon:health": "daemon:health",
   "daemon:debugState": "daemon:debugState",
   "daemon:faultInject": "daemon:faultInject",
+  // §3.5 末段 — UI 端口运行态三态探测 (in-running / stopped / unknown).
+  // 纯展示, 不影响端口归属.
+  "daemon:probeRuntime": "daemon:probeRuntime",
   // P6: /sync full-snapshot endpoint. Used by renderer to rebuild local
   // state after reconnect / daemon restart. Returns the v2 three-table
   // shape (state, snapshotSeq, sessions, owners, ports) — see plugins/daemon/routes/v2.ts.

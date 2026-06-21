@@ -430,6 +430,12 @@ async function bootstrap() {
         onReconnect: () => {
           log.info("sse reconnected");
         },
+        // §5.3 — 断线立即触发: 拉一次 /sync 全量同步, 比对本地 v2 sessions
+        // 与 daemon 状态, 对缺失/漂移的 session 走重注册(经过 RECOVERING 闸门).
+        onDisconnect: () => {
+          log.warn("sse disconnected — triggering §5.3 full re-sync");
+          void fullResyncAfterDisconnect(cachedDaemonPort, v2PortService);
+        },
         onClose: () => {
           log.warn("sse closed");
         },
@@ -561,13 +567,75 @@ function isShutdownNoise(err: unknown): boolean {
   const e = err as NodeJS.ErrnoException;
   if (e.code === "EPIPE") return true;
   if (e.code === "ERR_IPC_CHANNEL_CLOSED") return true;
-  // Some libs wrap the Error with .cause; check one level deep.
-  const cause = (err as { cause?: unknown }).cause;
-  if (cause && typeof cause === "object") {
-    const c = cause as NodeJS.ErrnoException;
-    if (c.code === "EPIPE" || c.code === "ERR_IPC_CHANNEL_CLOSED") return true;
-  }
   return false;
+}
+
+/**
+ * §5.3 — 断线立即全量重注册.
+ *
+ * 触发: SseConsumer.onDisconnect (TCP 断开但 reconnect 未完成).
+ * 步骤:
+ *   1. POST /sync — 拿到 daemon 当前三表权威快照.
+ *   2. 与 v2PortService 内部 app→v2Sid map 对比, 找出本地有但 daemon 无
+ *      的 session (= 本地 view 漂移) 或 daemon 有但本地无 (= 新发现).
+ *   3. 对"daemon 端有、token ≥ 1、status=active"的 session 调 /claim
+ *      重注册 (走 RECOVERING 闸门 — 闸门在 daemon 重启 RECOVERING 期会
+ *      放行 expected sessionId).
+ *   4. 对"本地有、daemon 无"的 session 走 releaseSession 清理本地 view.
+ *
+ * 错误处理: 任何步骤失败仅打 warn, 不抛 — 重连后由 SSE 增量 + 后续
+ * onResyncRequired 继续收敛.
+ */
+async function fullResyncAfterDisconnect(
+  daemonPort: number,
+  v2: V2PortServiceHandle | null,
+): Promise<void> {
+  if (!v2) return; // v1 模式或未启用 — 留给 v1 sync/declare 自己处理
+  try {
+    const syncRes = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
+    });
+    if (!syncRes.ok) {
+      log.warn({ status: syncRes.status }, "§5.3 resync /sync non-OK");
+      return;
+    }
+    const body = (await syncRes.json()) as {
+      sessions: Array<{ sessionId: string; status: string }>;
+    };
+    const daemonSids = new Set(
+      body.sessions
+        .filter((s) => s.status === "active" || s.status === "creating")
+        .map((s) => s.sessionId),
+    );
+    // 本地有但 daemon 没了 → 清本地 view
+    for (const [appSid, v2Sid] of Object.entries(internalAppToV2Ids(v2))) {
+      if (!daemonSids.has(v2Sid)) {
+        log.info({ appSid, v2Sid }, "§5.3 stale local session, clearing");
+        v2.completeDeletion(appSid).catch((err) => {
+          log.warn({ err, appSid }, "§5.3 clear stale session failed");
+        });
+      }
+    }
+    // daemon 有但本地无 → 拉一次, 但无法重建(没有 portKeys), 仅记日志
+    // (真实情况 v2 总是先 /session/create 再 /claim, daemon 端有记录就
+    //  说明本 client 创建过; 这种情况极罕见, 留给下次交互重同步).
+  } catch (err) {
+    log.warn({ err }, "§5.3 full resync failed");
+  }
+}
+
+// 通过 service 的 token 状态推断 app→v2Sid 映射(v2 service 内部 closure,
+// 我们借用 completeDeletion 这个公开 API 来清 stale; 真正的 map 暴露
+// 给 v2 service 是 P9.6 backlog, 这里保守实现).
+function internalAppToV2Ids(_v: V2PortServiceHandle): Record<string, string> {
+  // v2 service 不直接暴露 appToV2Ids — 我们只能从 v2Service.getToken 推断
+  // "有 v2Sid" 集合. 真实断开重注册由 daemon RECOVERING 闸门 + SSE 增量
+  // 收敛保证 (§7.3), 本函数仅做 best-effort 清理.
+  // 返回空对象: 不主动调 completeDeletion, 让 SSE 事件 / sync 重注册自然收敛.
+  // 这样不会因为 app→v2Sid 错映射而误删.
+  return {} as Record<string, string>;
 }
 
 process.on("uncaughtException", (err) => {

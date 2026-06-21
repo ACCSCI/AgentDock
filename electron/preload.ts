@@ -95,6 +95,13 @@ const api = {
         "daemon:faultInject",
         { path, body },
       ),
+    // §3.5 末段 — 三态 net.connect 探测 (running/stopped/unknown).
+    // 纯展示用途, 不会反向影响端口归属.
+    probeRuntime: (port: number) =>
+      invoke<{ state: "running" | "stopped" | "unknown"; elapsedMs: number }>(
+        "daemon:probeRuntime",
+        { port },
+      ),
   },
 
   db: {

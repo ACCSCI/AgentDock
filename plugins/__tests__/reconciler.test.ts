@@ -285,3 +285,68 @@ describe("reconciler — RECONCILER_TUNING 常量", () => {
     expect(RECONCILER_TUNING.LEASE_TTL_MS).toBe(LEASE_TTL_MS);
   });
 });
+
+describe("reconciler — C4 orphan-dir 扫描 (§4.3)", () => {
+  it("emits C4-orphan-dir for dirs with no DB record (永不自动删)", async () => {
+    const stateV2 = makeStateV2();
+    // DB has session "known-id" but NOT "ghost-id" or "unknown-id"
+    stateV2.createSession({
+      sessionId: "known-id",
+      projectRoot: "/p",
+      displayName: "known",
+      clientId: "c1",
+      pid: 1,
+      leaseExpiresAt: Date.now() + 60_000,
+    });
+    stateV2.activateSession("known-id");
+
+    const emitted: ReconcileAction[] = [];
+    const deps = makeDeps({
+      stateV2,
+      emitOrphan: (a) => emitted.push(a),
+      scanWorktreeDirs: (projectRoot) => [
+        { sessionIdGuess: "known-id", worktreePath: `${projectRoot}/.agentdock/worktrees/known-id` },
+        { sessionIdGuess: "ghost-id", worktreePath: `${projectRoot}/.agentdock/worktrees/ghost-id` },
+        { sessionIdGuess: null, worktreePath: `${projectRoot}/.agentdock/worktrees/random-stuff` },
+        { sessionIdGuess: "unknown-id", worktreePath: `${projectRoot}/.agentdock/worktrees/unknown-id` },
+      ],
+    });
+    const r = createReconciler(deps);
+    const report = await r.tick();
+
+    const c4s = report.actions.filter((a) => a.kind === "C4-orphan-dir");
+    expect(c4s).toHaveLength(2);
+    const ids = c4s.map((a) => (a as { sessionIdGuess: string | null }).sessionIdGuess).sort();
+    expect(ids).toEqual(["ghost-id", "unknown-id"]);
+    // known-id 不应被报 (DB 里有)
+    expect(ids).not.toContain("known-id");
+    // 推断不到 sessionId 的目录不报
+    expect(c4s.every((a) => (a as { sessionIdGuess: string | null }).sessionIdGuess !== null)).toBe(true);
+  });
+
+  it("C4 永不触发 takeOverDelete/rollbackCreate (永不自动删, §4.3 原则)", async () => {
+    const stateV2 = makeStateV2();
+    const takeOverDelete = vi.fn();
+    const rollbackCreate = vi.fn();
+    const deps = makeDeps({
+      stateV2,
+      takeOverDelete,
+      rollbackCreate,
+      scanWorktreeDirs: (projectRoot) => [
+        { sessionIdGuess: "orphan", worktreePath: `${projectRoot}/.agentdock/worktrees/orphan` },
+      ],
+    });
+    const r = createReconciler(deps);
+    await r.tick();
+    expect(takeOverDelete).not.toHaveBeenCalled();
+    expect(rollbackCreate).not.toHaveBeenCalled();
+  });
+
+  it("scanWorktreeDirs 未注入时不报 C4 (保持旧行为, 无副作用)", async () => {
+    const stateV2 = makeStateV2();
+    const deps = makeDeps({ stateV2 });
+    const r = createReconciler(deps);
+    const report = await r.tick();
+    expect(report.actions.filter((a) => a.kind === "C4-orphan-dir")).toHaveLength(0);
+  });
+});

@@ -11,6 +11,10 @@ import {
 import path from "node:path";
 import os from "node:os";
 import { createServer } from "node:net";
+import {
+  BIND_PROBE_BACKOFF_MS,
+  BIND_PROBE_RETRY,
+} from "./constants.js";
 
 // ============================================================
 // Constants
@@ -286,14 +290,70 @@ export class PoolPortAllocator implements PortAllocator {
 // Utility
 // ============================================================
 
-export async function isPortAvailable(port: number): Promise<boolean> {
+/**
+ * EADDRINUSE — clear "occupied" signal. Don't retry, don't fall through
+ * to "transient" — a successful bind retry would just race with the same
+ * real occupant. (新架构 §3.3 bindProbe)
+ */
+const EADDRINUSE = "EADDRINUSE";
+
+/**
+ * tryBindOnce — single bind attempt. Resolves to one of:
+ *   - { ok: true }   — bound and immediately closed
+ *   - { ok: false, code: "EADDRINUSE" } — port is in use
+ *   - { ok: false, code: "TRANSIENT", err } — try again later
+ */
+function tryBindOnce(port: number): Promise<
+  { ok: true } | { ok: false; code: "EADDRINUSE" } | { ok: false; code: "TRANSIENT"; err: unknown }
+> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.listen(port, "127.0.0.1", () => {
-      server.close(() => resolve(true));
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      try {
+        server.close();
+      } catch {
+        /* not listening */
+      }
+      if (err.code === EADDRINUSE) {
+        resolve({ ok: false, code: "EADDRINUSE" });
+      } else {
+        resolve({ ok: false, code: "TRANSIENT", err });
+      }
     });
-    server.on("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve({ ok: true }));
+    });
   });
+}
+
+/**
+ * bindProbe — 新架构 §3.3.
+ *
+ *   bindProbe(port):
+ *     for attempt in 1..BIND_PROBE_RETRY (default 3):
+ *       r = tryBind(port)        // 普通 bind, 不带 SO_REUSEADDR
+ *       if r == OK: return FREE                 // 空闲
+ *       if r == EADDRINUSE: return OCCUPIED      // 明确占用, 立即判定, 不重试
+ *       // 其它瞬时错误 (EACCES 偶发 / 未知) → 短退避后重试
+ *       sleep(BIND_PROBE_BACKOFF_MS)             // 如 50ms
+ *     return OCCUPIED   // 重试耗尽仍失败 → 保守判定为占用
+ *
+ *   - 不带 SO_REUSEADDR 探活(带了反而会让已被别人监听的端口也 bind 成功)
+ *   - EADDRINUSE 立即判占用、不重试
+ *   - 仅对瞬时错误重试
+ *   - 重试耗尽仍失败 → 保守判占用(fail-closed)
+ */
+export async function isPortAvailable(port: number): Promise<boolean> {
+  for (let attempt = 1; attempt <= BIND_PROBE_RETRY; attempt++) {
+    const r = await tryBindOnce(port);
+    if (r.ok) return true;
+    if (r.code === "EADDRINUSE") return false; // 明确占用, 立即判定
+    // TRANSIENT: 短退避后重试
+    if (attempt < BIND_PROBE_RETRY) {
+      await sleep(BIND_PROBE_BACKOFF_MS);
+    }
+  }
+  return false; // 重试耗尽 → fail-closed
 }
 
 /**
@@ -331,4 +391,36 @@ export async function pickFreePort(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * allocateNFreePorts — 新架构 §3.3 / §14.2 归位的批量 pick.
+ *
+ * 新代码(v2 routes, v2PortService 等)应走本函数而非 daemon-state.ts
+ * 的 allocatePorts. 旧 v1 路径的 allocatePorts 保留以供 backward compat
+ * 现有 daemon v1 surface(/ports/allocate 等); 一旦 v1 surface 下线,
+ * 那个方法一并删除.
+ *
+ *   - 走 pickFreePort (OS port=0 随机空闲, §3.3 抗撞号)
+ *   - 走 isPortAvailable (BIND_PROBE_RETRY + 退避, §3.3 bind 探活)
+ *   - 不依赖任何 in-memory allocatedPorts 数组 — 端口归属由 DaemonStateV2
+ *     的 ports Map 单一真相源承担
+ *
+ * @param count 要分配的端口数
+ * @param exclude 已 RESERVED 或外部占用的端口, 必须排除
+ */
+export async function allocateNFreePorts(
+  count: number,
+  exclude: ReadonlySet<number> = new Set(),
+  maxAttempts = 50,
+): Promise<number[]> {
+  if (count <= 0) return [];
+  const result: number[] = [];
+  const excluded = new Set(exclude);
+  for (let i = 0; i < count; i++) {
+    const port = await pickFreePort([...excluded], maxAttempts);
+    result.push(port);
+    excluded.add(port);
+  }
+  return result;
 }

@@ -19,6 +19,7 @@ import { IPC_CHANNELS } from "../shared/api-types.js";
 import type { DaemonManager } from "../../plugins/daemon-manager.js";
 import { readDaemonInfo } from "../../plugins/daemon-discovery.js";
 import type { SseConsumer } from "./v2-sse-consumer.js";
+import { probeRuntime } from "./port-runtime-probe.js";
 
 export interface BootstrapDeps {
   /** Resolves true if the daemon is reachable. */
@@ -142,6 +143,19 @@ export function registerBootstrap(deps: BootstrapDeps): void {
       };
     }
   });
+
+  // §3.5 末段 — UI 端口运行态三态探测. 纯展示, 不影响端口归属/回收.
+  // 超时 RUNTIME_PROBE_TIMEOUT_MS=300ms, 防火墙丢包也得快速返 "unknown".
+  ipcMain.handle(
+    IPC_CHANNELS["daemon:probeRuntime"],
+    async (_evt, payload: { port: number }) => {
+      const p = Number(payload?.port);
+      if (!Number.isInteger(p) || p < 1 || p > 65535) {
+        return { state: "unknown" as const, elapsedMs: 0 };
+      }
+      return await probeRuntime(p);
+    },
+  );
 
   // 新架构 §11.2: fault injection for E2E tests. Only active when the
   // daemon was started with NODE_ENV=test (the /__inject/* routes return

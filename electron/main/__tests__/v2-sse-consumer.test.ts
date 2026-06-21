@@ -184,4 +184,38 @@ describe("SseConsumer", () => {
     expect(onResync).toHaveBeenCalled();
     consumer.stop();
   });
+
+  // §5.3 — 断线立即触发 onDisconnect (host: fetch /sync, 重新 claim)
+  it("triggers onDisconnect when the connection is lost (新架构 §5.3)", async () => {
+    const onDisconnect = vi.fn();
+    const onReconnect = vi.fn();
+    // First connect succeeds with a hello event; second connect (after
+    // backoff) succeeds again with a different hello.
+    fetchImpl
+      .mockResolvedValueOnce(
+        makeFakeResponse([
+          { value: "event: hello\nid: 1\ndata: {\"seq\":1}\n\n" },
+          // Close the stream to simulate a network drop.
+          { value: "", done: true },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeFakeResponse([
+          { value: "event: hello\nid: 1\ndata: {\"seq\":1}\n\n" },
+          { value: "", done: true },
+        ]),
+      );
+    const consumer = new SseConsumer({
+      baseUrl: "http://127.0.0.1:9999",
+      onEvent: () => {},
+      onDisconnect,
+      onReconnect,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    consumer.start();
+    // Wait for the first connection to close + onDisconnect to fire.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+    consumer.stop();
+  });
 });

@@ -247,6 +247,10 @@ export class DaemonState {
    * Allocate `count` unique ports, skipping ports in `exclude` and already-allocated ports.
    * Uses TCP probe to verify availability.
    * Returns the allocated port numbers.
+   *
+   * @deprecated §14.2 — 端口分配函数归位. 新代码应走 port-allocator.ts
+   * `allocateNFreePorts`. 本方法保留以供 v1 /ports/allocate 兼容.
+   * DaemonState 自身不应再承担端口业务逻辑, 未来 v1 surface 下线时一并删.
    */
   async allocatePorts(count: number, exclude?: Set<number>): Promise<number[]> {
     const combined = new Set<number>(this.allocatedPorts);

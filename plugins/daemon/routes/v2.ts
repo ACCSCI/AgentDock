@@ -36,12 +36,22 @@ import {
 } from "../../constants.js";
 import {
   CURRENT_SCHEMA_VERSION,
+  NotOwnerError,
   PortConflictError,
+  RecoveringError,
+  SessionBusyError,
+  SessionNotDeletableError,
   StaleOwnerError,
   type DaemonStateV2,
 } from "../../daemon-state-v2.js";
+
+// 注: SessionBusyError 已导入供 mapError 分支使用, 但 v2 routes 不主动
+// 抛它. 闸门语义由 STALE_OWNER + assertFencingToken 覆盖(同 owner 续作
+// create→activate 放行, 持旧 token 才视为并发冲突). 未来若需要"另一实例
+// 想 insert 新生命周期事务"的精确判定, 复用 SessionBusyError 类即可.
 import { isPortAvailable, pickFreePort } from "../../port-allocator.js";
 import { zodErrorHandler } from "../middleware/error.js";
+import { gateClaimInRecovering } from "../../recovering-controller.js";
 
 const SESSION_ID_RE = /^[a-zA-Z0-9-_]+$/;
 
@@ -368,12 +378,29 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
       const body = c.req.valid("json");
       try {
         const result = await ctx.mutex.runExclusive("state", async () => {
-          ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
+          // §5.2 — RECOVERING 期闸门: 仅放行 expected/已上报的恢复性 claim.
+          // 陌生 sessionId 视为新分配, 拒绝并让 client 稍后重试.
+          const expected = ctx.expectedSessionIds ?? new Set<string>();
+          const reported = ctx.alreadyReportedThisWindow ?? new Set<string>();
+          const gate = gateClaimInRecovering(
+            ctx.stateV2,
+            body.sessionId,
+            expected,
+            reported,
+          );
+          if (!gate.allow) {
+            return c.json(
+              { success: false, error: { code: gate.code, message: gate.message } },
+              503, // Service Unavailable — RECOVERING 临时状态, 不是客户端错误
+            );
+          }
+          // 闸门放行后, 把 sessionId 记入"已上报"以便后续重复上报也放行
+          if (ctx.stateV2.isRecovering() && !ctx.stateV2.getSession(body.sessionId)) {
+            reported.add(body.sessionId);
+            ctx.recovering?.recordReport(body.sessionId);
+          }
 
-          // §5.2 — RECOVERING only allows recovery claims (handled at /sync
-          // level); new claims during RECOVERING must wait. For now the
-          // v1 surface handles RECOVERING — we keep the v2 path open.
-          // TODO P4: integrate state-aware RECOVERING gate.
+          ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
 
           const requested = body.requestedPort;
           if (requested !== undefined) {
@@ -728,6 +755,18 @@ function mapError(c: Parameters<Parameters<Hono["post"]>[1]>[0], err: unknown) {
       409,
     );
   }
+  if (err instanceof NotOwnerError) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: "NOT_OWNER",
+          message: err.message,
+        },
+      },
+      403,
+    );
+  }
   if (err instanceof PortConflictError) {
     return c.json(
       {
@@ -740,6 +779,44 @@ function mapError(c: Parameters<Parameters<Hono["post"]>[1]>[0], err: unknown) {
         },
       },
       409,
+    );
+  }
+  if (err instanceof SessionBusyError) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: "SESSION_BUSY",
+          message: err.message,
+          leaseExpiresAt: err.leaseExpiresAt,
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof SessionNotDeletableError) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: "SESSION_NOT_DELETABLE",
+          message: err.message,
+          currentStatus: err.currentStatus,
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof RecoveringError) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: "RECOVERING",
+          message: err.message,
+        },
+      },
+      503,
     );
   }
   if (err instanceof Error && err.message.includes("not found")) {

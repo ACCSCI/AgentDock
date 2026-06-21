@@ -16,6 +16,8 @@
  * The class doesn't own route logic — that's all in plugins/daemon/routes/*.ts.
  */
 import { serve, type ServerType } from "@hono/node-server";
+import { readdirSync, statSync } from "node:fs";
+import path from "node:path";
 import { writeDaemonInfo, deleteDaemonInfo } from "../daemon-discovery.js";
 import { log } from "../logger.js";
 import { createApp } from "./app.js";
@@ -34,6 +36,7 @@ import {
   createReconciler,
   RECONCILER_TUNING,
   type Reconciler,
+  type WorktreeDirEntry,
 } from "../reconciler.js";
 
 export class AgentDockDaemon {
@@ -89,6 +92,10 @@ export class AgentDockDaemon {
         const expected = new Set(this.ctx.stateV2.listSessions().map((s) => s.sessionId));
         const recovering = createRecoveringController(this.ctx.stateV2, {
           expectedSessionIds: expected,
+          // Tests can opt out of the RECOVERING soft-min wait by passing
+          // `recoveringSoftMinMs: 0` via DaemonOptions (production stays at
+          // RECOVERING_SOFT_MIN_MS = 2s).
+          softMinMs: this.ctx.recoveringSoftMinMs,
           onTransition: (next, reason) => {
             log.info({ state: next, reason }, "lifecycle state transition");
             this.ctx.walV2.persist(this.ctx.stateV2);
@@ -100,6 +107,11 @@ export class AgentDockDaemon {
             }
           },
         });
+        // §5.2 — 把 RECOVERING 闸门 + expected 集合暴露给 v2 routes (/claim,
+        // /session/*) 以执行 "RECOVERING 期只放行恢复性 claim" 判定.
+        this.ctx.recovering = recovering;
+        this.ctx.expectedSessionIds = expected;
+        this.ctx.alreadyReportedThisWindow = new Set<string>();
         this.recoveringTimer = setInterval(() => {
           recovering.tick();
         }, RECOVERING_TICK_INTERVAL_MS);
@@ -118,6 +130,36 @@ export class AgentDockDaemon {
             return c?.lastHeartbeat ?? null;
           },
           isProcessAlive: (pid: number) => this.ctx.isProcessAlive(pid),
+          // §4.3 C4: 扫 .agentdock/worktrees/* 找 DB 无记录者.
+          // 永不自动删, 仅 emit C4-orphan-dir 由 UI 决定 (§4.3 原则).
+          scanWorktreeDirs: (projectRoot: string): WorktreeDirEntry[] => {
+            const wtDir = path.join(projectRoot, ".agentdock", "worktrees");
+            try {
+              const entries = readdirSync(wtDir, { withFileTypes: true });
+              const out: WorktreeDirEntry[] = [];
+              for (const e of entries) {
+                if (!e.isDirectory()) continue;
+                const wt = path.join(wtDir, e.name);
+                try {
+                  // 必须是目录 (非 symlink 悬挂)
+                  const st = statSync(wt);
+                  if (!st.isDirectory()) continue;
+                } catch {
+                  continue;
+                }
+                out.push({
+                  sessionIdGuess: e.name,
+                  worktreePath: wt,
+                });
+              }
+              return out;
+            } catch (err) {
+              // 目录不存在 = 项目没建过 session, 静默 noop
+              if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+              log.warn({ err, projectRoot }, "scanWorktreeDirs failed");
+              return [];
+            }
+          },
         });
         this.reconcilerTimer = setInterval(() => {
           this.reconciler?.tick().catch((err) => {
