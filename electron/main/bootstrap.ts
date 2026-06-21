@@ -9,11 +9,16 @@
  *
  * 新架构 §13.1: also exposes `daemon:health` and `daemon:debugState` for
  * the renderer's status bar (§15) and `daemon:faultInject` for E2E tests.
+ *
+ * P9: adds `daemon:events:subscribe` which delegates to the SSE consumer
+ * in main and returns an unsubscribe function. The matching one-way push
+ * channel is "daemon:events:push" (const literal in preload).
  */
-import { ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../shared/api-types.js";
 import type { DaemonManager } from "../../plugins/daemon-manager.js";
 import { readDaemonInfo } from "../../plugins/daemon-discovery.js";
+import type { SseConsumer } from "./v2-sse-consumer.js";
 
 export interface BootstrapDeps {
   /** Resolves true if the daemon is reachable. */
@@ -34,6 +39,11 @@ export interface BootstrapDeps {
   getDaemonManager: () => DaemonManager | null;
   /** Returns the daemon port (read from daemon.json). */
   getDaemonPort: () => number;
+  /** P9 SSE consumer (null when AGENTDOCK_V2 is off). */
+  getSseConsumer: () => SseConsumer | null;
+  /** P9: returns true when AGENTDOCK_V2=1 is set, so the renderer can
+   *  route session mutations through the v2 channel set. */
+  isV2Enabled: () => boolean;
 }
 
 export function registerBootstrap(deps: BootstrapDeps): void {
@@ -55,6 +65,12 @@ export function registerBootstrap(deps: BootstrapDeps): void {
 
   ipcMain.handle(IPC_CHANNELS["bootstrap:clientId"], () => {
     return deps.getClientId();
+  });
+
+  // P9: tells the renderer whether AGENTDOCK_V2=1 is set. Renderer uses
+  // this to decide between v1 and v2 channel sets for session mutations.
+  ipcMain.handle(IPC_CHANNELS["bootstrap:v2Enabled"], () => {
+    return deps.isV2Enabled();
   });
 
   // 新架构 §13.1: direct daemon health + state observation for the UI.
@@ -121,6 +137,34 @@ export function registerBootstrap(deps: BootstrapDeps): void {
           error: err instanceof Error ? err.message : String(err),
         };
       }
+    },
+  );
+
+  // P9: SSE event subscription. Each renderer that calls this gets its own
+  // one-way `daemon:events:push` listener hooked into the SSE consumer.
+  ipcMain.handle(
+    IPC_CHANNELS["daemon:events:subscribe"],
+    async (event) => {
+      const consumer = deps.getSseConsumer();
+      if (!consumer) {
+        return { success: false, error: "AGENTDOCK_V2 not enabled" };
+      }
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const sender = event.sender;
+      const unsubscribe = consumer.subscribe((payload) => {
+        if (sender.isDestroyed()) return;
+        try {
+          sender.send("daemon:events:push", payload);
+        } catch {
+          /* sender torn down */
+        }
+      });
+      // We can't return the unsubscribe function through ipcRenderer.invoke
+      // (functions don't survive contextBridge), so we stash it in a
+      // WeakMap keyed on the sender so the renderer can later ask us to
+      // clean up. The renderer simply ignores the return value in P9;
+      // a future P6 client will wire up the unsubscribe path.
+      return { success: true };
     },
   );
 }

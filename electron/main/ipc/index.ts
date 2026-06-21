@@ -14,6 +14,8 @@ import { registerBootstrap, type BootstrapDeps } from "../bootstrap.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import type { DaemonHonoClient } from "../hono-client.js";
 import type { DaemonManager } from "../../../plugins/daemon-manager.js";
+import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
+import type { SseConsumer } from "../v2-sse-consumer.js";
 
 export interface AllIpcDeps {
   getDaemonClient: () => DaemonHonoClient | null;
@@ -34,11 +36,18 @@ export interface AllIpcDeps {
   isViteReady: () => Promise<boolean>;
   isDaemonReady: () => Promise<boolean>;
   countHandlers: () => number;
+  /** P9: v2 service when AGENTDOCK_V2=1, else null. */
+  getV2PortService: () => V2PortServiceHandle | null;
+  /** P9: SSE consumer when AGENTDOCK_V2=1, else null. */
+  getSseConsumer: () => SseConsumer | null;
+  /** P9: true when AGENTDOCK_V2=1. */
+  isV2Enabled: () => boolean;
 }
 
 export function registerAllIpc(deps: AllIpcDeps): void {
   // Bootstrap (3 channels: health, reallocated, clientId + 3 daemon channels:
-  // daemon:health, daemon:debugState, daemon:faultInject — 新架构 §13.1/§11.2)
+  // daemon:health, daemon:debugState, daemon:faultInject + P9 daemon:events:subscribe
+  // + bootstrap:v2Enabled — 新架构 §13.1/§11.2/P9)
   const bootstrapDeps: BootstrapDeps = {
     isDaemonReady: deps.isDaemonReady,
     isViteReady: deps.isViteReady,
@@ -47,6 +56,8 @@ export function registerAllIpc(deps: AllIpcDeps): void {
     getClientId: deps.getClientId,
     getDaemonManager: deps.getDaemonManager,
     getDaemonPort: deps.getDaemonPort,
+    getSseConsumer: deps.getSseConsumer,
+    isV2Enabled: deps.isV2Enabled,
   };
   registerBootstrap(bootstrapDeps);
 
@@ -65,15 +76,17 @@ export function registerAllIpc(deps: AllIpcDeps): void {
   };
   registerDb(dbCtx);
 
-  // Sessions (8 channels). `getDb()` resolves the singleton populated by
-  // `db:init` / lazy access through `db:projects:*` — both reach the same
-  // active Drizzle handle via plugins/db/index.ts.
+  // Sessions (8 channels + P9 v2 channels). `getDb()` resolves the singleton
+  // populated by `db:init` / lazy access through `db:projects:*` — both
+  // reach the same active Drizzle handle via plugins/db/index.ts.
   const sessionsDeps: SessionsDeps = {
     getDb: () => getActiveDb(),
     getProjectPath: deps.getProjectPath,
     getClientId: deps.getClientId,
     getDaemonClient: deps.getDaemonClient,
     getDaemonManager: deps.getDaemonManager,
+    getV2PortService: deps.getV2PortService,
+    getDaemonPort: deps.getDaemonPort,
   };
   registerSessions(sessionsDeps);
 

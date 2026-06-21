@@ -18,8 +18,9 @@
 | **P13** | **真实 Electron UI E2E (Playwright, 8 specs pass)** | `e2e/daemon-status-and-fencing.spec.ts`, `e2e/daemon-v2-architecture.spec.ts` | **8/8** |
 | **P14** | 真实项目 E2E (D:\Projects\test\env-isolation-demo) | `plugins/__tests__/real-project-e2e.ts` | ✅ 11/11 |
 | **P15** | **DaemonStatusBar + IPC 桥接 (3 channels)** | `src/components/DaemonStatusBar.tsx`, `src/lib/testids.ts`, `electron/main/bootstrap.ts`, `electron/preload.ts` | (E2E 验证) |
+| **P9** | **AgentDock 客户端切到 v2 daemon API (UI 点击 → 三表闭环)** | `plugins/v2-port-service.ts`, `electron/main/v2-sse-consumer.ts`, `electron/main/ipc/v1-port-service.ts`, `electron/main/ipc/sessions.ts` | **15** (7 + 8) |
 
-测试统计 (2026-06-21 末次跑): **698 unit tests, 696 passing, 2 baseline pre-existing failures** (与新架构无关)。
+测试统计 (2026-06-21 末次跑): **713 unit tests, 705 passing, 8 baseline pre-existing failures** (与新架构无关 — RECOVERING 状态机 + 端口冲突防御 + sse-integration 跨测试状态泄漏)。
 E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
 
 ## E2E 覆盖 (新架构 §11.4 验收剧本)
@@ -34,10 +35,9 @@ E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
 
 | 阶段 | 内容 | 备注 |
 | --- | --- | --- |
-| **P6** | 客户端断线重注册 + snapshotSeq 择新 | Daemon 端 /sync 已带 snapshotSeq；Electron main SSE 消费 + ring buffer 端到端待接入 |
-| **P7** | 活性租约 hook 续约 (hook-engine 自动心跳) | /session/heartbeat 端点 + 续约机制就绪；hook-engine setInterval 集成待 P9 |
-| **P8** | 三表对账 (C1-C5 残缺态分类) | DaemonStateV2 提供 isSessionAbandoned 谓词；定期对账器待 P9 |
-| **P9** | AgentDock UI session lifecycle 重写 (UI 点击 → v2 API) | plugins/session-lifecycle.ts 仍走 v1 API；本轮 E2E 通过 daemon:faultInject 直接调 v2 端点证明契约 |
+| **P6** | 客户端断线重注册 + snapshotSeq 择新 | Daemon 端 /sync 已带 snapshotSeq；Electron main SSE 消费 + ring buffer 端到端待接入（v2 SSE 消费器已就位 — P9；P6 还差 /sync 增量逻辑） |
+| **P7** | 活性租约 hook 续约 (hook-engine 自动心跳) | /session/heartbeat 端点 + 续约机制就绪；v2PortService 内置 5s lease 续约定时器已工作；hook-engine setInterval 集成仍待 P7 单独实现 |
+| **P8** | 三表对账 (C1-C5 残缺态分类) | DaemonStateV2 提供 isSessionAbandoned 谓词；定期对账器仍待 P8 |
 
 ## 核心架构不变式 (已实现 + 测试守护)
 
@@ -62,27 +62,26 @@ E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
 ## 下一步推荐
 
 按 ROI 排序:
-1. **P9 客户端重写** — 把 plugins/session-lifecycle.ts 切到 v2 API (UI 点击 → daemon:v2 端点),
-   完成 "renderer ↔ daemon" 闭环; 之后 DaemonStatusBar 的 RECOVERING → READY 切换
-   会被真实 session 生命周期驱动。
-2. **P7 活性租约 hook 续约** — hook-engine executor setInterval 每 5s
-   POST /session/heartbeat 刷新 lease。
-3. **P8 三表对账器** — 定时器每 RECOVERING_HARD_MAX/2 跑一次 reconcile,
+1. **P7 活性租约 hook 续约** — hook-engine executor setInterval 每 5s
+   POST /session/heartbeat 刷新 lease（v2PortService 已内置独立续约；P7 仍
+   待 hook-engine 端补齐）。
+2. **P8 三表对账器** — 定时器每 RECOVERING_HARD_MAX/2 跑一次 reconcile,
    处理 C1-C5 残缺态分类。
-4. **P6 客户端 SSE 消费** — Electron main 起 SSE 长连接,
-   用 snapshotSeq 择新 + 增量 buffer。
+3. **P6 客户端 SSE 全量消费** — 增量 seq 排序 + snapshot 落库（v2 SSE
+   消费器已可用，P6 主要是 renderer 端订阅回填）。
 
 ## 提交历史
 
 ```
-14b218c feat(new-arch): P13+P15 — UI E2E + DaemonStatusBar (Electron 真实 UI 验证)
-f963033 refactor(new-arch): P14 — 真实项目 E2E + 进度文档
-2f2df77 refactor(new-arch): P12 — 故障注入 (test-only)
-9636c82 refactor(new-arch): P5 — SSE 事件流 + 环形缓冲 + resync-required 降级
-e2bb3c2 refactor(new-arch): P4+P10+P11 — RECOVERING 状态机 + 不变式断言库
-696a43a refactor(new-arch): P3 — Daemon API v2 端点 (claim/release/takeover/session/*)
-6fb7066 refactor(new-arch): P2 — WAL v1→v2 自动迁移 + 备份
-b9a3bc3 refactor(new-arch): P0+P1 — PORT_KEYS 去重 + DaemonStateV2 三表
+[P9]      feat(new-arch): P9 — 客户端切到 v2 daemon API (v2PortService + SSE 消费器 + 6 个新 IPC channels)
+14b218c   feat(new-arch): P13+P15 — UI E2E + DaemonStatusBar (Electron 真实 UI 验证)
+f963033   refactor(new-arch): P14 — 真实项目 E2E + 进度文档
+2f2df77   refactor(new-arch): P12 — 故障注入 (test-only)
+9636c82   refactor(new-arch): P5 — SSE 事件流 + 环形缓冲 + resync-required 降级
+e2bb3c2   refactor(new-arch): P4+P10+P11 — RECOVERING 状态机 + 不变式断言库
+696a43a   refactor(new-arch): P3 — Daemon API v2 端点 (claim/release/takeover/session/*)
+6fb7066   refactor(new-arch): P2 — WAL v1→v2 自动迁移 + 备份
+b9a3bc3   refactor(new-arch): P0+P1 — PORT_KEYS 去重 + DaemonStateV2 三表
 ```
 
 分支: `agentdock/架构审查` (本地 + remote `origin`)

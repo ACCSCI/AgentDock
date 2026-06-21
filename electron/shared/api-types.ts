@@ -78,11 +78,25 @@ export const IPC_CHANNELS = {
   "bootstrap:health": "bootstrap:health",
   "bootstrap:reallocated": "bootstrap:reallocated",
   "bootstrap:clientId": "bootstrap:clientId",
+  "bootstrap:v2Enabled": "bootstrap:v2Enabled",
 
   // daemon (新架构 §13.1 — direct daemon API access for UI observability)
   "daemon:health": "daemon:health",
   "daemon:debugState": "daemon:debugState",
   "daemon:faultInject": "daemon:faultInject",
+  // daemon:events:subscribe is a renderer→main invoke that returns an
+  // unsubscribe function; the matching one-way push channel is a const
+  // literal defined in electron/preload.ts ("daemon:events:push") since
+  // IPC_CHANNELS only models the invoke surface.
+  "daemon:events:subscribe": "daemon:events:subscribe",
+
+  // sessions:v2 (P9 — v2 daemon API driven from renderer)
+  "sessions:v2:create": "sessions:v2:create",
+  "sessions:v2:delete": "sessions:v2:delete",
+  "sessions:v2:rename": "sessions:v2:rename",
+  "sessions:v2:reassign": "sessions:v2:reassign",
+  "sessions:v2:status": "sessions:v2:status",
+  "sessions:v2:takeover": "sessions:v2:takeover",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;

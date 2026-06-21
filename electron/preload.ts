@@ -43,6 +43,8 @@ const api = {
         }>
       >("bootstrap:reallocated"),
     clientId: () => invoke<string>("bootstrap:clientId"),
+    /** P9: true when AGENTDOCK_V2=1 is set in the Electron main env. */
+    v2Enabled: () => invoke<boolean>("bootstrap:v2Enabled"),
   },
 
   // daemon (新架构 §13.1) — direct daemon API access for UI observability
@@ -131,6 +133,65 @@ const api = {
       invoke<string | null>("sessions:bgHookStatus", sessionId),
     hookErrors: (sessionId: string) =>
       invoke<unknown[]>("sessions:hookErrors", sessionId),
+  },
+
+  // P9: v2 daemon API — direct endpoints for renderer-driven lifecycle.
+  // Active when `bootstrap.v2Enabled()` returns true. The handler side
+  // forwards to /session/* /takeover /reassign on the daemon.
+  sessionsV2: {
+    create: (params: { projectId: string; name: string; baseBranch?: string }) =>
+      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
+        "sessions:v2:create",
+        params,
+      ),
+    delete: (params: { sessionId: string; v2SessionId?: string }) =>
+      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
+        "sessions:v2:delete",
+        params,
+      ),
+    rename: (params: { sessionId: string; v2SessionId?: string; name: string }) =>
+      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
+        "sessions:v2:rename",
+        params,
+      ),
+    reassign: (sessionId: string) =>
+      invoke<{ success: boolean; ports?: Record<string, number>; error?: string }>(
+        "sessions:v2:reassign",
+        { sessionId },
+      ),
+    status: (sessionId: string) =>
+      invoke<"creating" | "active" | "deleting" | null>("sessions:v2:status", { sessionId }),
+    takeover: (params: { sessionId: string; fromClientId?: string; fromPid?: number }) =>
+      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
+        "sessions:v2:takeover",
+        params,
+      ),
+  },
+
+  /**
+   * P9 SSE event subscriber. Subscribes to the daemon's `/events` SSE
+   * stream via `daemon:events:subscribe`, then forwards every event on
+   * the `daemon:events:push` one-way channel to the supplied callback.
+   *
+   * Returns an unsubscribe function. Heartbeats are filtered server-side.
+   */
+  sse: {
+    subscribe: (cb: (e: { event: string; seq: number; data: unknown }) => void) => {
+      // Register the renderer-side listener first, then notify main to
+      // start forwarding. The order avoids losing events that arrive
+      // between subscribe() returning and the listener attaching.
+      const off = on<{ event: string; seq: number; data: unknown }>(
+        "daemon:events:push",
+        (payload) => cb(payload),
+      );
+      void invoke<{ success: boolean; error?: string }>("daemon:events:subscribe").catch(
+        (err) => {
+          // eslint-disable-next-line no-console
+          console.warn("[sse.subscribe] main refused:", err);
+        },
+      );
+      return off;
+    },
   },
 
   terminals: {

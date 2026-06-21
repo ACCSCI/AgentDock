@@ -32,6 +32,8 @@ import {
   getActiveDb,
 } from "../plugins/db/index.js";
 import * as schema from "../plugins/db/schema.js";
+import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-port-service.js";
+import { SseConsumer } from "./main/v2-sse-consumer.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +48,9 @@ let reallocatedQueue: Array<{
   oldPorts: Record<string, number>;
   newPorts: Record<string, number>;
 }> = [];
+// P9: v2 service + SSE consumer (only populated when AGENTDOCK_V2=1).
+let v2PortService: V2PortServiceHandle | null = null;
+let sseConsumer: SseConsumer | null = null;
 
 // Foreign session tracking — mirrors master's _sessionStatuses map.
 // Tracks runtime ownership status per session across IPC calls:
@@ -398,7 +403,44 @@ async function bootstrap() {
     isViteReady,
     isDaemonReady,
     countHandlers,
+    getV2PortService: () => v2PortService,
+    getSseConsumer: () => sseConsumer,
+    isV2Enabled: () => process.env.AGENTDOCK_V2 === "1",
   };
+
+  // P9: when AGENTDOCK_V2=1, build the v2 PortService and SSE consumer.
+  // v2 service handles /session/create → /claim × N → /session/activate
+  // with fencingToken caching and lease renewal. SSE consumer forwards
+  // /events to renderer via daemon:events:push.
+  if (process.env.AGENTDOCK_V2 === "1" && cachedDaemonPort > 0) {
+    try {
+      v2PortService = createV2PortService({
+        baseUrl: `http://127.0.0.1:${cachedDaemonPort}`,
+        clientId,
+        pid: process.pid,
+        getProjectRoot: () => activeProjectPath ?? process.cwd(),
+      });
+      sseConsumer = new SseConsumer({
+        baseUrl: `http://127.0.0.1:${cachedDaemonPort}`,
+        onEvent: (e) => {
+          // Filter heartbeats — too noisy for the renderer.
+          if (e.event === "heartbeat") return;
+          log.debug({ event: e.event, seq: e.seq }, "sse event");
+        },
+        onReconnect: () => {
+          log.info("sse reconnected");
+        },
+        onClose: () => {
+          log.warn("sse closed");
+        },
+      });
+      sseConsumer.start();
+      log.info({ port: cachedDaemonPort }, "AGENTDOCK_V2 enabled");
+    } catch (err) {
+      log.error({ err }, "v2 service / sse consumer init failed");
+    }
+  }
+
   registerAllIpc(ipcDeps);
 
   // Auto-init the active project to the current working directory so the
@@ -456,6 +498,17 @@ app.on("before-quit", (e) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+
+  // P9: stop the SSE consumer + dispose v2 service so their timers
+  // don't keep the event loop alive past app exit.
+  if (sseConsumer) {
+    sseConsumer.stop();
+    sseConsumer = null;
+  }
+  if (v2PortService) {
+    v2PortService.dispose();
+    v2PortService = null;
   }
 
   // Unregister BEFORE killing the daemon child. If we're the leader,

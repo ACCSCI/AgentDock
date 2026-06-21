@@ -31,6 +31,16 @@ export interface PortService {
     portKeys?: string[];
   }): Promise<SessionPorts>;
   releaseSession(sessionId: string): Promise<void>;
+  /**
+   * v2-only (新架构 §4.2). Called after `removeWorktree` succeeds, before
+   * `afterDeleteSession` hooks. v1 PortService implementations may omit
+   * this — the orchestrator no-ops when the method is absent.
+   *
+   * v2 semantics: POST /session/purge to drop the session's three-table
+   * entries. Must come AFTER the worktree is gone so the daemon's
+   * "worktree still owned" guard doesn't reject the purge.
+   */
+  completeDeletion?(sessionId: string): Promise<void>;
 }
 
 // --- Step event types ---
@@ -78,6 +88,13 @@ export interface DeleteSessionInput {
   projectPath: string;
   worktreePath: string;
   config: AgentDockConfig;
+  /**
+   * Git branch currently backing the worktree. May differ from
+   * `agentdock/<sessionId>` if the session was renamed (8ec663a). When
+   * omitted, removeWorktree falls back to `agentdock/<sessionId>` and
+   * leaves the real branch dangling.
+   */
+  currentBranch?: string;
   onStep?: (event: StepEvent) => void;
 }
 
@@ -118,11 +135,27 @@ export function createSessionLifecycle(deps?: {
   }
 
   function log(sessionId: string, msg: string) {
-    console.log(`[SessionLifecycle] ${sessionId} → ${msg}`);
+    // Swallow EPIPE from console.log: this orchestrator is called by
+    // long-running fire-and-forget IPC handlers, and the parent
+    // stdout pipe can close mid-flight (window closed → Electron tears
+    // down stdio). Without this guard the EPIPE bubbles up as an
+    // uncaught exception and Electron shows a "JavaScript error
+    // occurred in the main process" dialog.
+    try {
+      console.log(`[SessionLifecycle] ${sessionId} → ${msg}`);
+    } catch {
+      // pipe gone — nothing useful to do here.
+    }
   }
 
   function emit(onStep: ((e: StepEvent) => void) | undefined, event: StepEvent) {
-    onStep?.(event);
+    try {
+      onStep?.(event);
+    } catch {
+      // onStep is typically `webContents.send(...)` — if the renderer
+      // window is gone, that throws ERR_IPC_CHANNEL_CLOSED. The
+      // lifecycle must continue running its cleanup steps regardless.
+    }
   }
 
   async function create(input: CreateSessionInput): Promise<CreateSessionResult> {
@@ -231,7 +264,9 @@ export function createSessionLifecycle(deps?: {
             await deps.portService.releaseSession(sessionId);
           }
         } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
-        try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
+        // wt.branch is the freshly-created branch — passing it explicitly
+        // keeps the rollback consistent with future renamed-session semantics.
+        try { await removeWorktree(projectPath, sessionId, { currentBranch: wt.branch, force: true }); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
         throw new Error("afterCreateSession hook failed (required)");
       }
       log(sessionId, `afterCreateSession ✓ ${afterDuration}ms`);
@@ -250,13 +285,26 @@ export function createSessionLifecycle(deps?: {
           await deps.portService.releaseSession(sessionId);
         }
       } catch (e) { log(sessionId, `  rollback releasePorts failed: ${e}`); }
-      try { await removeWorktree(projectPath, sessionId, true); } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
+      // `wt` is in scope here because createWorktree runs BEFORE this try
+      // block — passing wt.branch keeps rollback consistent with rename.
+      try {
+        await removeWorktree(projectPath, sessionId, {
+          currentBranch: wt.branch,
+          force: true,
+        });
+      } catch (e) { log(sessionId, `  rollback removeWorktree failed: ${e}`); }
+      // v2-only: also drop the three-table row. v1 omits this method.
+      try {
+        if (deps?.portService?.completeDeletion) {
+          await deps.portService.completeDeletion(sessionId);
+        }
+      } catch (e) { log(sessionId, `  rollback completeDeletion failed: ${e}`); }
       throw err;
     }
   }
 
   async function remove(input: DeleteSessionInput): Promise<DeleteSessionResult> {
-    const { sessionId, projectPath, worktreePath, config, onStep } = input;
+    const { sessionId, projectPath, worktreePath, config, currentBranch, onStep } = input;
     const hookReports: HookReport[] = [];
     const start = Date.now();
 
@@ -296,11 +344,26 @@ export function createSessionLifecycle(deps?: {
       // Kill any lingering async hook child processes that may hold CWD handles
       // and wait for OS to release them before attempting directory removal.
       await killSessionHookProcessesAndWait(sessionId, worktreePath);
-      await removeWorktree(projectPath, sessionId, true);
+      // Forward currentBranch so a renamed session's real branch (not
+      // `agentdock/<sessionId>`) is deleted alongside the worktree.
+      await removeWorktree(projectPath, sessionId, { currentBranch, force: true });
     }
     const wtDuration = Date.now() - wtStepStart;
     log(sessionId, `removeWorktree ✓ ${wtDuration}ms`);
     emit(onStep, { step: "removeWorktree", status: "done", duration: wtDuration });
+
+    // Step 3.5: CompleteDeletion (v2-only, 新架构 §4.2).
+    // v1 PortService omits this method → no-op. v2 calls /session/purge
+    // here so the daemon's 3-table entries are dropped AFTER the worktree
+    // is gone (matches the daemon's `deleting → purged` state machine).
+    if (deps?.portService?.completeDeletion) {
+      emit(onStep, { step: "removeWorktree", status: "done" });
+      try {
+        await deps.portService.completeDeletion(sessionId);
+      } catch (e) {
+        log(sessionId, `completeDeletion ✗ ${e}`);
+      }
+    }
 
     // Step 4: AfterDeleteSession hooks — failure doesn't affect result
     emit(onStep, { step: "afterDeleteSession", status: "running" });
