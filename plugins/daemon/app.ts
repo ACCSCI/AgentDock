@@ -7,7 +7,9 @@
  *   1. hostGuard         127.0.0.1 / localhost only
  *   2. originGuard       OPTIONS preflight + reject POST-with-Origin
  *   3. errorEnvelope     catches thrown errors → {success:false, error}
- *   4. routes/*          health, ports, registry, clients, sessions, sync, debug
+ *   4. routes/*          health, v2, registry, clients, debug
+ *
+ * v1 routes (sessions/sync/ports) were removed in F10-2a.
  *
  * AppType is exported so the Electron main process (Phase 2) can build a
  * type-safe Hono client via `hc<AppType>(daemonUrl)`.
@@ -20,10 +22,7 @@ import { originGuard } from "./middleware/origin.js";
 import { registerClients } from "./routes/clients.js";
 import { registerDebug } from "./routes/debug.js";
 import { registerHealth } from "./routes/health.js";
-import { registerPorts } from "./routes/ports.js";
 import { registerRegistry } from "./routes/registry.js";
-import { registerSessions } from "./routes/sessions.js";
-import { registerSync } from "./routes/sync.js";
 import { registerV2 } from "./routes/v2.js";
 import { registerFaultEndpoints } from "../fault-injector.js";
 
@@ -36,20 +35,15 @@ export function createApp(ctx: DaemonContext): Hono {
   app.use("*", originGuard);
   app.use("*", errorEnvelope);
 
-  // v2 routes — 新架构 §13.1. Mounted BEFORE v1 so they take precedence
-  // on overlapping paths (/health, /debug/state). v1 routes remain as
-  // backward-compat for any client still using the old API.
+  // v2 routes — 新架构 §13.1. Primary API surface.
   registerV2(app, ctx);
 
   // Fault injection (新架构 §11.2) — only active when NODE_ENV=test.
   registerFaultEndpoints(app, ctx.faults);
 
   registerHealth(app, ctx);
-  registerPorts(app, ctx);
   registerRegistry(app, ctx);
   registerClients(app, ctx);
-  registerSessions(app, ctx);
-  registerSync(app, ctx);
   registerDebug(app, ctx);
 
   // 404 for unknown routes — preserves the original daemon's
