@@ -313,33 +313,39 @@ describe("createWorktree baseBranch injection safety", () => {
 });
 
 describe("renameWorktree newName injection safety", () => {
-  it("WR1: newName 含双引号/反引号 → 拒绝", () => {
+  it("WR1: newName 含双引号/反引号 → 不影响 branch (§4.1 displayName 隔离)", () => {
     createWorktree(projectDir, "rn1");
-    expect(() => renameWorktree(projectDir, "rn1", 'x`touch pwned`')).toThrow();
-    expect(() => renameWorktree(projectDir, "rn1", 'x"; echo y; "')).toThrow();
+    // §4.1 — branch 派生自 sessionId, newName 仅作为 displayName.
+    // 特殊字符在 newName 中不会注入到 branch (branch = agentdock/rn1).
+    const result = renameWorktree(projectDir, "rn1", 'x`touch pwned`');
+    expect(result.newBranch).toBe("agentdock/rn1");
     expect(existsSync(path.join(projectDir, "pwned"))).toBe(false);
+    const result2 = renameWorktree(projectDir, "rn1", 'x"; echo y; "');
+    expect(result2.newBranch).toBe("agentdock/rn1");
   });
 
-  it("WR2: 合法 newName 正常重命名（回归）", () => {
+  it("WR2: 合法 newName 不改 branch — branch 派生自 sessionId (§4.1)", () => {
     createWorktree(projectDir, "rn2");
     const result = renameWorktree(projectDir, "rn2", "renamed2");
-    expect(result.newBranch).toBe("agentdock/renamed2");
+    // §4.1 — branch 派生自 sessionId, 不派生自 newName
+    expect(result.newBranch).toBe("agentdock/rn2");
   });
 
-  it("WR3: 中文 session 名可以重命名", () => {
+  it("WR3: 中文 newName 不改 branch — branch 派生自 sessionId (§4.1)", () => {
     createWorktree(projectDir, "cn1");
     const result = renameWorktree(projectDir, "cn1", "测试会话");
-    expect(result.newBranch).toBe("agentdock/测试会话");
-    // 确认旧分支已不存在
+    // §4.1 — branch 不含中文 (来自 sessionId), displayName 独立
+    expect(result.newBranch).toBe("agentdock/cn1");
+    // 旧分支仍在 (rename 只改 displayName, 不改 branch)
     const branches = execSync("git branch --list", { cwd: projectDir, encoding: "utf-8" });
-    expect(branches).not.toContain("agentdock/cn1");
+    expect(branches).toContain("agentdock/cn1");
   });
 
-  it("WR4: 连续重命名不会失败", () => {
+  it("WR4: 连续重命名不会失败 — branch 始终是 agentdock/<sessionId>", () => {
     createWorktree(projectDir, "rn4");
     const first = renameWorktree(projectDir, "rn4", "first");
-    // 第二次重命名需要传入当前分支名，否则 oldBranch=agentdock/rn4 已不存在
+    expect(first.newBranch).toBe("agentdock/rn4");
     const result = renameWorktree(projectDir, "rn4", "second", first.newBranch);
-    expect(result.newBranch).toBe("agentdock/second");
+    expect(result.newBranch).toBe("agentdock/rn4");
   });
 });
