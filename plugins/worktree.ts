@@ -1,10 +1,11 @@
-import { exec, execFileSync, execSync } from "node:child_process";
+import { exec, execFile, execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const WORKTREE_DIR = ".agentdock/worktrees";
 
@@ -210,9 +211,18 @@ export function createWorktree(
 export async function removeWorktree(
   projectPath: string,
   sessionId: string,
-  force = false,
+  options: { currentBranch?: string; force?: boolean } | boolean = {},
 ): Promise<{ removed: string }> {
+  // Accept the legacy positional-boolean form so older callers
+  // (`removeWorktree(p, id, true)`) keep working. Internally normalize.
+  const opts =
+    typeof options === "boolean" ? { force: options } : options;
+  const force = opts.force ?? false;
+  const branchToDelete =
+    opts.currentBranch ?? `agentdock/${sessionId}`;
+
   validateSessionId(sessionId);
+  validateBranchName(branchToDelete);
 
   const worktreePath = getWorktreePath(projectPath, sessionId);
 
@@ -250,8 +260,10 @@ export async function removeWorktree(
     }
 
     try {
-      const branch = `agentdock/${sessionId}`;
-      await execAsync(`git branch -D "${branch}"`, {
+      // Use the caller-provided branch name when available — this is
+      // critical for renamed sessions where the on-disk branch no longer
+      // matches `agentdock/<sessionId>` (8ec663a fix).
+      await execAsync(`git branch -D "${branchToDelete}"`, {
         cwd: projectPath,
         encoding: "utf-8",
       });
@@ -347,34 +359,37 @@ export function renameWorktree(
   }
 
   const oldBranch = currentBranch ?? `agentdock/${sessionId}`;
-  const newBranch = `agentdock/${newName}`;
+  // §4.1 — branch 派生自 sessionId (不可变), 不派生自 newName (自由文本).
+  // 防 displayName → branch 注入 (§11.3 #7).
+  const newBranch = `agentdock/${sessionId}`;
 
-  // oldBranch derives from validated sessionId; newBranch derives from caller
-  // input and MUST be validated before reaching git.
+  // §4.1 — rename 只改 displayName, 不改 branch.
+  // oldBranch 与 newBranch 必然相同 (都派生自 sessionId), 所以 branch
+  // rename 是 no-op. 跳过 git 操作, 只更新 displayName.
   validateBranchName(oldBranch);
-  validateBranchName(newBranch);
-
-  // Check if new branch name already exists
-  try {
-    execFileSync("git", ["rev-parse", "--verify", newBranch], {
-      cwd: projectPath,
+  if (oldBranch !== newBranch) {
+    validateBranchName(newBranch);
+    // Check if new branch name already exists (only when actually renaming)
+    try {
+      execFileSync("git", ["rev-parse", "--verify", newBranch], {
+        cwd: projectPath,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      throw new Error(`Branch '${newBranch}' already exists`);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("already exists")) {
+        throw err;
+      }
+      // Branch doesn't exist - good
+    }
+    // Rename the branch
+    execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
+      cwd: worktreePath,
       encoding: "utf-8",
       stdio: "pipe",
     });
-    throw new Error(`Branch '${newBranch}' already exists`);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("already exists")) {
-      throw err;
-    }
-    // Branch doesn't exist - good
   }
-
-  // Rename the branch
-  execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
-    cwd: worktreePath,
-    encoding: "utf-8",
-    stdio: "pipe",
-  });
 
   return { newBranch, worktreePath };
 }
@@ -411,7 +426,9 @@ export function scanDiskWorktrees(projectPath: string): DiskWorktree[] {
 export interface OrphanDir {
   sessionId: string;
   worktreePath: string;
-  reason: "no-git-file" | "empty-dir";
+  reason: "no-git-file" | "empty-dir" | "orphan-branch";
+  /** Populated for `orphan-branch`; the agentdock/<sessionId> branch name. */
+  branch?: string;
 }
 
 /**
@@ -476,5 +493,65 @@ export async function removeOrphanDir(dirPath: string): Promise<void> {
         throw err; // final attempt failed, propagate
       }
     }
+  }
+}
+
+/**
+ * List `agentdock/*` branches that no live session or on-disk worktree
+ * references — these survive a session rename or a partial cleanup.
+ * `knownBranches` is the union of DB `sessions.branch` and `agentdock/*`
+ * branches that currently back a registered git worktree (callers build
+ * it). Anything matching `refs/heads/agentdock/` outside that set counts.
+ */
+export function scanOrphanBranches(
+  projectPath: string,
+  knownBranches: Set<string>,
+): OrphanDir[] {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "git",
+      ["for-each-ref", "--format=%(refname:short)", "refs/heads/agentdock/"],
+      { cwd: projectPath, encoding: "utf-8", stdio: "pipe" },
+    );
+  } catch {
+    return [];
+  }
+
+  const result: OrphanDir[] = [];
+  for (const line of raw.split("\n")) {
+    const branch = line.trim();
+    if (!branch) continue;
+    if (knownBranches.has(branch)) continue;
+    const sessionId = branch.startsWith("agentdock/")
+      ? branch.slice("agentdock/".length)
+      : branch;
+    result.push({ sessionId, worktreePath: "", reason: "orphan-branch", branch });
+  }
+  return result;
+}
+
+/**
+ * Delete a single `agentdock/*` branch. Refuses anything outside the
+ * agentdock prefix and validates the branch name first (block flag-style
+ * argument injection via `validateBranchName`).
+ */
+export async function removeOrphanBranch(
+  projectPath: string,
+  branch: string,
+): Promise<void> {
+  validateBranchName(branch);
+  if (!branch.startsWith("agentdock/")) {
+    throw new Error(`Refusing to delete non-agentdock branch: ${branch}`);
+  }
+  try {
+    await execFileAsync("git", ["branch", "-D", branch], {
+      cwd: projectPath,
+      encoding: "utf-8",
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to delete branch '${branch}': ${err instanceof Error ? err.message : "unknown error"}`,
+    );
   }
 }
