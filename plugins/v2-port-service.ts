@@ -215,9 +215,12 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
   const service: PortService = {
     async allocateSession(params): Promise<SessionPorts> {
-      const { sessionId, portKeys } = params;
+      const { sessionId, projectPath, portKeys } = params;
       if (disposed) throw new Error("v2PortService disposed");
-      const projectRoot = deps.getProjectRoot();
+      // The orchestrator passes the actual projectPath (the per-session
+      // project being opened, not the active cwd). Fall back to
+      // `getProjectRoot()` only when not provided.
+      const projectRoot = projectPath ?? deps.getProjectRoot();
 
       // 1. Create — daemon generates its own sessionId (UUID), returns fencingToken=1.
       const create = await postJson("/session/create", {
