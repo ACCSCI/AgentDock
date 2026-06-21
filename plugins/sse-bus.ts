@@ -31,6 +31,7 @@ export type EventName =
   | "port-released"
   | "session-created"
   | "session-renamed"
+  | "session-deleting"
   | "session-purged"
   | "resync-required"
   | "hello"

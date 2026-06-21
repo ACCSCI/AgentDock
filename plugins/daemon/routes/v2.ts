@@ -52,6 +52,8 @@ import {
 import { isPortAvailable, pickFreePort } from "../../port-allocator.js";
 import { zodErrorHandler } from "../middleware/error.js";
 import { gateClaimInRecovering } from "../../recovering-controller.js";
+import { lookupCurrentBranch } from "../../git-branch-lookup.js";
+import { sanitizeDisplayName } from "../../display-name.js";
 
 const SESSION_ID_RE = /^[a-zA-Z0-9-_]+$/;
 
@@ -184,8 +186,9 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
       const body = c.req.valid("json");
       const result = await ctx.mutex.runExclusive("state", () => {
         const sessionId = crypto.randomUUID();
-        const displayName =
-          body.displayName?.trim() || sessionId.slice(0, 8);
+        // §4.1 — displayName 最小消毒 (去控制字符 + 长度上限 + trim)
+        const sanitized = sanitizeDisplayName(body.displayName);
+        const displayName = sanitized || sessionId.slice(0, 8);
         ctx.stateV2.createSession({
           sessionId,
           projectRoot: body.projectRoot,
@@ -200,11 +203,9 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           fencingToken: ctx.stateV2.getOwner(sessionId)?.fencingToken ?? 1,
         };
       });
-      // P5: publish event
-      ctx.sseBus.publish("session-created", {
-        sessionId: result.sessionId,
-        displayName: body.displayName ?? result.sessionId.slice(0, 8),
-      });
+      // 注: §7.3 规定 session-created 事件在 /session/activate 成功后推
+      // (不是 /session/create 时). 此时 session 仍 creating, 监听端不
+      // 应当看见 session-created. 事件推送移至 /session/activate 末尾.
       return c.json({ success: true, ...result });
     },
   );
@@ -219,6 +220,19 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
           ctx.stateV2.activateSession(body.sessionId);
           ctx.walV2.persist(ctx.stateV2);
+        });
+        // §7.3 — session-created 在 activate 成功后推. branch 必须现查
+        // git (§4.1 派生字段不入库). projectRoot 已知, worktreePath
+        // 由 sessionId 派生.
+        const session = ctx.stateV2.getSession(body.sessionId);
+        let branch: string | null = null;
+        if (session) {
+          branch = await lookupCurrentBranch(session.projectRoot, body.sessionId);
+        }
+        ctx.sseBus.publish("session-created", {
+          sessionId: body.sessionId,
+          displayName: session?.displayName,
+          branch: branch ?? "",
         });
         return c.json({ success: true });
       } catch (err) {
@@ -235,12 +249,14 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
       try {
         await ctx.mutex.runExclusive("state", () => {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
-          ctx.stateV2.renameSession(body.sessionId, body.displayName);
+          // §4.1 — displayName 最小消毒
+          const sanitized = sanitizeDisplayName(body.displayName);
+          ctx.stateV2.renameSession(body.sessionId, sanitized);
           ctx.walV2.persist(ctx.stateV2);
         });
         ctx.sseBus.publish("session-renamed", {
           sessionId: body.sessionId,
-          newDisplayName: body.displayName,
+          newDisplayName: sanitizeDisplayName(body.displayName),
         });
         return c.json({ success: true });
       } catch (err) {
@@ -260,7 +276,10 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.beginDelete(body.sessionId, Date.now() + LEASE_TTL_MS);
           ctx.walV2.persist(ctx.stateV2);
         });
-        ctx.sseBus.publish("session-purged", { sessionId: body.sessionId });
+        // §7.3 — phase 1 推 session-deleting (进入 deleting), 不是
+        // session-purged. session-purged 仅在 phase 2 (/session/purge)
+        // 删三表项时推.
+        ctx.sseBus.publish("session-deleting", { sessionId: body.sessionId });
         return c.json({ success: true });
       } catch (err) {
         return mapError(c, err);
@@ -424,7 +443,11 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
               return r;
             }
             // Idempotent for same session — no probe needed
-            if (owner && owner.sessionId === body.sessionId) {
+            // §3.3 末段: 幂等免探活仅在 owner 连续 (Daemon 未重启) 时成立.
+            // RECOVERING 期 (Daemon 刚重启, 看护连续性已破) 即便同
+            // session 同端口也必须重新 bind 探活 — 崩溃窗口内 OS 层
+            // 该端口可能已被外部进程抢占, 免探活会误判仍归该 session.
+            if (owner && owner.sessionId === body.sessionId && !ctx.stateV2.isRecovering()) {
               ctx.walV2.persist(ctx.stateV2);
               return { port: requested, picked: false };
             }

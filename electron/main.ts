@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { eq } from "drizzle-orm";
+import { generateClientId } from "./main/client-id.js";
 import { DaemonManager } from "../plugins/daemon-manager.js";
 import { createDaemonClient, type DaemonHonoClient } from "./main/hono-client.js";
 import { IPC_CHANNELS, IPC_CHANNEL_COUNT } from "./shared/api-types.js";
@@ -74,8 +75,9 @@ function clearSessionStatuses(): void {
 // handlers throw. Renderer's first call should be db:init with a project path.
 let activeProjectPath: string | null = null;
 
-// Stable clientId, derived from cwd so re-launches from the same dir reuse it.
-const clientId = `client_${process.cwd().replace(/[^a-zA-Z0-9]/g, "_").slice(-20)}`;
+// §6 — clientId 进程级唯一 (hostname + pid + 启动时间戳 + 随机后缀).
+// 详见 electron/main/client-id.ts.
+const clientId = generateClientId();
 
 // Heartbeat: every 30 s. Daemon's HEARTBEAT_TIMEOUT_MS is 90 s, so
 // missing two heartbeats marks us stale and the daemon releases our
@@ -111,6 +113,33 @@ function startHeartbeatLoop(): void {
   }, HEARTBEAT_INTERVAL_MS);
   // Don't keep the event loop alive just for heartbeats during shutdown.
   if (typeof heartbeatTimer.unref === "function") heartbeatTimer.unref();
+}
+
+// §7 — v2 path 30s 全量 sync 循环 (兼 heartbeat). SSE 推送增量, /sync
+// 提供全量兜底 + 维持 daemon 端 client 活性 (HEARTBEAT_TIMEOUT 90s).
+// v2 路径不走 v1 /client/heartbeat, 因此**必须**有自己的周期调用.
+let v2SyncTimer: ReturnType<typeof setInterval> | null = null;
+function startV2SyncLoop(daemonPort: number): void {
+  if (v2SyncTimer) clearInterval(v2SyncTimer);
+  const tick = async (): Promise<void> => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
+      });
+      if (!res.ok) {
+        log.debug({ status: res.status }, "v2 /sync non-2xx");
+      }
+    } catch (err) {
+      // 网络错: 静默 — SSE 还在跑, 30s 后重试
+      log.debug({ err }, "v2 /sync failed");
+    }
+  };
+  v2SyncTimer = setInterval(() => void tick(), HEARTBEAT_INTERVAL_MS);
+  if (typeof v2SyncTimer.unref === "function") v2SyncTimer.unref();
+  // 立即跑一次, 不等 30s
+  void tick();
 }
 
 async function unregisterClientWithDaemon(): Promise<void> {
@@ -441,6 +470,11 @@ async function bootstrap() {
         },
       });
       sseConsumer.start();
+      // §7 — 30s 全量 sync 循环 (兼 heartbeat). v2 path 走 /sync, 兼
+      // 维持 daemon 端 client 活性 (否则 HEARTBEAT_TIMEOUT 90s 会把
+      // 我们的 session 整批释放). SSE 推送的是增量, /sync 提供 fallback
+      // 兜底 + 全量状态修正.
+      startV2SyncLoop(cachedDaemonPort);
       log.info({ port: cachedDaemonPort }, "AGENTDOCK_V2 enabled");
     } catch (err) {
       log.error({ err }, "v2 service / sse consumer init failed");
@@ -609,33 +643,46 @@ async function fullResyncAfterDisconnect(
         .filter((s) => s.status === "active" || s.status === "creating")
         .map((s) => s.sessionId),
     );
-    // 本地有但 daemon 没了 → 清本地 view
-    for (const [appSid, v2Sid] of Object.entries(internalAppToV2Ids(v2))) {
-      if (!daemonSids.has(v2Sid)) {
-        log.info({ appSid, v2Sid }, "§5.3 stale local session, clearing");
-        v2.completeDeletion(appSid).catch((err) => {
-          log.warn({ err, appSid }, "§5.3 clear stale session failed");
-        });
+    // §5.3 — 对每个本地 active/creating session 走 /claim 真正重注册
+    // (走 RECOVERING 闸门, daemon 端 expected 集合放行). v2PortService.
+    // listKnownSessions 暴露 app→v2 映射 + 创建时用的 portKeys.
+    const known = v2.listKnownSessions();
+    for (const ks of known) {
+      if (!daemonSids.has(ks.v2SessionId)) {
+        // daemon 端丢了 (e.g. daemon 重启后 WAL 还没 restore) — 主动重 claim
+        log.info(
+          { appSid: ks.appSessionId, v2Sid: ks.v2SessionId, portKeys: ks.portKeys },
+          "§5.3 re-claim session after disconnect",
+        );
+        for (const name of ks.portKeys) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${daemonPort}/claim`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: ks.v2SessionId,
+                fencingToken: ks.fencingToken,
+                name,
+              }),
+            });
+            if (!res.ok) {
+              log.warn(
+                { status: res.status, name, v2Sid: ks.v2SessionId },
+                "§5.3 re-claim failed (may be RECOVERING)",
+              );
+            }
+          } catch (err) {
+            log.warn({ err, name }, "§5.3 re-claim network failed");
+          }
+        }
       }
     }
-    // daemon 有但本地无 → 拉一次, 但无法重建(没有 portKeys), 仅记日志
-    // (真实情况 v2 总是先 /session/create 再 /claim, daemon 端有记录就
-    //  说明本 client 创建过; 这种情况极罕见, 留给下次交互重同步).
+    // 本地有但 daemon 也没记录 (未恢复的 WAL) → 等下一轮 sync 自动恢复
+    // 或 §5.2 闸门超时后走对账 (C1/C2/C3). 这里不主动 completeDeletion
+    // 以免误删.
   } catch (err) {
     log.warn({ err }, "§5.3 full resync failed");
   }
-}
-
-// 通过 service 的 token 状态推断 app→v2Sid 映射(v2 service 内部 closure,
-// 我们借用 completeDeletion 这个公开 API 来清 stale; 真正的 map 暴露
-// 给 v2 service 是 P9.6 backlog, 这里保守实现).
-function internalAppToV2Ids(_v: V2PortServiceHandle): Record<string, string> {
-  // v2 service 不直接暴露 appToV2Ids — 我们只能从 v2Service.getToken 推断
-  // "有 v2Sid" 集合. 真实断开重注册由 daemon RECOVERING 闸门 + SSE 增量
-  // 收敛保证 (§7.3), 本函数仅做 best-effort 清理.
-  // 返回空对象: 不主动调 completeDeletion, 让 SSE 事件 / sync 重注册自然收敛.
-  // 这样不会因为 app→v2Sid 错映射而误删.
-  return {} as Record<string, string>;
 }
 
 process.on("uncaughtException", (err) => {

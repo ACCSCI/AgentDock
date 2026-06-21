@@ -16,6 +16,9 @@ export const SPAWN_JITTER_MS = 500;
 /** §1.1 — Maximum number of follower's lock re-acquisition attempts. */
 export const FOLLOWER_RETRY_MAX = 3;
 
+/** §1.1 — Follower 重抢锁时的退避基值 (每轮 ×2, 封顶 LEADER_LOCK_TIMEOUT_MS). */
+export const FOLLOWER_BACKOFF_MS = 1_000;
+
 /** §5.2 — Soft floor for RECOVERING; can early-exit if all sessions re-reported. */
 export const RECOVERING_SOFT_MIN_MS = 2_000;
 

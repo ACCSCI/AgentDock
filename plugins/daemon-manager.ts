@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { DaemonClient } from "./daemon-client.js";
 import { readDaemonInfo, isProcessAlive, deleteDaemonInfo, writeDaemonInfo, DAEMON_STARTUP_TIMEOUT_MS, DAEMON_STARTUP_POLL_MS, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MAX_MS } from "./daemon-discovery.js";
 import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
+import { FOLLOWER_BACKOFF_MS, FOLLOWER_RETRY_MAX } from "./constants.js";
+import { log } from "./logger.js";
 
 // ============================================================
 // Types
@@ -40,6 +42,13 @@ export class DaemonManager {
   private client: DaemonClient | null = null;
   private child: ChildProcess | null = null;
   private baseDir: string;
+  /**
+   * Optional override for the daemon entry path. When set, the manager
+   * spawns this exact file instead of looking for `daemon.js` / `daemon.ts`
+   * next to this file. Phase 3 needs this because Electron main bundles
+   * to out/main/main.js where the original __dirname-relative lookup fails.
+   */
+  daemonEntry?: string;
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? path.join(os.homedir(), ".agentdock");
@@ -121,22 +130,53 @@ export class DaemonManager {
   }
 
   private async waitForLeaderDaemon(): Promise<DaemonManagerResult> {
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    // §1.1 — Follower 等待 Leader 写 daemon.json + TCP 探活成功.
+    // 超时后**不直接失败** — 退化为重新抢锁 (最多 FOLLOWER_RETRY_MAX 次),
+    // 每轮重抢前要重读 daemon.json + TCP 探活, 避免无谓争抢.
+    //
+    // 退避: 第 1 轮 0ms, 第 2 轮 FOLLOWER_BACKOFF_MS, 第 3 轮 2×, 封顶
+    // LEADER_LOCK_TIMEOUT_MS. 达到 FOLLOWER_RETRY_MAX 仍失败 → 抛错
+    // 由 UI 弹"启动 Daemon"模态.
+    let attempt = 0;
+    let backoffMs = 0;
 
-    while (Date.now() < deadline) {
-      const info = readDaemonInfo();
-      if (info && isProcessAlive(info.pid)) {
-        const tempClient = new DaemonClient(info.port);
-        if (await tempClient.health()) {
-          return { client: tempClient, started: false };
+    while (attempt <= FOLLOWER_RETRY_MAX) {
+      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        const info = readDaemonInfo();
+        if (info && isProcessAlive(info.pid)) {
+          const tempClient = new DaemonClient(info.port);
+          if (await tempClient.health()) {
+            return { client: tempClient, started: false };
+          }
         }
+        await sleep(STARTUP_POLL_MS);
       }
-      await sleep(STARTUP_POLL_MS);
+
+      // 本轮超时, 准备重抢.
+      attempt++;
+      if (attempt > FOLLOWER_RETRY_MAX) {
+        break;
+      }
+      log.warn(
+        { attempt, max: FOLLOWER_RETRY_MAX },
+        "Follower: leader daemon did not become ready — re-entering EnsureRunning",
+      );
+      // 退避 (从 0 起, 每轮 ×2, 封顶 LEADER_LOCK_TIMEOUT_MS)
+      backoffMs = backoffMs === 0
+        ? FOLLOWER_BACKOFF_MS
+        : Math.min(backoffMs * 2, LEADER_LOCK_TIMEOUT_MS);
+      await sleep(backoffMs);
+      // 重新进入 Leader 选举 — 顶层入口会再次走 Phase 1 (重读 daemon.json
+      // + TCP 探活), 然后 Phase 2 (抢锁). 这样:
+      //   - 如果其他实例在我们等待期间成功启动了 Daemon, 我们直接发现
+      //   - 如果仍没有, 我们有机会自己成为 Leader
+      return this.runLeaderElection();
     }
 
-    // Leader timed out — try to become leader ourselves
+    // 重抢锁次数耗尽 — 弹人工模态
     throw new Error(
-      `Leader daemon did not become ready within ${STARTUP_TIMEOUT_MS}ms`,
+      `Follower: leader daemon did not become ready after ${FOLLOWER_RETRY_MAX + 1} attempts of ${STARTUP_TIMEOUT_MS}ms each`,
     );
   }
 
@@ -178,39 +218,97 @@ export class DaemonManager {
   }
 
   private async startDaemon(port: number): Promise<void> {
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const daemonPath = path.join(__dirname, "daemon.js");
-    const daemonPathTs = path.join(__dirname, "daemon.ts");
-
+    // Phase 3: support a custom daemonEntry (Electron main sets this to the
+    // project root + plugins/daemon.ts, since electron-vite bundles main to
+    // out/main/main.js and the original __dirname-relative lookup fails).
+    //
+    // Also: when invoked from Electron's main process, process.execPath is
+    // electron.exe — that can't run a plain TS file with --import tsx. We
+    // explicitly prefer `bun run` (TS-native, no loader dance) when
+    // available, falling back to `node --import tsx` otherwise.
+    const { daemonEntry } = this;
     let cmd: string;
     let args: string[];
     const { existsSync } = await import("node:fs");
-    if (existsSync(daemonPath)) {
-      cmd = process.execPath;
-      args = [daemonPath];
-    } else if (existsSync(daemonPathTs)) {
-      cmd = process.execPath;
-      args = ["--import", "tsx", daemonPathTs];
+
+    // Helper: pick the best runtime for a .ts / .js entry.
+    const pickRuntime = (entry: string): { cmd: string; args: string[] } => {
+      const isTs = entry.endsWith(".ts");
+      // Prefer bun — runs TS natively, no --import needed.
+      if (process.env.BUN_INSTALL || process.env.AGENTDOCK_USE_BUN) {
+        return { cmd: "bun", args: ["run", entry] };
+      }
+      // Fallback: node with tsx loader for .ts, plain for .js.
+      return isTs
+        ? { cmd: process.execPath, args: ["--import", "tsx", entry] }
+        : { cmd: process.execPath, args: [entry] };
+    };
+
+    if (daemonEntry) {
+      // Explicit override — caller knows where the daemon entry lives.
+      if (!existsSync(daemonEntry)) {
+        throw new Error(`Daemon entry point not found at: ${daemonEntry}`);
+      }
+      const picked = pickRuntime(daemonEntry);
+      cmd = picked.cmd;
+      args = picked.args;
     } else {
-      throw new Error(`Daemon entry point not found: ${daemonPath} or ${daemonPathTs}`);
+      // Default: same dir as this DaemonManager file (plugins/).
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const daemonPath = path.join(__dirname, "daemon.js");
+      const daemonPathTs = path.join(__dirname, "daemon.ts");
+      if (existsSync(daemonPath)) {
+        const picked = pickRuntime(daemonPath);
+        cmd = picked.cmd;
+        args = picked.args;
+      } else if (existsSync(daemonPathTs)) {
+        const picked = pickRuntime(daemonPathTs);
+        cmd = picked.cmd;
+        args = picked.args;
+      } else {
+        throw new Error(`Daemon entry point not found: ${daemonPath} or ${daemonPathTs}`);
+      }
     }
 
     const env = { ...process.env, AGENTDOCK_DAEMON_PORT: String(port) };
 
+    // Phase 3: when running from Electron, detached:true + stdio:"ignore"
+    // can cause the child to be killed by the parent process tree cleanup
+    // (Chromium's child tracking is aggressive on Windows). Detect
+    // AGENTDOCK_ELECTRON=1 and spawn without detached/stdio:ignore so the
+    // daemon stays alive and we can see its stderr if it crashes.
+    const isElectron = process.env.AGENTDOCK_ELECTRON === "1";
+
     this.child = spawn(cmd, args, {
-      detached: true,
-      stdio: "ignore",
+      detached: !isElectron,
+      stdio: isElectron ? ["ignore", "pipe", "pipe"] : "ignore",
       env,
     });
 
-    this.child.unref();
+    if (!isElectron) this.child.unref();
+
+    if (isElectron && this.child.stdout) {
+      this.child.stdout.on("data", (d: Buffer) => {
+        process.stderr.write(`[daemon] ${d}`);
+      });
+    }
+    if (isElectron && this.child.stderr) {
+      this.child.stderr.on("data", (d: Buffer) => {
+        process.stderr.write(`[daemon:err] ${d}`);
+      });
+    }
 
     this.child.on("error", (err) => {
-      console.error("[daemon-manager] Failed to start daemon:", err.message);
+      // Use log (pino JSON) instead of console.error to avoid the
+      // EPIPE-during-Electron-shutdown trap.
+      process.stderr.write(`[daemon-manager] spawn error: ${err.message}\n`);
       this.child = null;
     });
 
-    this.child.on("exit", () => {
+    this.child.on("exit", (code) => {
+      if (isElectron) {
+        process.stderr.write(`[daemon-manager] daemon exited with code ${code}\n`);
+      }
       this.child = null;
     });
   }

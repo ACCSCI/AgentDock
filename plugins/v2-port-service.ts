@@ -63,6 +63,18 @@ export interface V2PortServiceHandle {
   reassign(appSessionId: string): Promise<SessionPorts>;
   /** v2-only: phase 2 of delete — drop 3-table entries. */
   completeDeletion(appSessionId: string): Promise<void>;
+  /**
+   * §5.3 — 列出本地已知的所有 active/creating sessions (app→v2 映射).
+   * 用于断线重连时对每个 session 主动 /claim 重注册, 走 daemon
+   * RECOVERING 闸门重建 registry. 纯只读快照, 不触发任何 daemon 调用.
+   */
+  listKnownSessions(): Array<{
+    appSessionId: string;
+    v2SessionId: string;
+    fencingToken: number;
+    status: "creating" | "active" | "deleting";
+    portKeys: string[];
+  }>;
   /** Stop the lease timer + abort in-flight renewals. Call on app quit. */
   dispose(): void;
 }
@@ -95,6 +107,8 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
   const tokens = new Map<string, number>();
   const statuses = new Map<string, Phase>();
   const renewals = new Map<string, RenewalEntry>();
+  /** §5.3 — 创建时的 portKeys, 用于断线重连时按相同 keys 重 claim. */
+  const sessionPortKeys = new Map<string, string[]>();
 
   let timer: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
@@ -210,6 +224,7 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
     appToV2Ids.delete(appSid);
     tokens.delete(appSid);
     statuses.delete(appSid);
+    sessionPortKeys.delete(appSid);
     stopLeaseRenewal(appSid);
   }
 
@@ -249,6 +264,8 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       try {
         // 2. Claim each port key.
         const keys = portKeys ?? PORT_KEYS_DEFAULT;
+        // §5.3 — 记下创建时用的 portKeys, 断线重连时按相同 keys 重建
+        sessionPortKeys.set(sessionId, [...keys]);
         const ports: SessionPorts = {};
         for (const name of keys) {
           const claim = await postJson("/claim", {
@@ -366,6 +383,39 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       return body.ports;
     },
     completeDeletion: service.completeDeletion!,
+    // §5.3 — 列出本地已知的所有 active/creating sessions, 给断线重连
+    // 触发器用. 只读快照, 不调任何 daemon.
+    listKnownSessions(): Array<{
+      appSessionId: string;
+      v2SessionId: string;
+      fencingToken: number;
+      status: "creating" | "active" | "deleting";
+      portKeys: string[];
+    }> {
+      const out: Array<{
+        appSessionId: string;
+        v2SessionId: string;
+        fencingToken: number;
+        status: "creating" | "active" | "deleting";
+        portKeys: string[];
+      }> = [];
+      for (const [appSid, v2Sid] of appToV2Ids.entries()) {
+        const token = tokens.get(appSid);
+        const status = statuses.get(appSid);
+        const keys = sessionPortKeys.get(appSid) ?? [...PORT_KEYS_DEFAULT];
+        if (token === undefined || !status) continue;
+        // 过滤 deleting — 已在 phase 1, 不需要重 claim
+        if (status === "deleting") continue;
+        out.push({
+          appSessionId: appSid,
+          v2SessionId: v2Sid,
+          fencingToken: token,
+          status,
+          portKeys: keys,
+        });
+      }
+      return out;
+    },
     dispose() {
       disposed = true;
       if (timer) {

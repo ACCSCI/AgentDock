@@ -16,7 +16,8 @@
  * The class doesn't own route logic — that's all in plugins/daemon/routes/*.ts.
  */
 import { serve, type ServerType } from "@hono/node-server";
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { writeDaemonInfo, deleteDaemonInfo } from "../daemon-discovery.js";
 import { log } from "../logger.js";
@@ -159,6 +160,80 @@ export class AgentDockDaemon {
               log.warn({ err, projectRoot }, "scanWorktreeDirs failed");
               return [];
             }
+          },
+          // §4.3 C2 接管续删 — lease 死的 deleting session 由 reconciler
+          // 续跑物理清理 + 三表 purge. 步骤:
+          //   1. git worktree remove --force worktreePath (幂等)
+          //   2. git worktree prune (清 .git/worktrees 悬挂登记)
+          //   3. fs.rm 重试兜底 (Windows 上 §4.2 句柄轮询)
+          //   4. mutex 内 /session/purge 删三表项
+          // 整段幂等可重试 (§4.2 delete 两段) — 旧 owner 复活或本轮重跑
+          // 都不会破坏最终一致.
+          takeOverDelete: async (
+            sessionId: string,
+            _projectRoot: string,
+            worktreePath: string,
+          ): Promise<void> => {
+            log.info({ sessionId, worktreePath }, "C2 takeover-delete: physical cleanup");
+            // 1. git worktree remove --force (幂等: 不存在不报错)
+            try {
+              await execFile("git", [
+                "-C",
+                worktreePath,
+                "worktree",
+                "remove",
+                "--force",
+                worktreePath,
+              ]);
+            } catch (err) {
+              log.debug({ err, worktreePath }, "git worktree remove failed (may be already gone)");
+            }
+            // 2. 从父 repo 跑 git worktree prune 清悬挂登记
+            const projectRoot = path.dirname(path.dirname(path.dirname(worktreePath)));
+            try {
+              await execFile("git", ["-C", projectRoot, "worktree", "prune"]);
+            } catch (err) {
+              log.debug({ err, projectRoot }, "git worktree prune failed");
+            }
+            // 3. fs.rm 兜底
+            try {
+              if (existsSync(worktreePath)) {
+                rmSync(worktreePath, { recursive: true, force: true });
+              }
+            } catch (err) {
+              log.warn({ err, worktreePath }, "fs.rm fallback failed");
+            }
+            // 4. 三表 purge (走 mutex 串行). owner 可能已不存在
+            // (C2 接管时原 owner 已死), 用 0/0 token 让 purgeSession 走
+            // 幂等分支 (status==missing → 静默 OK).
+            await this.ctx.mutex.runExclusive("state", () => {
+              try {
+                // 跳过 fencingToken 校验 (原 owner 已死) — 直接调
+                // purgeSession 内部 status 判断, 不存在则幂等 OK.
+                this.ctx.stateV2.purgeSession(sessionId);
+                this.ctx.walV2.persist(this.ctx.stateV2);
+              } catch (err) {
+                log.warn({ err, sessionId }, "C2 purgeSession failed");
+              }
+            });
+            // 5. SSE 通知监听端
+            this.ctx.sseBus.publish("session-purged", { sessionId });
+          },
+          // §4.3 C1 回滚 — lease 死的 creating session 未过提交点
+          // (键值不匹配 / 缺端口键) 时, reconciler 回滚删除三表项.
+          // 不做 worktree 清理 (creating 状态本就没建好 worktree, 或
+          // worktree 物理残留由 §4.3 C4 在下一轮对账中处理).
+          rollbackCreate: async (sessionId: string): Promise<void> => {
+            log.info({ sessionId }, "C1 rollback: purge half-created session");
+            await this.ctx.mutex.runExclusive("state", () => {
+              try {
+                this.ctx.stateV2.purgeSession(sessionId);
+                this.ctx.walV2.persist(this.ctx.stateV2);
+              } catch (err) {
+                log.warn({ err, sessionId }, "C1 rollback purgeSession failed");
+              }
+            });
+            this.ctx.sseBus.publish("session-purged", { sessionId });
           },
         });
         this.reconcilerTimer = setInterval(() => {
