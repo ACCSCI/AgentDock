@@ -208,6 +208,9 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
           fencingToken: ctx.stateV2.getOwner(sessionId)?.fencingToken ?? 1,
         };
       });
+      // §5.2 — dynamically add newly created sessionId to the expected set
+      // so the RECOVERING gate allows subsequent recovery claims for it.
+      ctx.expectedSessionIds?.add(result.sessionId);
       // 注: §7.3 规定 session-created 事件在 /session/activate 成功后推
       // (不是 /session/create 时). 此时 session 仍 creating, 监听端不
       // 应当看见 session-created. 事件推送移至 /session/activate 末尾.
@@ -220,6 +223,9 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
     zValidator("json", SessionActivateSchema, zodErrorHandler),
     async (c) => {
       const body = c.req.valid("json");
+      // §5.2 — activate signals the session reached commit point;
+      // record it so the RECOVERING gate allows subsequent recovery claims.
+      ctx.recovering?.recordReport(body.sessionId);
       try {
         await ctx.mutex.runExclusive("state", () => {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
@@ -316,6 +322,9 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
     zValidator("json", SessionHeartbeatSchema, zodErrorHandler),
     async (c) => {
       const body = c.req.valid("json");
+      // §5.2 — heartbeat signals the session is alive during RECOVERING;
+      // record it so the gate allows subsequent recovery claims.
+      ctx.recovering?.recordReport(body.sessionId);
       try {
         await ctx.mutex.runExclusive("state", () => {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
@@ -400,6 +409,9 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
     zValidator("json", ClaimSchema, zodErrorHandler),
     async (c) => {
       const body = c.req.valid("json");
+      // §5.2 — claim signals the session is alive during RECOVERING;
+      // record it so subsequent recovery claims for this sessionId pass.
+      ctx.recovering?.recordReport(body.sessionId);
       try {
         const result = await ctx.mutex.runExclusive("state", async () => {
           // §5.2 — RECOVERING 期闸门: 仅放行 expected 的恢复性 claim.

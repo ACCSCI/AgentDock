@@ -131,7 +131,7 @@ export interface DaemonContext {
    * §5.2 — RECOVERING 期的 expected sessionId 集合 (WAL 快照 + 本轮已上报).
    * 由 server.ts 注入. 用于 gateClaimInRecovering 判定.
    */
-  expectedSessionIds?: ReadonlySet<string>;
+  expectedSessionIds?: Set<string>;
   /**
    * §5.2 — RECOVERING 本轮已 recordReport 的 sessionIds. v2 routes 调用
    * recordReport 后追加. 用于"同一 session 第二次及以后重复上报"放行.
