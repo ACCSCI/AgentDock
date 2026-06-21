@@ -433,6 +433,11 @@ function sleep(ms: number): Promise<void> {
  *   - 不依赖任何 in-memory allocatedPorts 数组 — 端口归属由 DaemonStateV2
  *     的 ports Map 单一真相源承担
  *
+ * P1 修: pickFreePort 返回 PickFreePortResult ({ port, closeServer }), 不是
+ * number. 这里解构 { port } 拿到端口号, 并把每个 probe socket 的 closeServer
+ * 攒到 closeAll 里, 循环结束后统一释放 — 保持 §3.3 抢占窗口语义 (all bind
+ * sockets released together once all picks done, vs 边 pick 边 close).
+ *
  * @param count 要分配的端口数
  * @param exclude 已 RESERVED 或外部占用的端口, 必须排除
  */
@@ -444,10 +449,21 @@ export async function allocateNFreePorts(
   if (count <= 0) return [];
   const result: number[] = [];
   const excluded = new Set(exclude);
-  for (let i = 0; i < count; i++) {
-    const port = await pickFreePort([...excluded], maxAttempts);
-    result.push(port);
-    excluded.add(port);
+  const closeAll: Array<() => Promise<void>> = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const { port, closeServer } = await pickFreePort(
+        [...excluded],
+        maxAttempts,
+      );
+      result.push(port);
+      excluded.add(port);
+      closeAll.push(closeServer);
+    }
+    return result;
+  } finally {
+    // 异常路径也保证 probe sockets 不泄漏 (Node 进程退出时 net.Server GC
+    // 会自动关, 但 setImmediate 内的 close callback 可能跑不完).
+    await Promise.all(closeAll.map((fn) => fn().catch(() => {})));
   }
-  return result;
 }

@@ -42,6 +42,8 @@ export interface BootstrapDeps {
   getDaemonPort: () => number;
   /** P9 SSE consumer (null when AGENTDOCK_V2 is off). */
   getSseConsumer: () => SseConsumer | null;
+  /** P0+ (二审修): 返回 sseConsumer 维护的真实 lastSeq. 用于 /sync body. */
+  getSseLastSeq: () => number;
   /** P9: returns true when AGENTDOCK_V2=1 is set, so the renderer can
    *  route session mutations through the v2 channel set. */
   isV2Enabled: () => boolean;
@@ -123,6 +125,10 @@ export function registerBootstrap(deps: BootstrapDeps): void {
   // after reconnect or daemon restart. The snapshotSeq field tells the
   // client which SSE events have been "absorbed" into this snapshot.
   // The renderer then applies only SSE events with seq > snapshotSeq.
+  //
+  // P0+ (二审修): lastSeq 改为从 sseConsumer 真实水位读取, 避免 daemon 端
+  // replaySince(0) 在重启后回放大量历史事件. v1 模式下 SSE 未启 → 返 0
+  // (语义正确, daemon 端走 v1 sync 路径, 不会处理 v2 lastSeq).
   ipcMain.handle(IPC_CHANNELS["daemon:sync"], async () => {
     const port = deps.getDaemonPort();
     if (!port) return { success: false, error: "no daemon" };
@@ -130,7 +136,11 @@ export function registerBootstrap(deps: BootstrapDeps): void {
       const res = await fetch(`http://127.0.0.1:${port}/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: deps.getClientId(), pid: 0, lastSeq: 0 }),
+        body: JSON.stringify({
+          clientId: deps.getClientId(),
+          pid: 0,
+          lastSeq: deps.getSseLastSeq(),
+        }),
       });
       if (!res.ok) {
         return { success: false, error: `daemon returned ${res.status}` };

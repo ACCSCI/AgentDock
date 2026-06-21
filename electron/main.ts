@@ -118,15 +118,26 @@ function startHeartbeatLoop(): void {
 // §7 — v2 path 30s 全量 sync 循环 (兼 heartbeat). SSE 推送增量, /sync
 // 提供全量兜底 + 维持 daemon 端 client 活性 (HEARTBEAT_TIMEOUT 90s).
 // v2 路径不走 v1 /client/heartbeat, 因此**必须**有自己的周期调用.
+//
+// P0+ (二审修): lastSeq 改为从 sseConsumer.getLastSeq() 读取真实水位,
+// 避免 daemon 端 replaySince(0) 在重启后回放大量历史事件。
+// 用 accessor 函数而非快照值, 让 SSE 重连 resetSeq() 后下一 tick 自动生效.
 let v2SyncTimer: ReturnType<typeof setInterval> | null = null;
-function startV2SyncLoop(daemonPort: number): void {
+function startV2SyncLoop(
+  daemonPort: number,
+  getLastSeq: () => number,
+): void {
   if (v2SyncTimer) clearInterval(v2SyncTimer);
   const tick = async (): Promise<void> => {
     try {
       const res = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
+        body: JSON.stringify({
+          clientId,
+          pid: process.pid,
+          lastSeq: getLastSeq(),
+        }),
       });
       if (!res.ok) {
         log.debug({ status: res.status }, "v2 /sync non-2xx");
@@ -434,6 +445,7 @@ async function bootstrap() {
     countHandlers,
     getV2PortService: () => v2PortService,
     getSseConsumer: () => sseConsumer,
+    getSseLastSeq: () => sseConsumer?.getLastSeq() ?? 0,
     isV2Enabled: () => process.env.AGENTDOCK_V2 === "1",
   };
 
@@ -473,8 +485,8 @@ async function bootstrap() {
       // §7 — 30s 全量 sync 循环 (兼 heartbeat). v2 path 走 /sync, 兼
       // 维持 daemon 端 client 活性 (否则 HEARTBEAT_TIMEOUT 90s 会把
       // 我们的 session 整批释放). SSE 推送的是增量, /sync 提供 fallback
-      // 兜底 + 全量状态修正.
-      startV2SyncLoop(cachedDaemonPort);
+      // 兜底 + 全量状态修正. lastSeq 从 sseConsumer.getLastSeq() 读真实水位.
+      startV2SyncLoop(cachedDaemonPort, () => sseConsumer?.getLastSeq() ?? 0);
       log.info({ port: cachedDaemonPort }, "AGENTDOCK_V2 enabled");
     } catch (err) {
       log.error({ err }, "v2 service / sse consumer init failed");
@@ -626,10 +638,17 @@ async function fullResyncAfterDisconnect(
 ): Promise<void> {
   if (!v2) return; // v1 模式或未启用 — 留给 v1 sync/declare 自己处理
   try {
+    // P0+ — lastSeq 用 sseConsumer 真实水位, 避免 daemon replaySince(0)
+    // 在长会话后回放数百条历史事件. SSE 重连时 resetSeq() 自动归零,
+    // 下次断线重连会自然 fall back 到完整重同步.
     const syncRes = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
+      body: JSON.stringify({
+        clientId,
+        pid: process.pid,
+        lastSeq: sseConsumer?.getLastSeq() ?? 0,
+      }),
     });
     if (!syncRes.ok) {
       log.warn({ status: syncRes.status }, "§5.3 resync /sync non-OK");

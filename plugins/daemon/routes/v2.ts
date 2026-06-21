@@ -54,6 +54,7 @@ import { zodErrorHandler } from "../middleware/error.js";
 import { gateClaimInRecovering } from "../../recovering-controller.js";
 import { lookupCurrentBranch } from "../../git-branch-lookup.js";
 import { sanitizeDisplayName } from "../../display-name.js";
+import { checkAllInvariants } from "../../invariants.js";
 
 const SESSION_ID_RE = /^[a-zA-Z0-9-_]+$/;
 
@@ -710,7 +711,7 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
         v2Owners: v2.owners,
         v2Ports: v2.ports,
         metrics: ctx.metrics,
-        lastSeq: ctx.lastSeq,
+        lastSeq: ctx.sseBus.lastSeq(),
         startedAt: ctx.startedAt,
         state: {
           sessions: v1Sessions,
@@ -754,11 +755,44 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
       v2Owners: {},
       v2Ports: {},
       metrics: ctx.metrics,
-      lastSeq: ctx.lastSeq,
+      lastSeq: ctx.sseBus.lastSeq(),
       startedAt: ctx.startedAt,
       state: v1Debug,
       stats: ctx.state.getStats(),
     });
+  });
+
+  // P2+ (二审修) — v2 不变式校验端点. v1 /debug/invariants 仍存在 (debug.ts),
+  // 不同路径避免 Hono 路由覆盖 (v2 registerDebugState 在 v1 registerDebug 之前).
+  // 路由名 /debug/invariants-v2; E2E helper 调这个端点跑 §11.3 的 8 条断言.
+  // 失败返 503 + 详细 detail, 正常情况返 200 + ok=true + 每条 detail.
+  app.get("/debug/invariants-v2", (c) => {
+    // §3.5/§11.3 #1 — 运行时监听集合从 v2 已分配的端口派生
+    // (RESERVED 必有 owner; 监听端口是 OS 视角, 在 probe-time 收集).
+    // 这里用所有 v2 allocated ports 作为 listener 集合上界:
+    //   - 真监听 ⊆ allocated, 所以 allocated ⊇ listener 时 #1 一定过
+    //   - 真监听 ⊆ RESERVED, RESERVED ⊆ allocated, 所以仍成立
+    // 真正的运行时监听由 E2E 用 probeRuntime 收集, 这里用 allocated 给 daemon
+    // 端自检一个保守起点.
+    const listeners = new Set<number>(
+      ctx.stateV2.listAllPorts().map((p) => p.port),
+    );
+    const composite = checkAllInvariants(ctx.stateV2, listeners);
+    if (!composite.ok) {
+      return c.json(
+        {
+          success: false,
+          error: {
+            code: "INVARIANT_VIOLATION",
+            message: `${composite.failed.length} invariant(s) violated`,
+            failed: composite.failed,
+          },
+          results: composite.results,
+        },
+        503,
+      );
+    }
+    return c.json({ success: true, ...composite });
   });
 }
 
