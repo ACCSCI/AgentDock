@@ -18,10 +18,10 @@
 | **P13** | **真实 Electron UI E2E (Playwright, 8 specs pass)** | `e2e/daemon-status-and-fencing.spec.ts`, `e2e/daemon-v2-architecture.spec.ts` | **8/8** |
 | **P14** | 真实项目 E2E (D:\Projects\test\env-isolation-demo) | `plugins/__tests__/real-project-e2e.ts` | ✅ 11/11 |
 | **P15** | **DaemonStatusBar + IPC 桥接 (3 channels)** | `src/components/DaemonStatusBar.tsx`, `src/lib/testids.ts`, `electron/main/bootstrap.ts`, `electron/preload.ts` | (E2E 验证) |
-| **P9** | **AgentDock 客户端切到 v2 daemon API (UI 点击 → 三表闭环)** | `plugins/v2-port-service.ts`, `electron/main/v2-sse-consumer.ts`, `electron/main/ipc/v1-port-service.ts`, `electron/main/ipc/sessions.ts` | **15** (7 + 8) |
+| **P9** | **AgentDock 客户端切到 v2 daemon API (UI 点击 → 三表闭环)** | `plugins/v2-port-service.ts`, `electron/main/v2-sse-consumer.ts`, `electron/main/ipc/v1-port-service.ts`, `electron/main/ipc/sessions.ts` | **15** 单测 + **1** E2E (29.7s) |
 
 测试统计 (2026-06-21 末次跑): **713 unit tests, 705 passing, 8 baseline pre-existing failures** (与新架构无关 — RECOVERING 状态机 + 端口冲突防御 + sse-integration 跨测试状态泄漏)。
-E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
+E2E (Playwright 真实 Electron UI): **9 passed (1.2m 总耗时)** — 含 P9 v2 路径 UI → 三表闭环（AGENTDOCK_V2=1）。
 
 ## E2E 覆盖 (新架构 §11.4 验收剧本)
 
@@ -29,6 +29,7 @@ E2E (Playwright 真实 Electron UI): **8 passed (33s 总耗时)**。
 | --- | --- |
 | `daemon-status-and-fencing.spec.ts` | DaemonStatusBar UI 渲染 + daemon:health IPC v2 §2 健康形状 + daemon:debugState IPC v2 §4.1 三表 |
 | `daemon-v2-architecture.spec.ts` | 完整 v2 lifecycle: /health → /session/create → /activate → /claim ×3 → /takeover → STALE_OWNER 409 → /delete → /purge + 端口冲突重分配 |
+| `p9-v2-lifecycle.spec.ts` (**P9 新增**) | AGENTDOCK_V2=1 下真实 UI 点击 new session → daemon `/debug/state` 中 v2Sessions/v2Owners/v2Ports 三表 populated，status=active，FRONTEND_PORT 等键齐全（29.7s） |
 | `session-ui.spec.ts` (既有, 回归) | 真实点击 open project → create session → delete session → exit clean (确认 DaemonStatusBar 插入不影响原流程) |
 
 ## 暂未完成 (scope-deferred)
