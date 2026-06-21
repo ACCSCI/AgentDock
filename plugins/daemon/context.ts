@@ -27,11 +27,18 @@ import {
   createFaultInjectorState,
   type FaultInjectorState,
 } from "../fault-injector.js";
+// §11.5 C4 — re-exported from plugins/constants.ts so all callers resolve to
+// the SAME single source of truth. Previously context.ts re-declared
+// HEARTBEAT_PERSIST_INTERVAL_MS as 30_000, causing 6× divergence from the
+// canonical 5_000 in constants.ts depending on import path.
+import {
+  HEARTBEAT_PERSIST_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
+} from "../constants.js";
 
 /** Tunables — same constants the old AgentDockDaemon used. */
-export const HEARTBEAT_TIMEOUT_MS = 90_000;
+export { HEARTBEAT_PERSIST_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS };
 export const HEARTBEAT_CHECK_INTERVAL_MS = 30_000;
-export const HEARTBEAT_PERSIST_INTERVAL_MS = 30_000;
 
 export interface DaemonOptions {
   /** Port to listen on. Default: 0 (OS-assigned random port). */
