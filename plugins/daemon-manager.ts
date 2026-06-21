@@ -3,9 +3,17 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { DaemonClient } from "./daemon-client.js";
-import { readDaemonInfo, isProcessAlive, deleteDaemonInfo, writeDaemonInfo, DAEMON_STARTUP_TIMEOUT_MS, DAEMON_STARTUP_POLL_MS, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MAX_MS } from "./daemon-discovery.js";
+import {
+  readDaemonInfo,
+  isProcessAlive,
+  deleteDaemonInfo,
+  writeDaemonInfo,
+  DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_STARTUP_POLL_MS,
+  FOLLOWER_STARTUP_TIMEOUT_MS,
+} from "./daemon-discovery.js";
 import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
-import { FOLLOWER_BACKOFF_MS, FOLLOWER_RETRY_MAX } from "./constants.js";
+import { FOLLOWER_BACKOFF_MS, FOLLOWER_RETRY_MAX, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MS } from "./constants.js";
 import { log } from "./logger.js";
 
 // ============================================================
@@ -21,7 +29,18 @@ export interface DaemonManagerResult {
 // DaemonManager — discover / elect / start / connect
 // ============================================================
 
-const STARTUP_TIMEOUT_MS = DAEMON_STARTUP_TIMEOUT_MS;
+/**
+ * Leader-side: timeout for our OWN daemon (process spawn + listen + write
+ * daemon.json). New architecture §1.1 — bound to DAEMON_STARTUP_TIMEOUT_MS.
+ */
+const SELF_STARTUP_TIMEOUT_MS = DAEMON_STARTUP_TIMEOUT_MS;
+/**
+ * Follower-side: timeout for waiting on the leader to publish daemon.json.
+ * New architecture §1.1 — must exceed LEADER_LOCK_TIMEOUT_MS, otherwise a
+ * slow leader (spawn + listen + atomic-rename) is abandoned while it is
+ * still finishing. Bound to FOLLOWER_STARTUP_TIMEOUT_MS (= 15000ms).
+ */
+const FOLLOWER_WAIT_MS = FOLLOWER_STARTUP_TIMEOUT_MS;
 const STARTUP_POLL_MS = DAEMON_STARTUP_POLL_MS;
 
 /**
@@ -141,7 +160,7 @@ export class DaemonManager {
     let backoffMs = 0;
 
     while (attempt <= FOLLOWER_RETRY_MAX) {
-      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+      const deadline = Date.now() + FOLLOWER_WAIT_MS;
       while (Date.now() < deadline) {
         const info = readDaemonInfo();
         if (info && isProcessAlive(info.pid)) {
@@ -176,7 +195,7 @@ export class DaemonManager {
 
     // 重抢锁次数耗尽 — 弹人工模态
     throw new Error(
-      `Follower: leader daemon did not become ready after ${FOLLOWER_RETRY_MAX + 1} attempts of ${STARTUP_TIMEOUT_MS}ms each`,
+      `Follower: leader daemon did not become ready after ${FOLLOWER_RETRY_MAX + 1} attempts of ${FOLLOWER_WAIT_MS}ms each`,
     );
   }
 
@@ -185,7 +204,7 @@ export class DaemonManager {
   ): Promise<DaemonManagerResult> {
     // Random jitter to reduce thundering herd if multiple instances
     // somehow pass the lock simultaneously
-    const jitter = Math.random() * SPAWN_JITTER_MAX_MS;
+    const jitter = Math.random() * SPAWN_JITTER_MS;
     await sleep(jitter);
 
     // Re-check: daemon may have been started between election and now
@@ -314,7 +333,7 @@ export class DaemonManager {
   }
 
   private async waitForReady(): Promise<void> {
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    const deadline = Date.now() + SELF_STARTUP_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
       try {
@@ -334,7 +353,7 @@ export class DaemonManager {
     }
 
     throw new Error(
-      `Daemon did not start within ${STARTUP_TIMEOUT_MS}ms`,
+      `Daemon did not start within ${SELF_STARTUP_TIMEOUT_MS}ms`,
     );
   }
 }

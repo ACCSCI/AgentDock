@@ -34,11 +34,13 @@ import {
 import {
   HEARTBEAT_PERSIST_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
+  SYNC_INTERVAL_MS,
 } from "../constants.js";
 
 /** Tunables — same constants the old AgentDockDaemon used. */
 export { HEARTBEAT_PERSIST_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS };
-export const HEARTBEAT_CHECK_INTERVAL_MS = 30_000;
+/** §7 — Heartbeat check interval; equal to SYNC_INTERVAL_MS (single source of truth). */
+export const HEARTBEAT_CHECK_INTERVAL_MS = SYNC_INTERVAL_MS;
 
 export interface DaemonOptions {
   /** Port to listen on. Default: 0 (OS-assigned random port). */
@@ -234,7 +236,7 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
  * **跳过本轮 heartbeat 超时判定**, 给一个完整 SYNC_INTERVAL 宽限窗口
  * 让冻结的 client 重连上报, 之后再恢复正常判定.
  */
-const SUSPEND_GRACE_THRESHOLD_MS = 2 * 30_000; // 2 × SYNC_INTERVAL = 60s
+const SUSPEND_GRACE_THRESHOLD_MS = 2 * SYNC_INTERVAL_MS; // 60s
 let lastTickAt = Date.now();
 
 export function detectSuspendAndMaybeSkip(): boolean {
