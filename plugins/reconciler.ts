@@ -35,7 +35,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { log } from "./logger.js";
 import {
@@ -45,7 +45,11 @@ import {
 } from "./constants.js";
 import type { DaemonStateV2 } from "./daemon-state-v2.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile) as (
+  cmd: string,
+  args: readonly string[],
+  opts: { cwd?: string },
+) => Promise<{ stdout: string; stderr: string }>;
 
 // ---------------------------------------------------------------------------
 // 残缺态分类
@@ -147,8 +151,10 @@ export interface Reconciler {
 export function createReconciler(deps: ReconcileDeps): Reconciler {
   const exists = deps.existsSync ?? existsSync;
   const read = deps.readFileSync ?? ((p: string) => readFileSync(p, "utf-8"));
-  const execImpl = deps.execImpl ?? defaultExec;
   const now = deps.now ?? (() => Date.now());
+  // 注: deps.execImpl 字段保留作 forward-compat 注入点, 但 §11.5 H5 后
+  // C5 路径不再走它 — 直接用 child_process.execFile 防止命令注入.
+  void deps.execImpl;
   let readySince: number | null = null;
 
   function isInGraceWindow(): boolean {
@@ -387,7 +393,11 @@ async function dispatchAction(action: ReconcileAction, deps: ReconcileDeps): Pro
     case "C5-prune-then-C3":
       log.info({ sessionId: action.sessionId }, "C5 git worktree prune");
       try {
-        await execImpl(`git -C "${action.projectRoot}" worktree prune`);
+        // §11.5 H5: 用 execFile 避免 projectRoot 经 shell 解析 (命令注入防护).
+        // projectRoot 作为 cwd 而非 args, Node 直接 fork/execve, 不经 sh -c.
+        await execFileAsync("git", ["worktree", "prune", "-d"], {
+          cwd: action.projectRoot,
+        });
       } catch (err) {
         log.warn({ err }, "C5 git prune failed");
       }
@@ -396,8 +406,15 @@ async function dispatchAction(action: ReconcileAction, deps: ReconcileDeps): Pro
   }
 }
 
-async function defaultExec(cmd: string): Promise<{ stdout: string; stderr: string }> {
-  return execAsync(cmd);
+/**
+ * Test hook — 暴露 C5 dispatchAction 的最小可测表面, 供
+ * reconciler-prune.test.ts 验证 exec → execFile 改造. 仅测试用.
+ */
+export async function triggerC5PruneForTest(
+  action: ReconcileAction,
+  deps: ReconcileDeps,
+): Promise<void> {
+  await dispatchAction(action, deps);
 }
 
 /**
