@@ -35,6 +35,8 @@ import {
 import * as schema from "../plugins/db/schema.js";
 import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-port-service.js";
 import { SseConsumer } from "./main/v2-sse-consumer.js";
+import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2SyncSnapshot } from "./main/sync-applier.js";
+import { serializeForPush } from "./main/v2-state-bridge.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -52,6 +54,8 @@ let reallocatedQueue: Array<{
 // P9: v2 service + SSE consumer (only populated when AGENTDOCK_V2=1).
 let v2PortService: V2PortServiceHandle | null = null;
 let sseConsumer: SseConsumer | null = null;
+// §7.3, §11.3 #8: SyncApplier state — tracks snapshot + stream ordering.
+let v2State: AppliedState = emptyState();
 
 // Foreign session tracking — mirrors master's _sessionStatuses map.
 // Tracks runtime ownership status per session across IPC calls:
@@ -462,6 +466,13 @@ async function bootstrap() {
           // Filter heartbeats — too noisy for the renderer.
           if (e.event === "heartbeat") return;
           log.debug({ event: e.event, seq: e.seq }, "sse event");
+          // §7.3, §11.3 #8: Apply event to SyncApplier state
+          v2State = dispatchEvent(v2State, e);
+          // Push serialized state to renderer
+          const serialized = serializeForPush(v2State);
+          if (mainWindow?.webContents) {
+            mainWindow.webContents.send("daemon:v2State", serialized);
+          }
         },
         onReconnect: () => {
           log.info("sse reconnected");
@@ -470,6 +481,12 @@ async function bootstrap() {
         // 与 daemon 状态, 对缺失/漂移的 session 走重注册(经过 RECOVERING 闸门).
         onDisconnect: () => {
           log.warn("sse disconnected — triggering §5.3 full re-sync");
+          void fullResyncAfterDisconnect(cachedDaemonPort, v2PortService);
+        },
+        // §7.3 — daemon 显式要求重同步 (环形缓冲溢出 / 进程重启): 立即走
+        // §5.3 全量重同步, 不等 30s 兜底轮询, 否则增量事件会丢失.
+        onResyncRequired: () => {
+          log.warn("sse resync-required — triggering §7.3 full re-sync");
           void fullResyncAfterDisconnect(cachedDaemonPort, v2PortService);
         },
         onClose: () => {
@@ -652,7 +669,14 @@ async function fullResyncAfterDisconnect(
     const body = (await syncRes.json()) as {
       sessions: Array<{ sessionId: string; status: string }>;
       ports?: Array<{ port: number; sessionId: string; name: string }>;
+      snapshotSeq?: number;
+      owners?: Array<{ sessionId: string; clientId: string; pid: number; fencingToken: number }>;
     };
+    // §7.3, §11.3 #8: Apply snapshot to SyncApplier state
+    if (typeof body.snapshotSeq === "number") {
+      v2State = applySnapshot(v2State, body as V2SyncSnapshot);
+      log.debug({ snapshotSeq: body.snapshotSeq }, "§7.3 applied snapshot to v2State");
+    }
     // 索引: v2SessionId → (name → port). 给 /claim 携带 preferredPort 用.
     const portsByV2Sid = new Map<string, Map<string, number>>();
     for (const p of body.ports ?? []) {
