@@ -120,3 +120,46 @@ export function updateEnvFile(
   const merged = mergeEnv(existing, updates);
   writeFileSync(filePath, writeEnv(merged), "utf-8");
 }
+
+/**
+ * Load a .env file's keys into process.env (dev-mode entry helper).
+ *
+ * Designed for `electron.vite.config.ts`, which is evaluated by
+ * electron-vite's esbuild bundler with no .env auto-loading — so the
+ * Vite dev server's `port` (read from process.env.FRONTEND_PORT in the
+ * config) would otherwise be undefined.
+ *
+ * Pairs with 新架构 §8: production never reads .env (it's port-agnostic
+ * via IPC), only this dev entry does.
+ *
+ * Semantics:
+ *   - filePath defaults to `<process.cwd()>/.env`. Not walked up.
+ *   - Only `.env` is read; `.env.local` / `.env.development` are ignored.
+ *   - Missing file → throw (fail-fast in dev).
+ *   - Empty file → silent no-op (let downstream "FRONTEND_PORT is required"
+ *     still surface its richer message).
+ *   - Existing process.env values are NEVER overridden (shell wins,
+ *     matches dotenv default + 12-factor convention).
+ *
+ * @param filePath Optional override path. Relative paths resolve
+ *                 against process.cwd(). Default: `<cwd>/.env`.
+ * @throws When the resolved file path does not exist on disk.
+ */
+export function loadDotEnvIntoProcess(filePath?: string): void {
+  const resolved = filePath
+    ? path.resolve(filePath)
+    : path.join(process.cwd(), ".env");
+
+  if (!existsSync(resolved)) {
+    throw new Error(
+      `[dev] .env not found at ${resolved} — create .env in your project/worktree root, ` +
+        `or set FRONTEND_PORT (and the rest of PORT_KEYS_DEFAULT) directly in the environment. ` +
+        `See .env.example for the expected schema.`,
+    );
+  }
+
+  const env = readEnvFile(resolved);
+  for (const [k, v] of Object.entries(env)) {
+    if (process.env[k] === undefined) process.env[k] = v;
+  }
+}

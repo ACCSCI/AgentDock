@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   buildScopedChildEnv,
   discoverPortKeysFromEnv,
+  loadDotEnvIntoProcess,
   mergeEnv,
   parseEnv,
   readEnvFile,
@@ -269,5 +270,116 @@ describe("discoverPortKeysFromEnv", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("loadDotEnvIntoProcess", () => {
+  function createTmpDir(): string {
+    const dir = path.join(
+      os.tmpdir(),
+      `agentdock-load-dotenv-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  // process.env snapshot so each test starts from the test-runner's env
+  // and restores it cleanly. Mutations by one test never leak to the next.
+  let savedEnv: NodeJS.ProcessEnv;
+  let tmpDirs: string[];
+
+  beforeEach(() => {
+    savedEnv = { ...process.env };
+    tmpDirs = [];
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+    for (const dir of tmpDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("loads .env keys into process.env when unset", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, ".env");
+    writeFileSync(filePath, "FRONTEND_PORT=30000\nBACKEND_PORT=30001\n");
+    delete process.env.FRONTEND_PORT;
+    delete process.env.BACKEND_PORT;
+
+    loadDotEnvIntoProcess(filePath);
+
+    expect(process.env.FRONTEND_PORT).toBe("30000");
+    expect(process.env.BACKEND_PORT).toBe("30001");
+  });
+
+  it("does not override existing process.env values (shell wins)", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, ".env");
+    writeFileSync(filePath, "FRONTEND_PORT=from-file\n");
+    process.env.FRONTEND_PORT = "from-shell";
+
+    loadDotEnvIntoProcess(filePath);
+
+    expect(process.env.FRONTEND_PORT).toBe("from-shell");
+  });
+
+  it("throws when .env file does not exist (fail-fast)", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    const missing = path.join(dir, ".env");
+
+    expect(() => loadDotEnvIntoProcess(missing)).toThrow(/\.env not found/);
+    // Error message must include the resolved absolute path so the user
+    // can see exactly where the loader looked (helpful when cwd is wrong).
+    expect(() => loadDotEnvIntoProcess(missing)).toThrow(missing);
+  });
+
+  it("empty .env file does not throw (fall-through to downstream error)", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, ".env");
+    writeFileSync(filePath, "");
+
+    // Empty file is NOT the same as missing file: we silently load nothing
+    // so the downstream `FRONTEND_PORT is required` error (in
+    // electron.vite.config.ts) still surfaces its richer "which key is
+    // missing" diagnostic.
+    expect(() => loadDotEnvIntoProcess(filePath)).not.toThrow();
+  });
+
+  it("explicit filePath parameter is used (relative path resolves against cwd)", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    // Use only the basename as the explicit arg → must resolve under cwd.
+    // We create the file at the resolved absolute path so cwd is irrelevant
+    // to the assertion: only the param matters.
+    writeFileSync(path.join(dir, ".env"), "EXPLICIT_PATH_VAR=loaded\n");
+    delete process.env.EXPLICIT_PATH_VAR;
+
+    loadDotEnvIntoProcess(path.join(dir, ".env"));
+
+    expect(process.env.EXPLICIT_PATH_VAR).toBe("loaded");
+  });
+
+  it("default filePath resolves against process.cwd()", () => {
+    const dir = createTmpDir();
+    tmpDirs.push(dir);
+    writeFileSync(path.join(dir, ".env"), "CWD_DEFAULT_VAR=loaded\n");
+    delete process.env.CWD_DEFAULT_VAR;
+    // Stub process.cwd() so the no-arg call resolves to our tmpdir.
+    // Avoids real chdir() which on Windows can fail across drive letters.
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+
+    loadDotEnvIntoProcess(); // no args — must use cwd/.env
+
+    expect(process.env.CWD_DEFAULT_VAR).toBe("loaded");
   });
 });
