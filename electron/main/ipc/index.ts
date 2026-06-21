@@ -57,6 +57,7 @@ export function registerAllIpc(deps: AllIpcDeps): void {
     getDaemonManager: deps.getDaemonManager,
     getDaemonPort: deps.getDaemonPort,
     getSseConsumer: deps.getSseConsumer,
+    getSseLastSeq: deps.getSseLastSeq,
     isV2Enabled: deps.isV2Enabled,
   };
   registerBootstrap(bootstrapDeps);

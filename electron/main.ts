@@ -388,9 +388,11 @@ async function bootstrap() {
   // already a project dep (used for scripts), so it ships in node_modules.
   process.env.AGENTDOCK_USE_BUN = "1";
   log.info({ entry: daemonManager.daemonEntry, cwd: process.cwd() }, "spawning daemon");
+  let cachedDaemonPort = 0;
   try {
     const { client } = await daemonManager.init();
     daemonClient = createDaemonClient(`http://127.0.0.1:${client.port}`);
+    cachedDaemonPort = client.port;
     log.info({ port: client.port }, "daemon connected");
   } catch (err) {
     log.error({ err, msg: String(err) }, "failed to start daemon");
@@ -408,20 +410,13 @@ async function bootstrap() {
     return;
   }
 
+  // v1 client registration + heartbeat — needed for /debug/clients and
+  // daemon-client-lifecycle E2E. v2 path uses /sync for liveness, but v1
+  // routes still exist and some tests depend on them.
+  await registerClientWithDaemon();
+  startHeartbeatLoop();
+
   // 2. Register ALL IPC handlers (Phase 4: 29 channels + 3 daemon channels)
-  // Cached daemon port — daemonClient.port is set once at init() and
-  // doesn't move. readDaemonInfo() reads the file again on every call,
-  // which races with daemon startup (daemon.json may not exist yet).
-  let cachedDaemonPort = 0;
-  try {
-    const { client } = await daemonManager.init();
-    daemonClient = createDaemonClient(`http://127.0.0.1:${client.port}`);
-    cachedDaemonPort = client.port;
-    log.info({ port: client.port }, "daemon connected");
-  } catch (err) {
-    log.error({ err, msg: String(err) }, "failed to start daemon");
-    // Cache stays 0; bootstrap handlers will return "down".
-  }
 
   const ipcDeps: AllIpcDeps = {
     getDaemonClient: () => daemonClient,

@@ -21,20 +21,31 @@ const ACTIVE_TIMEOUT_MS = 30_000; // 1× SYNC_INTERVAL, 明显短于 HEARTBEAT_T
 
 test.describe("新架构 §11.4 — 端口预留不误收 (§3.5 不变式 2)", () => {
   test("claim 后无监听 + 持续 heartbeat, 端口仍 RESERVED", async ({ window }) => {
+    // 0. Wait for daemon READY — stale WAL may cause 15s RECOVERING.
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const h = (await window.evaluate(async () => {
+        return await window.api.daemon.health();
+      })) as { state?: string; lifecycleState?: string; port: number };
+      const s = h.lifecycleState ?? h.state;
+      if (s === "ready" || s === "READY") break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
     // 1. 通过 daemon 端 API 创建 + 全部 claim + activate, 但不启动 dev server.
     //    用 daemon:health/health 探活 + 拿 port.
     const health = (await window.evaluate(async () => {
       return await window.api.daemon.health();
-    })) as { port: number };
+    })) as { port: number; state?: string; lifecycleState?: string };
 
     expect(health.port, "daemon must be reachable").toBeGreaterThan(0);
 
     // 2. 通过 faultInject 走 v2 /session/create (简化: 直接走 IPC bridge 调 daemon)
     const sync = (await window.evaluate(async () => {
       return await window.api.daemon.sync();
-    })) as { success: boolean; sessions?: unknown[] };
+    })) as { success: boolean; sessions?: unknown[]; error?: string };
 
-    expect(sync.success, "daemon /sync reachable").toBe(true);
+    expect(sync.success, `daemon /sync reachable: ${JSON.stringify(sync)}`).toBe(true);
 
     // 3. 通过 v2 routes 创建 session + 激活(不启动任何 dev server).
     const create = (await window.evaluate(async () => {

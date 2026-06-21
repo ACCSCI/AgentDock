@@ -138,7 +138,7 @@ export function registerBootstrap(deps: BootstrapDeps): void {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clientId: deps.getClientId(),
-          pid: 0,
+          pid: process.pid,
           lastSeq: deps.getSseLastSeq(),
         }),
       });

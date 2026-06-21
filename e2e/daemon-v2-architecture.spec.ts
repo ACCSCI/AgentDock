@@ -42,6 +42,30 @@ function writeEmptyConfig(dir: string): void {
 }
 
 /**
+ * Wait for the daemon to transition from RECOVERING to READY.
+ * After a fresh boot with stale WAL, the daemon stays RECOVERING for up to
+ * 15s (RECOVERING_HARD_MAX_MS). Polls /health until lifecycleState=READY.
+ */
+async function waitForDaemonReady(
+  window: import("@playwright/test").Page,
+  timeoutMs = 20_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await window.evaluate(async () => {
+      return (await window.api.daemon.health()) as {
+        state?: string;
+        lifecycleState?: string;
+      };
+    });
+    const state = health.lifecycleState ?? health.state;
+    if (state === "ready" || state === "READY") return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`waitForDaemonReady: daemon not READY after ${timeoutMs}ms`);
+}
+
+/**
  * Forward a request to the v2 daemon via the daemon:faultInject IPC
  * bridge. The fault injector accepts arbitrary POST paths under
  * /__inject/* in test mode; we just use it as a generic HTTP
@@ -89,6 +113,9 @@ test.describe("v2 architecture contract (新架构 §13.1)", () => {
     window,
     dataDir,
   }) => {
+    // Wait for daemon READY — stale WAL may cause 15s RECOVERING.
+    await waitForDaemonReady(window);
+
     // Open a project so the renderer has the activeProjectPath wired.
     const projectPath = join(dataDir, "v2-arch-project");
     prepareGitRepo(projectPath);
@@ -207,6 +234,9 @@ test.describe("v2 architecture contract (新架构 §13.1)", () => {
     window,
     dataDir,
   }) => {
+    // Wait for daemon READY — stale WAL may cause 15s RECOVERING.
+    await waitForDaemonReady(window);
+
     const projectPath = join(dataDir, "v2-event-project");
     prepareGitRepo(projectPath);
     writeEmptyConfig(projectPath);
