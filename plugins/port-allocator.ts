@@ -423,11 +423,8 @@ function sleep(ms: number): Promise<void> {
 /**
  * allocateNFreePorts — 新架构 §3.3 / §14.2 归位的批量 pick.
  *
- * 新代码(v2 routes, v2PortService 等)应走本函数而非 daemon-state.ts
- * 的 allocatePorts. 旧 v1 路径的 allocatePorts 保留以供 backward compat
- * 现有 daemon v1 surface(/ports/allocate 等); 一旦 v1 surface 下线,
- * 那个方法一并删除.
- *
+ * All code paths now use this function. The old daemon-state.ts allocatePorts
+ * was removed in F10-2c along with the v1 surface.
  *   - 走 pickFreePort (OS port=0 随机空闲, §3.3 抗撞号)
  *   - 走 isPortAvailable (BIND_PROBE_RETRY + 退避, §3.3 bind 探活)
  *   - 不依赖任何 in-memory allocatedPorts 数组 — 端口归属由 DaemonStateV2
