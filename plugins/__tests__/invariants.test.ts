@@ -342,3 +342,63 @@ describe("branchForSession / worktreePathFor — derived field safety", () => {
     expect(() => worktreePathFor("/p", "中文")).toThrow(/Invalid sessionId/);
   });
 });
+
+/**
+ * assertSnapshotStreamMonotonic — P2-7 补单测守护.
+ *
+ * §11.3 #8 — /sync 拍快照后, 任何 seq<=snapshotSeq 的 SSE 事件应被过滤;
+ * seq>snapshotSeq 且比 snapshot 值更新的事件应被应用.
+ *
+ * 之前只覆盖 3 个分支, 这里补边界:
+ *   - seq 正好等于 snapshotSeq (应被过滤 → ok=false)
+ *   - 多 key 混合 (部分更新部分没动)
+ *   - 空快照 + 空增量
+ *   - snapshot 里有 key 但增量里没 (增量没回退, 应该 ok)
+ */
+describe("assertSnapshotStreamMonotonic 边界补充 (§11.3 #8)", () => {
+  it("FAILS when incremental seq == snapshot seq (边界 = 0)", () => {
+    const r = assertSnapshotStreamMonotonic(5, { "a": 1 }, { "a": 1 }, 5);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/filtered out/);
+  });
+
+  it("多 key 混合: 部分被增量更新, 部分没动 → ok", () => {
+    const r = assertSnapshotStreamMonotonic(
+      5,
+      { "a": 1, "b": 2, "c": 3 },
+      { "a": 1, "b": 5, "c": 3 },
+      6,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("空快照 + 空增量 → ok (无内容可验证)", () => {
+    const r = assertSnapshotStreamMonotonic(5, {}, {}, 6);
+    expect(r.ok).toBe(true);
+  });
+
+  it("snapshot 里有 key, 增量里没 (增量没回退) → ok", () => {
+    const r = assertSnapshotStreamMonotonic(
+      5,
+      { "a": 1, "b": 2 },
+      { "a": 1 },
+      6,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("增量 key 不在 snapshot 里 → ok (新 key, 不算回退)", () => {
+    const r = assertSnapshotStreamMonotonic(
+      5,
+      { "a": 1 },
+      { "a": 1, "b": 99 },
+      6,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("增量值 === snapshot 值 → ok (相等不算回退)", () => {
+    const r = assertSnapshotStreamMonotonic(5, { "a": 1 }, { "a": 1 }, 6);
+    expect(r.ok).toBe(true);
+  });
+});

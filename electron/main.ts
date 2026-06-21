@@ -609,16 +609,16 @@ function isShutdownNoise(err: unknown): boolean {
  *
  * 触发: SseConsumer.onDisconnect (TCP 断开但 reconnect 未完成).
  * 步骤:
- *   1. POST /sync — 拿到 daemon 当前三表权威快照.
- *   2. 与 v2PortService 内部 app→v2Sid map 对比, 找出本地有但 daemon 无
- *      的 session (= 本地 view 漂移) 或 daemon 有但本地无 (= 新发现).
- *   3. 对"daemon 端有、token ≥ 1、status=active"的 session 调 /claim
- *      重注册 (走 RECOVERING 闸门 — 闸门在 daemon 重启 RECOVERING 期会
- *      放行 expected sessionId).
- *   4. 对"本地有、daemon 无"的 session 走 releaseSession 清理本地 view.
+ *   1. POST /sync — 拿到 daemon 当前三表权威快照 (含 ports 数组).
+ *   2. 对**所有**本地 active/creating session 调 /claim 重新注册
+ *      (走 RECOVERING 闸门, expected 集合放行), 携带**当前端口作
+ *      preferredPort** (从 /sync 响应的 ports 字段按 (sessionId, name)
+ *      查找). 这样 daemon 端已知端口的 session 不会被换掉, RECOVERING
+ *      窗口收不齐的场景 (daemon WAL 滞后) 也能让 client 主动重建.
+ *   3. /claim 失败 (RECOVERING 期陌生 sessionId) 仅打 warn, 不抛 —
+ *      SSE 重连后由后续增量 + onResyncRequired 继续收敛.
  *
- * 错误处理: 任何步骤失败仅打 warn, 不抛 — 重连后由 SSE 增量 + 后续
- * onResyncRequired 继续收敛.
+ * 错误处理: 任何步骤失败仅打 warn, 不抛.
  */
 async function fullResyncAfterDisconnect(
   daemonPort: number,
@@ -637,49 +637,58 @@ async function fullResyncAfterDisconnect(
     }
     const body = (await syncRes.json()) as {
       sessions: Array<{ sessionId: string; status: string }>;
+      ports?: Array<{ port: number; sessionId: string; name: string }>;
     };
-    const daemonSids = new Set(
-      body.sessions
-        .filter((s) => s.status === "active" || s.status === "creating")
-        .map((s) => s.sessionId),
-    );
-    // §5.3 — 对每个本地 active/creating session 走 /claim 真正重注册
-    // (走 RECOVERING 闸门, daemon 端 expected 集合放行). v2PortService.
-    // listKnownSessions 暴露 app→v2 映射 + 创建时用的 portKeys.
+    // 索引: v2SessionId → (name → port). 给 /claim 携带 preferredPort 用.
+    const portsByV2Sid = new Map<string, Map<string, number>>();
+    for (const p of body.ports ?? []) {
+      let inner = portsByV2Sid.get(p.sessionId);
+      if (!inner) {
+        inner = new Map();
+        portsByV2Sid.set(p.sessionId, inner);
+      }
+      inner.set(p.name, p.port);
+    }
+    // §5.3 — 对**所有**本地 active/creating session 走 /claim 重注册.
+    // 不只针对 daemon 缺失的 session — 哪怕 daemon 端还在, RECOVERING
+    // 闸门放行时 client 端再 claim 一次可让 daemon 三表确认 owner 身份
+    // (有助 §5.2 收齐 reported 集合, 缩短 RECOVERING 窗口).
     const known = v2.listKnownSessions();
     for (const ks of known) {
-      if (!daemonSids.has(ks.v2SessionId)) {
-        // daemon 端丢了 (e.g. daemon 重启后 WAL 还没 restore) — 主动重 claim
-        log.info(
-          { appSid: ks.appSessionId, v2Sid: ks.v2SessionId, portKeys: ks.portKeys },
-          "§5.3 re-claim session after disconnect",
-        );
-        for (const name of ks.portKeys) {
-          try {
-            const res = await fetch(`http://127.0.0.1:${daemonPort}/claim`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                sessionId: ks.v2SessionId,
-                fencingToken: ks.fencingToken,
-                name,
-              }),
-            });
-            if (!res.ok) {
-              log.warn(
-                { status: res.status, name, v2Sid: ks.v2SessionId },
-                "§5.3 re-claim failed (may be RECOVERING)",
-              );
-            }
-          } catch (err) {
-            log.warn({ err, name }, "§5.3 re-claim network failed");
+      const portMap = portsByV2Sid.get(ks.v2SessionId);
+      log.info(
+        {
+          appSid: ks.appSessionId,
+          v2Sid: ks.v2SessionId,
+          portKeys: ks.portKeys,
+          preferredPorts: portMap ? Object.fromEntries(portMap) : null,
+        },
+        "§5.3 re-claim session after disconnect",
+      );
+      for (const name of ks.portKeys) {
+        const requestedPort = portMap?.get(name); // undefined = daemon 无记录
+        try {
+          const res = await fetch(`http://127.0.0.1:${daemonPort}/claim`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: ks.v2SessionId,
+              fencingToken: ks.fencingToken,
+              name,
+              ...(requestedPort !== undefined ? { requestedPort } : {}),
+            }),
+          });
+          if (!res.ok) {
+            log.warn(
+              { status: res.status, name, v2Sid: ks.v2SessionId },
+              "§5.3 re-claim failed (may be RECOVERING)",
+            );
           }
+        } catch (err) {
+          log.warn({ err, name }, "§5.3 re-claim network failed");
         }
       }
     }
-    // 本地有但 daemon 也没记录 (未恢复的 WAL) → 等下一轮 sync 自动恢复
-    // 或 §5.2 闸门超时后走对账 (C1/C2/C3). 这里不主动 completeDeletion
-    // 以免误删.
   } catch (err) {
     log.warn({ err }, "§5.3 full resync failed");
   }

@@ -33,6 +33,75 @@ import { LEASE_RENEW_INTERVAL_MS } from "./constants.js";
 import { PORT_KEYS_DEFAULT } from "./config.js";
 import type { SessionPorts } from "./daemon-state.js";
 import type { PortService } from "./session-lifecycle.js";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+/**
+ * parseEnvFilePorts — 解析 .env 文件, 提取形如 `KEY=number` 的行.
+ * 跳过空行/注释/非数字值. 用于 §4.2 提交点值匹配.
+ */
+function parseEnvFilePorts(contents: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    const n = Number(val);
+    if (!Number.isFinite(n)) continue;
+    out[key] = n;
+  }
+  return out;
+}
+
+/**
+ * verifyCommitPoint — §4.2 提交点内联校验.
+ *
+ * session-lifecycle.ts 在 `writePortsToEnv(wt, ports)` 后**立即**调本函数,
+ * 读 .env 实际写入的端口值, 与 daemon claim 返回的端口**逐项比对**:
+ *   - .env 端口键齐全 (== N) **且每个键值 == daemon claim 返回的端口** → 通过
+ *   - 任一项不匹配 → 抛 Error (含具体哪个键不匹配)
+ *
+ * 与 reconciler C1 提交点判定的区别:
+ *   - 本函数: create 流程**立即**失败, 不等 lease 过期
+ *   - C1: 兜底, 30s+ 后 reconciler 巡检时回滚
+ *
+ * syncResources 的 `mergeEnvFileSync` 可能把旧端口值合并进来 — 仅按
+ * "键数 == N" 判通过会把脏 .env 误判为已提交. 本函数做**逐项值匹配**
+ * (架构 §4.2 不变式).
+ */
+export function verifyCommitPoint(
+  worktreePath: string,
+  claimedPorts: SessionPorts,
+): void {
+  const envFile = path.join(worktreePath, ".env");
+  let envContents: string;
+  try {
+    envContents = readFileSync(envFile, "utf-8");
+  } catch (err) {
+    throw new Error(
+      `commit-point verify: cannot read ${envFile}: ${(err as Error).message}`,
+    );
+  }
+  const envValues = parseEnvFilePorts(envContents);
+  const claimedEntries = Object.entries(claimedPorts);
+  if (claimedEntries.length === 0) {
+    throw new Error("commit-point verify: no claimed ports");
+  }
+  for (const [name, port] of claimedEntries) {
+    const envVal = envValues[name];
+    if (envVal === undefined) {
+      throw new Error(`commit-point verify: .env missing port key ${name}`);
+    }
+    if (envVal !== port) {
+      throw new Error(
+        `commit-point verify: .env ${name}=${envVal} != daemon port ${port}`,
+      );
+    }
+  }
+}
 
 export interface V2PortServiceDeps {
   /** http://127.0.0.1:<port> */

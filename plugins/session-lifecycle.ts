@@ -18,6 +18,7 @@ import {
   getWorktreePath,
   removeWorktree,
 } from "./worktree.js";
+import { verifyCommitPoint } from "./v2-port-service.js";
 
 /**
  * Abstract port service interface for session lifecycle.
@@ -211,6 +212,11 @@ export function createSessionLifecycle(deps?: {
       const portKeys = config.env?.ports?.length ? config.env.ports : undefined;
       const ports = await deps.portService.allocateSession({ sessionId, projectPath, worktreePath: wt.worktreePath, portKeys });
       writePortsToEnv(wt.worktreePath, ports);
+      // §4.2 — 提交点值匹配 (内联校验). writePortsToEnv 后立即读回
+      // .env 与 daemon claim 返回的端口逐项比对, 不一致立即抛错 (不
+      // 等 reconciler 30s+ 后兜底). syncResources 的 mergeEnvFileSync
+      // 可能把旧端口值合并进来, 仅按"键数 == N"会误判为已提交.
+      verifyCommitPoint(wt.worktreePath, ports);
       const portsDuration = Date.now() - portsStepStart;
       const firstKey = Object.keys(ports)[0] ?? "?";
       log(sessionId, `allocatePorts ✓ ${portsDuration}ms (${Object.keys(ports).length} ports, ${firstKey}:${ports[firstKey]})`);

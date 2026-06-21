@@ -339,3 +339,60 @@ describe("v2PortService lease-renewal timer", () => {
     svc.dispose();
   });
 });
+
+/**
+ * verifyCommitPoint — §4.2 提交点内联校验 (P1-3 修复).
+ */
+describe("verifyCommitPoint (新架构 §4.2)", () => {
+  // 用临时目录模拟 worktree
+  let tmpDir: string;
+  beforeEach(async () => {
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const fs = await import("node:fs/promises");
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "v2-cp-"));
+  });
+
+  it("passes when .env 端口键值与 claimed 一致", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(`${tmpDir}/.env`, "FRONTEND_PORT=30001\nBACKEND_PORT=30002\n");
+    const { verifyCommitPoint } = await import("../v2-port-service.js");
+    expect(() =>
+      verifyCommitPoint(tmpDir, { FRONTEND_PORT: 30001, BACKEND_PORT: 30002 }),
+    ).not.toThrow();
+  });
+
+  it("throws on missing port key in .env (syncResources mergeEnvFileSync 漏洞)", async () => {
+    const fs = await import("node:fs/promises");
+    // .env 缺 BACKEND_PORT
+    await fs.writeFile(`${tmpDir}/.env`, "FRONTEND_PORT=30001\n");
+    const { verifyCommitPoint } = await import("../v2-port-service.js");
+    expect(() =>
+      verifyCommitPoint(tmpDir, { FRONTEND_PORT: 30001, BACKEND_PORT: 30002 }),
+    ).toThrow(/missing port key BACKEND_PORT/);
+  });
+
+  it("throws on value mismatch (脏 .env 由 syncResources 合并进旧端口值)", async () => {
+    const fs = await import("node:fs/promises");
+    // .env FRONTEND_PORT=30000 是 syncResources merge 进来的旧值
+    await fs.writeFile(`${tmpDir}/.env`, "FRONTEND_PORT=30000\nBACKEND_PORT=30002\n");
+    const { verifyCommitPoint } = await import("../v2-port-service.js");
+    expect(() =>
+      verifyCommitPoint(tmpDir, { FRONTEND_PORT: 30001, BACKEND_PORT: 30002 }),
+    ).toThrow(/FRONTEND_PORT=30000 != daemon port 30001/);
+  });
+
+  it("throws on missing .env file", async () => {
+    const { verifyCommitPoint } = await import("../v2-port-service.js");
+    expect(() => verifyCommitPoint(tmpDir, { FRONTEND_PORT: 30001 })).toThrow(
+      /cannot read .*\.env/,
+    );
+  });
+
+  it("throws on empty claimed ports (N=0)", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(`${tmpDir}/.env`, "OTHER=value\n");
+    const { verifyCommitPoint } = await import("../v2-port-service.js");
+    expect(() => verifyCommitPoint(tmpDir, {})).toThrow(/no claimed ports/);
+  });
+});

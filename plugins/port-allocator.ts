@@ -357,16 +357,36 @@ export async function isPortAvailable(port: number): Promise<boolean> {
 }
 
 /**
+ * pickFreePort 结果: 端口号 + 持有该 socket 的 server 实例.
+ * 调用方负责**先**用端口号做 claimPort 登记, **后**显式 closeServer
+ * 释放端口 (§3.3 严格解读: "先在锁内把 ports[P]=RESERVED 挂到目标
+ * sessionId, 再关闭探活 socket"). 比旧实现 (close 在 pickFreePort
+ * 内同步发生) 缩小"close 后到 claimPort 之间"的抢占窗口.
+ */
+export interface PickFreePortResult {
+  port: number;
+  closeServer: () => Promise<void>;
+}
+
+/**
  * Pick a single free port using OS port=0 to get a random one (新架构 §3.3).
  *
  * Tries up to `maxAttempts` times to bind a random port; returns the first
- * one that succeeds. Excludes ports in `exclude`. This avoids "increment
- * through a range" which can collide with consecutive occupied ranges.
+ * one that succeeds with its **未关闭的** server. Excludes ports in
+ * `exclude`. This avoids "increment through a range" which can collide
+ * with consecutive occupied ranges.
+ *
+ * 调用模式 (与 §3.3 严格顺序一致):
+ *   const { port, closeServer } = await pickFreePort();
+ *   await mutex.runExclusive("state", async () => {
+ *     claimPort(sessionId, port, name);   // 1. 锁内登记 RESERVED
+ *   });
+ *   await closeServer();                    // 2. 锁外关 socket 释放端口
  */
 export async function pickFreePort(
   exclude: readonly number[] = [],
   maxAttempts = 50,
-): Promise<number> {
+): Promise<PickFreePortResult> {
   const excludeSet = new Set(exclude);
   for (let i = 0; i < maxAttempts; i++) {
     const server = createServer();
@@ -377,12 +397,19 @@ export async function pickFreePort(
       });
       server.on("error", () => resolve(null));
     });
-    // Close immediately so the OS releases the port (it's not in
-    // `excludeSet` yet, so we won't hand it back twice in this call).
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     if (port !== null && !excludeSet.has(port)) {
-      return port;
+      return {
+        port,
+        closeServer: () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          }),
+      };
     }
+    // 不在排除集但未拿到端口 — 关闭 server 重试
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
   }
   throw new Error(
     `pickFreePort: failed to find a free port in ${maxAttempts} attempts`,

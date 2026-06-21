@@ -117,7 +117,11 @@ export function registerSyncV2(app: Hono, ctx: DaemonContext): void {
     return c.json({
       success: true,
       state: ctx.stateV2.state,
-      snapshotSeq: ctx.lastSeq,
+      // §7.3 — snapshotSeq 必须是当前 SSE seq 水位, client 据此过滤
+      // "快照之后" 的增量事件 (seq > snapshotSeq). 用 sseBus.lastSeq()
+      // 而非 ctx.lastSeq (后者初始 0 永不变, 会让 client 永远丢弃所有
+      // seq>0 的增量, §11.3 #8 invariant 直接失效).
+      snapshotSeq: ctx.sseBus.lastSeq(),
       sessions: ctx.stateV2.listSessions().map((s) => ({
         sessionId: s.sessionId,
         projectRoot: s.projectRoot,
@@ -397,15 +401,14 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
       const body = c.req.valid("json");
       try {
         const result = await ctx.mutex.runExclusive("state", async () => {
-          // §5.2 — RECOVERING 期闸门: 仅放行 expected/已上报的恢复性 claim.
+          // §5.2 — RECOVERING 期闸门: 仅放行 expected 的恢复性 claim.
           // 陌生 sessionId 视为新分配, 拒绝并让 client 稍后重试.
           const expected = ctx.expectedSessionIds ?? new Set<string>();
-          const reported = ctx.alreadyReportedThisWindow ?? new Set<string>();
           const gate = gateClaimInRecovering(
             ctx.stateV2,
             body.sessionId,
             expected,
-            reported,
+            ctx.alreadyReportedThisWindow ?? new Set<string>(),
           );
           if (!gate.allow) {
             return c.json(
@@ -413,11 +416,11 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
               503, // Service Unavailable — RECOVERING 临时状态, 不是客户端错误
             );
           }
-          // 闸门放行后, 把 sessionId 记入"已上报"以便后续重复上报也放行
-          if (ctx.stateV2.isRecovering() && !ctx.stateV2.getSession(body.sessionId)) {
-            reported.add(body.sessionId);
-            ctx.recovering?.recordReport(body.sessionId);
-          }
+          // §5.2 闸门放行. 注: 旧实现这里有"已上报"重复上报放行机制
+          // (alreadyReportedThisWindow), 但 !getSession 条件让该分支
+          // 永不入 (gate 拒绝的正是 getSession==null 的陌生 sessionId).
+          // 死代码已删除 — 真要支持"非 expected 但已上报"放行, 需要
+          // 客户端先发某种"report"端点, 不在 /claim 内. backlog.
 
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
 
@@ -461,6 +464,8 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
                 body.bindFailed ? requested : undefined,
               );
               ctx.walV2.persist(ctx.stateV2);
+              // §3.3 — 锁内 claim 完毕, 锁外异步 close.
+              void r.closeServer();
               ctx.sseBus.publish("port-reassigned", {
                 sessionId: body.sessionId,
                 oldPort: requested,
@@ -476,12 +481,19 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
           }
 
           // No requested port → allocate a fresh free one
-          const picked = await pickFreePort(
+          // §3.3 — pickFreePort 返回 { port, closeServer }. 先 claimPort
+          // 登记 RESERVED (锁内), 再 closeServer 释放端口 (锁外).
+          // 缩小"close 后到 claimPort 之间"的抢占窗口.
+          const { port: picked, closeServer } = await pickFreePort(
             ctx.stateV2.listAllPorts().map((p) => p.port),
           );
           ctx.stateV2.claimPort(body.sessionId, picked, body.name);
           ctx.metrics.claimCount++;
           ctx.walV2.persist(ctx.stateV2);
+          // 锁内做完, 锁外异步 close. 不 await closeServer: 不阻塞
+          // 响应; OS 层 close 与 claimPort 在 await 切换间仍有窗口, 但
+          // bindFailed 路径专门兜底.
+          void closeServer();
           return { port: picked, picked: true };
         });
         return c.json({ success: true, ...result });
@@ -528,15 +540,22 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
           ctx.stateV2.releaseAllPorts(body.sessionId);
           const excluded = new Set(ctx.stateV2.listAllPorts().map((p) => p.port));
           const newPorts: Record<string, number> = {};
+          const openServers: Array<() => Promise<void>> = [];
           for (const name of oldNames) {
-            const p = await pickFreePort([...excluded]);
+            // §3.3 — pickFreePort {port, closeServer}. 锁内 claim, 锁
+            // 外 close (见上文).
+            const { port: p, closeServer } = await pickFreePort([...excluded]);
             ctx.stateV2.claimPort(body.sessionId, p, name);
+            openServers.push(closeServer);
             newPorts[name] = p;
             excluded.add(p);
           }
           ctx.walV2.persist(ctx.stateV2);
-          return { ports: newPorts, oldPorts };
+          return { ports: newPorts, oldPorts, openServers };
         });
+        // §3.3 — 锁内 claim 完毕, 锁外 close 所有 open servers.
+        // 不 await: 不阻塞响应; bindFailed 路径兜底.
+        for (const cs of result.openServers) void cs();
         // P5: publish per-port reassigned events
         for (const oldP of result.oldPorts) {
           const newP = Object.values(result.ports)[
@@ -565,12 +584,13 @@ async function conflictBranch(
   /** If bindFailed was set, caller already knows requestedPort is taken —
    * skip re-probing and pick a fresh one immediately. */
   skipProbePort: number | undefined,
-): Promise<{ port: number; picked: true }> {
+): Promise<{ port: number; picked: true; closeServer: () => Promise<void> }> {
   const excluded = new Set(state.listAllPorts().map((p) => p.port));
   if (skipProbePort !== undefined) excluded.add(skipProbePort);
-  const picked = await pickFreePort([...excluded]);
+  // §3.3 — 锁内 claim, 锁外 close (见上方 /claim handler)
+  const { port: picked, closeServer } = await pickFreePort([...excluded]);
   state.claimPort(sessionId, picked, name);
-  return { port: picked, picked: true };
+  return { port: picked, picked: true, closeServer };
 }
 
 // ---------------------------------------------------------------------------

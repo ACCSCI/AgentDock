@@ -281,7 +281,6 @@ async function classifyCreating(
     envContents = read(envFile);
   } catch {
     return { kind: "C1-rollback", sessionId, reason: "missing-env-ports" };
-    return { kind: "C1-rollback", sessionId, reason: "missing-env-ports" };
   }
   const envValues = parseEnvPorts(envContents);
   // 键值匹配(§4.2 不变式 — 不只是数键数)
