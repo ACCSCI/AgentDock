@@ -62,6 +62,34 @@ const api = {
         startedAt?: number;
       }>("daemon:health"),
     debugState: () => invoke<unknown>("daemon:debugState"),
+    // P6: v2 /sync full-snapshot. Returns the same v2 three-table shape
+    // (state, snapshotSeq, sessions, owners, ports) as a /sync response.
+    // Renderer applies this as the baseline, then only SSE events with
+    // seq > snapshotSeq — see SyncApplier in electron/main/sync-applier.ts.
+    sync: () =>
+      invoke<{
+        success: boolean;
+        state?: "RECOVERING" | "READY";
+        snapshotSeq?: number;
+        sessions?: Array<{
+          sessionId: string;
+          projectRoot: string;
+          displayName: string;
+          status: "creating" | "active" | "deleting";
+          createdAt: number;
+          ports: Record<string, number>;
+        }>;
+        owners?: Array<{
+          sessionId: string;
+          clientId: string;
+          pid: number;
+          fencingToken: number;
+        }>;
+        ports?: Array<{ port: number; sessionId: string; name: string }>;
+        serverTime?: number;
+        lastSeq?: number;
+        error?: string;
+      }>("daemon:sync"),
     faultInject: (path: string, body?: unknown) =>
       invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
         "daemon:faultInject",

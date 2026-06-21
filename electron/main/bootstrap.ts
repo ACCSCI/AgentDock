@@ -116,6 +116,33 @@ export function registerBootstrap(deps: BootstrapDeps): void {
     }
   });
 
+  // P6: v2 /sync full-snapshot endpoint. Returns the same shape as
+  // /debug/state but in the v2 /sync response format (state, snapshotSeq,
+  // sessions, owners, ports). Used by the renderer to rebuild local state
+  // after reconnect or daemon restart. The snapshotSeq field tells the
+  // client which SSE events have been "absorbed" into this snapshot.
+  // The renderer then applies only SSE events with seq > snapshotSeq.
+  ipcMain.handle(IPC_CHANNELS["daemon:sync"], async () => {
+    const port = deps.getDaemonPort();
+    if (!port) return { success: false, error: "no daemon" };
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: deps.getClientId(), pid: 0, lastSeq: 0 }),
+      });
+      if (!res.ok) {
+        return { success: false, error: `daemon returned ${res.status}` };
+      }
+      return await res.json();
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
   // 新架构 §11.2: fault injection for E2E tests. Only active when the
   // daemon was started with NODE_ENV=test (the /__inject/* routes return
   // 404 in production). Body shape: { path: string; body?: unknown }.

@@ -84,6 +84,10 @@ export const IPC_CHANNELS = {
   "daemon:health": "daemon:health",
   "daemon:debugState": "daemon:debugState",
   "daemon:faultInject": "daemon:faultInject",
+  // P6: /sync full-snapshot endpoint. Used by renderer to rebuild local
+  // state after reconnect / daemon restart. Returns the v2 three-table
+  // shape (state, snapshotSeq, sessions, owners, ports) — see plugins/daemon/routes/v2.ts.
+  "daemon:sync": "daemon:sync",
   // daemon:events:subscribe is a renderer→main invoke that returns an
   // unsubscribe function; the matching one-way push channel is a const
   // literal defined in electron/preload.ts ("daemon:events:push") since

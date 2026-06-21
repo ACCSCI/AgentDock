@@ -30,12 +30,19 @@ import {
   createRecoveringController,
   RECOVERING_TICK_INTERVAL_MS,
 } from "../recovering-controller.js";
+import {
+  createReconciler,
+  RECONCILER_TUNING,
+  type Reconciler,
+} from "../reconciler.js";
 
 export class AgentDockDaemon {
   private ctx: DaemonContext;
   private server: ServerType | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private recoveringTimer: ReturnType<typeof setInterval> | null = null;
+  private reconcilerTimer: ReturnType<typeof setInterval> | null = null;
+  private reconciler: Reconciler | null = null;
 
   constructor(options: DaemonOptions = {}) {
     this.ctx = makeContext(options);
@@ -85,6 +92,12 @@ export class AgentDockDaemon {
           onTransition: (next, reason) => {
             log.info({ state: next, reason }, "lifecycle state transition");
             this.ctx.walV2.persist(this.ctx.stateV2);
+            // P8: when transitioning to READY, mark grace window start so
+            // the reconciler gives each in-flight session a full LEASE_TTL
+            // to renew before judging abandoned (§4.4 末段).
+            if (next === "READY") {
+              this.reconciler?.setReady(Date.now());
+            }
           },
         });
         this.recoveringTimer = setInterval(() => {
@@ -92,6 +105,30 @@ export class AgentDockDaemon {
         }, RECOVERING_TICK_INTERVAL_MS);
         // Tick once immediately so empty installs exit RECOVERING fast.
         recovering.tick();
+
+        // P8: 三表对账 (C1-C5 残缺态分类, 新架构 §4.3).
+        // Tick every RECOVERING_HARD_MAX/2 = 7.5s. The reconciler
+        // self-skips during RECOVERING and during the LEASE_TTL grace
+        // window after entering READY (§4.4 末段).
+        this.reconciler = createReconciler({
+          stateV2: this.ctx.stateV2,
+          getOwnerLastHeartbeat: (clientId: string) => {
+            // v1 state carries the per-client lastHeartbeat.
+            const c = this.ctx.state.getClient(clientId);
+            return c?.lastHeartbeat ?? null;
+          },
+          isProcessAlive: (pid: number) => this.ctx.isProcessAlive(pid),
+        });
+        this.reconcilerTimer = setInterval(() => {
+          this.reconciler?.tick().catch((err) => {
+            log.warn({ err }, "reconciler tick failed");
+          });
+        }, RECONCILER_TUNING.TICK_INTERVAL_MS);
+        // Tick once immediately so first reconcile runs as soon as daemon
+        // enters READY (will be no-op if still in grace window).
+        this.reconciler.tick().catch((err) => {
+          log.warn({ err }, "reconciler initial tick failed");
+        });
 
         log.info({ port: actualPort }, "daemon listening");
         resolve();
@@ -140,6 +177,10 @@ export class AgentDockDaemon {
     if (this.recoveringTimer) {
       clearInterval(this.recoveringTimer);
       this.recoveringTimer = null;
+    }
+    if (this.reconcilerTimer) {
+      clearInterval(this.reconcilerTimer);
+      this.reconcilerTimer = null;
     }
     if (!this.server) {
       try {
