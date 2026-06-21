@@ -754,9 +754,8 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
       });
     }
 
-    // v2 empty — fall through to v1 state for the legacy view.
-    // v1 surface only; v2 fields are empty markers.
-    const v1Debug = ctx.state.toDebugObject();
+    // v2 empty — return minimal state with only client info.
+    // v1 session/port methods were removed in F10-2b.
     return c.json({
       success: true,
       schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -769,8 +768,19 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
       metrics: ctx.metrics,
       lastSeq: ctx.sseBus.lastSeq(),
       startedAt: ctx.startedAt,
-      state: v1Debug,
-      stats: ctx.state.getStats(),
+      state: {
+        sessions: {},
+        clients: Object.fromEntries(
+          ctx.state.listClients().map((c) => [c.clientId, c]),
+        ),
+        allocatedPorts: [],
+        worktreeIndex: {},
+      },
+      stats: {
+        sessionCount: 0,
+        clientCount: ctx.state.listClients().length,
+        allocatedPortCount: 0,
+      },
     });
   });
 

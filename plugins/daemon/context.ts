@@ -264,12 +264,6 @@ export async function cleanupStaleClients(ctx: DaemonContext): Promise<void> {
     let changed = false;
     for (const client of ctx.state.listClients()) {
       if (now - client.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
-        for (const session of ctx.state.listSessions()) {
-          if (session.ownerClientId === client.clientId) {
-            ctx.state.releaseSession(session.sessionId);
-            changed = true;
-          }
-        }
         ctx.state.unregisterClient(client.clientId);
         ctx.lastPersistedHeartbeatAt.delete(client.clientId);
         changed = true;
