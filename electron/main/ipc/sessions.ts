@@ -34,7 +34,6 @@ import {
   createHookRegistry,
   type HookDefinition,
 } from "../../../plugins/hook-engine.js";
-import { buildV1PortService } from "./v1-port-service.js";
 import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
 
 export interface SessionsDeps {
@@ -74,19 +73,24 @@ async function forwardV2(
 }
 
 /**
- * Pick the appropriate PortService for the current run mode.
+ * Resolve the PortService for the current run mode.
  *
- * - P9 (AGENTDOCK_V2=1) → uses the v2 service, which orchestrates
- *   /session/create → /claim × N → /session/activate via HTTP.
- * - Default (v1) → uses the Hono typed client against /sessions/allocate.
+ * The v1 daemon routes (/sessions/allocate, /sessions/release) were
+ * removed in F10-2a. v2 is the only path — throw a clear error if the
+ * v2 service was not initialized so the failure mode is obvious.
  */
 function pickPortService(
   deps: SessionsDeps,
   projectPath: string,
 ): PortService {
   const v2 = deps.getV2PortService();
-  if (v2) return v2.service;
-  return buildV1PortService(deps.getDaemonClient, deps.getClientId, projectPath);
+  if (!v2) {
+    throw new Error(
+      "v2 port service not available — daemon v1 routes have been removed. " +
+        "Ensure the daemon is running with v2 support.",
+    );
+  }
+  return v2.service;
 }
 
 export function registerSessions(deps: SessionsDeps): void {

@@ -7,11 +7,14 @@
  *
  * Asserts:
  *   - createDaemonClient() returns a usable Hono proxy
- *   - All 21 daemon routes are accessible as methods on the client
+ *   - All daemon routes are accessible as methods on the client
  *   - TypeScript compile-time error: missing required fields fails
  *   - HTTP round-trip: GET /health via the typed client works
- *   - HTTP round-trip: POST /sessions/allocate via the typed client works
+ *   - HTTP round-trip: POST /sync via the typed client works
  *   - The legacy DaemonClient class still works (uses Hono under the hood)
+ *
+ * Note: v1 routes (/sessions/allocate, /ports/allocate, etc.) were removed
+ * in F10-2a. Route surface tests only cover the v2 + shared endpoints.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, rmSync } from "node:fs";
@@ -56,25 +59,23 @@ describe("Phase 2: Hono typed client", () => {
       // Each route on the client should hit a real route on the app.
       // We test a sample of representative routes to ensure the proxy
       // shape matches the registered routes.
+      // v1 session/port routes (/sessions/*, /ports/*, /sync/declare)
+      // were removed in F10-2a; only v2 + shared routes remain.
       const checks: Array<{ name: string; call: () => Promise<Response> }> = [
         { name: "health", call: () => client.health.$get() },
-        { name: "ports.allocate", call: () => client.ports.allocate.$post({ json: { count: 1 } }) },
-        { name: "ports.release", call: () => client.ports.release.$post({ json: { ports: [30000] } }) },
         { name: "register", call: () => client.register.$post({ json: { dir: "/tmp", pid: 1 } }) },
         { name: "unregister", call: () => client.unregister.$post({ json: { dir: "/tmp" } }) },
         { name: "status", call: () => client.status.$get() },
         { name: "client.register", call: () => client.client.register.$post({ json: { clientId: "c1", pid: 1, projectPaths: ["/p"] } }) },
         { name: "client.unregister", call: () => client.client.unregister.$post({ json: { clientId: "c1" } }) },
         { name: "client.heartbeat", call: () => client.client.heartbeat.$post({ json: { clientId: "c1" } }) },
-        { name: "sessions.allocate", call: () => client.sessions.allocate.$post({ json: { clientId: "c1", sessionId: "s1", projectPath: "/p", worktreePath: "/w" } }) },
-        { name: "sessions.release", call: () => client.sessions.release.$post({ json: { clientId: "c1", sessionId: "s1" } }) },
-        { name: "sessions.reassign", call: () => client.sessions.reassign.$post({ json: { clientId: "c1", sessionId: "s1" } }) },
-        { name: "sessions.list", call: () => client.sessions.list.$get() },
-        { name: "sync.declare", call: () => client.sync.declare.$post({ json: { clientId: "c1", sessions: [] } }) },
+        { name: "sync (v2)", call: () => client.sync.$post({ json: { clientId: "c1", pid: 1, lastSeq: 0 } }) },
+        { name: "session.create (v2)", call: () => client.session.create.$post({ json: { clientId: "c1", projectRoot: "/p", displayName: "s1" } }) },
+        { name: "session.activate (v2)", call: () => client.session.activate.$post({ json: { sessionId: "v2-1", fencingToken: 1 } }) },
+        { name: "session.delete (v2)", call: () => client.session.delete.$post({ json: { sessionId: "v2-1", fencingToken: 1 } }) },
+        { name: "session.rename (v2)", call: () => client.session.rename.$post({ json: { sessionId: "v2-1", displayName: "new" } }) },
         { name: "debug.state", call: () => client.debug.state.$get() },
-        { name: "debug.invariants", call: () => client.debug.invariants.$get() },
-        { name: "debug.wal", call: () => client.debug.wal.$get() },
-        { name: "debug.ports", call: () => client.debug.ports.$get() },
+        { name: "debug.invariants-v2", call: () => client.debug["invariants-v2"].$get() },
         { name: "debug.clients", call: () => client.debug.clients.$get() },
         { name: "debug.simulate-stale", call: () => client.debug["simulate-stale"].$post({ json: { clientId: "c1" } }) },
         { name: "debug.trigger-cleanup", call: () => client.debug["trigger-cleanup"].$post({ json: {} }) },
@@ -95,7 +96,7 @@ describe("Phase 2: Hono typed client", () => {
 
   describe("TypeScript type safety (compile-time check via fixture file)", () => {
     it("fixture file with valid calls compiles", () => {
-      // This file exists to verify the typecheck pass: electron/main/__tests__/hono-client-types.test-d.ts
+      // This file exists to verify the typecheck pass: electron/main/__tests__/hono-client-types.test.ts
       // contains both valid and invalid typed calls. If tsc -b succeeds, the
       // valid ones compile. We can't easily assert "this should fail" in a
       // .ts file (it would be a syntax error). Instead, we run tsc on a
@@ -174,38 +175,21 @@ describe("Phase 2: Hono typed client", () => {
       expect(body).toMatchObject({ success: true, status: "ok" });
     });
 
-    it("POST /sessions/allocate via createDaemonClient (happy path)", async () => {
+    it("POST /sync via createDaemonClient (v2 state snapshot)", async () => {
       const { createDaemonClient } = await import("../../electron/main/hono-client.js");
       const client = createDaemonClient(daemonUrl);
 
-      // Register client first
-      const regRes = await client.client.register.$post({
-        json: { clientId: "phase2-test", pid: process.pid, projectPaths: ["/tmp"] },
+      const res = await client.sync.$post({
+        json: { clientId: "phase2-test", pid: process.pid, lastSeq: 0 },
       });
-      expect(regRes.status).toBe(200);
-
-      // Allocate
-      const allocRes = await client.sessions.allocate.$post({
-        json: {
-          clientId: "phase2-test",
-          sessionId: "phase2-sess-1",
-          projectPath: "/tmp/phase2-project",
-          worktreePath: "/tmp/phase2-worktree",
-        },
-      });
-      expect(allocRes.status).toBe(200);
-      const body = (await allocRes.json()) as { success: boolean; ports: Record<string, number> };
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        success: boolean;
+        sessions: unknown[];
+        snapshotSeq: number;
+      };
       expect(body.success).toBe(true);
-      expect(typeof body.ports.FRONTEND_PORT).toBe("number");
-    });
-
-    it("POST /sessions/allocate with missing fields returns 400 (zod)", async () => {
-      const { createDaemonClient } = await import("../../electron/main/hono-client.js");
-      const client = createDaemonClient(daemonUrl);
-
-      // @ts-expect-error - intentionally missing required fields to test zod
-      const res = await client.sessions.allocate.$post({ json: {} });
-      expect(res.status).toBe(400);
+      expect(Array.isArray(body.sessions)).toBe(true);
     });
   });
 });

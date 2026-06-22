@@ -57,6 +57,8 @@ let v2PortService: V2PortServiceHandle | null = null;
 let sseConsumer: SseConsumer | null = null;
 // §7.3, §11.3 #8: SyncApplier state — tracks snapshot + stream ordering.
 let v2State: AppliedState = emptyState();
+// Port the daemon is listening on (set once at boot, used by reconcileAndDeclareSessions).
+let cachedDaemonPort = 0;
 
 // Foreign session tracking — mirrors master's _sessionStatuses map.
 // Tracks runtime ownership status per session across IPC calls:
@@ -168,23 +170,29 @@ async function unregisterClientWithDaemon(): Promise<void> {
 }
 
 /**
- * Walk every session in the active project's DB and declare them to
- * the daemon. Anything coming back as `status: "reallocated"` means
- * the original ports got taken by an external process between
- * shutdowns — persist the new ports, rewrite the worktree `.env`,
+ * Walk every session in the active project's DB and compare its ports
+ * against the daemon's v2 state. If the daemon's ports differ from
+ * what the DB has (e.g. an external process reclaimed them between
+ * shutdowns), persist the new ports, rewrite the worktree `.env`,
  * and stash an entry in `reallocatedQueue` for the renderer's
  * `bootstrap:reallocated` IPC to pick up.
  *
- * Runs once per boot, after daemon connect + register. Quietly
- * no-ops when the DB doesn't exist yet (fresh install).
+ * v2 replaces the v1 `/sync/declare` endpoint with the `/sync` snapshot
+ * + SSE. This reconciliation runs once per boot, after daemon connect
+ * + register. Quietly no-ops when the DB doesn't exist yet (fresh
+ * install) or when v2 is not available.
  */
 async function reconcileAndDeclareSessions(): Promise<void> {
-  if (!daemonClient || !activeProjectPath) return;
+  if (!activeProjectPath) return;
+  if (!v2PortService || cachedDaemonPort <= 0) {
+    log.info("reconcile: v2 not available, skipping (v1 routes removed in F10-2a)");
+    return;
+  }
   let db: ReturnType<typeof ensureActiveDb>;
   try {
     db = ensureActiveDb(activeProjectPath);
   } catch (err) {
-    log.warn({ err }, "reconcile: DB unavailable, skipping declare");
+    log.warn({ err }, "reconcile: DB unavailable, skipping");
     return;
   }
 
@@ -210,78 +218,80 @@ async function reconcileAndDeclareSessions(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  // Resolve each session's owning project path. The /sync/declare
-  // schema requires worktreePath + projectPath per entry; pulling
-  // project.path out of the join keeps the daemon's directory
-  // lookup correct in multi-project setups.
-  const projectById = new Map<string, string>();
-  for (const p of db.select().from(schema.projects).all()) {
-    projectById.set(p.id, p.path);
+  // Build a worktreePath → v2SessionId map from the v2PortService's
+  // local cache, so we can match daemon sessions to DB rows by path.
+  const knownByV2Id = new Map<string, { appSessionId: string }>();
+  for (const known of v2PortService.listKnownSessions()) {
+    knownByV2Id.set(known.v2SessionId, { appSessionId: known.appSessionId });
   }
 
-  const declared = rows
-    .map((r) => {
-      const projectPath = projectById.get(r.projectId);
-      if (!projectPath) return null;
-      const ports = r.ports
-        ? (JSON.parse(r.ports) as Record<string, number>)
-        : null;
-      return {
-        sessionId: r.id,
-        worktreePath: r.worktreePath,
-        projectPath,
-        ports,
-        portKeys: ports ? Object.keys(ports) : undefined,
-      };
-    })
-    .filter((s): s is NonNullable<typeof s> => s !== null);
-  if (declared.length === 0) return;
-
+  // Fetch daemon state via v2 /sync (raw fetch — matches the pattern
+  // used by db.ts and v2-port-service.ts).
+  let daemonSessions: Array<{
+    sessionId: string;
+    projectRoot: string;
+    displayName: string;
+    status: string;
+    ports: Record<string, number>;
+  }> = [];
   try {
-    const res = await daemonClient.sync.declare.$post({
-      json: { clientId, sessions: declared },
+    const res = await fetch(`http://127.0.0.1:${cachedDaemonPort}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
     });
     if (!res.ok) {
-      log.warn({ status: res.status }, "sync/declare non-2xx");
+      log.warn({ status: res.status }, "reconcile: v2 /sync non-2xx");
       return;
     }
     const body = (await res.json()) as {
-      results: Array<{ sessionId: string; ports: Record<string, number>; status: string }>;
-      orphans: string[];
+      sessions: typeof daemonSessions;
     };
-    for (const r of body.results) {
-      if (r.status !== "reallocated") continue;
-      const before = rows.find((x) => x.id === r.sessionId);
-      if (!before) continue;
-      const oldPorts = before.ports
-        ? (JSON.parse(before.ports) as Record<string, number>)
-        : {};
-      reallocatedQueue.push({
-        sessionId: r.sessionId,
-        oldPorts,
-        newPorts: r.ports,
-      });
-      try {
-        db.update(schema.sessions)
-          .set({ ports: JSON.stringify(r.ports) })
-          .where(eq(schema.sessions.id, r.sessionId))
-          .run();
-        writePortsToEnv(before.worktreePath, r.ports, before.projectPath);
-      } catch (err) {
-        log.warn(
-          { err, sessionId: r.sessionId },
-          "reconcile: persist reallocated ports failed",
-        );
+    daemonSessions = body.sessions;
+  } catch (err) {
+    log.warn({ err }, "reconcile: v2 /sync failed");
+    return;
+  }
+
+  for (const ds of daemonSessions) {
+    // Match daemon session → DB row by v2PortService's app→v2 mapping.
+    // If we don't have a local mapping for this v2SessionId, skip
+    // (it belongs to another Electron instance).
+    const known = knownByV2Id.get(ds.sessionId);
+    if (!known) continue;
+    const row = rows.find((r) => r.id === known.appSessionId);
+    if (!row) continue;
+    if (ds.status !== "active") continue; // Only reconcile active sessions.
+    const oldPorts = row.ports
+      ? (JSON.parse(row.ports) as Record<string, number>)
+      : {};
+    const newPorts = ds.ports;
+    if (JSON.stringify(oldPorts) === JSON.stringify(newPorts)) continue;
+
+    reallocatedQueue.push({
+      sessionId: row.id,
+      oldPorts,
+      newPorts,
+    });
+    try {
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, row.projectId))
+        .get();
+      db.update(schema.sessions)
+        .set({ ports: JSON.stringify(newPorts) })
+        .where(eq(schema.sessions.id, row.id))
+        .run();
+      if (project) {
+        writePortsToEnv(row.worktreePath, newPorts, project.path);
       }
-    }
-    if (body.orphans.length > 0) {
-      log.info(
-        { orphans: body.orphans },
-        "reconcile: daemon reported orphan sessions (sessions whose owner client is gone)",
+    } catch (err) {
+      log.warn(
+        { err, sessionId: row.id },
+        "reconcile: persist reallocated ports failed",
       );
     }
-  } catch (err) {
-    log.warn({ err }, "sync/declare threw");
   }
 }
 
@@ -393,7 +403,6 @@ async function bootstrap() {
   // already a project dep (used for scripts), so it ships in node_modules.
   process.env.AGENTDOCK_USE_BUN = "1";
   log.info({ entry: daemonManager.daemonEntry, cwd: process.cwd() }, "spawning daemon");
-  let cachedDaemonPort = 0;
   try {
     const { client } = await daemonManager.init();
     daemonClient = createDaemonClient(`http://127.0.0.1:${client.port}`);
