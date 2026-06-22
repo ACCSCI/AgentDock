@@ -651,6 +651,9 @@ export function useActivateSession() {
         queryClient.setQueryData(queryKeys.projects, context.prev);
       }
     },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
   });
 }
 

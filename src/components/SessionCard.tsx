@@ -45,7 +45,9 @@ const STATUS_ICON_MAP: Record<SessionUserStatus, LucideIcon> = Object.fromEntrie
 // Exponential decay: half-life = 24 hours.  Returns 0..1.
 function computeHeat(lastActivatedAt: string | null | undefined): number {
   if (!lastActivatedAt) return 0;
-  const elapsed = Date.now() - new Date(lastActivatedAt).getTime();
+  const ts = new Date(lastActivatedAt).getTime();
+  if (Number.isNaN(ts)) return 0;
+  const elapsed = Date.now() - ts;
   if (elapsed < 0) return 0;
   const HALF_LIFE = 5 * 60 * 1000; // 5 min → 30 min ≈ 0.016 (nearly invisible)
   return Math.pow(0.5, elapsed / HALF_LIFE);
@@ -134,28 +136,19 @@ export function SessionCard({
   const submenuRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
 
-  // Heat value — recomputed every 10s via interval
-  const [heat, setHeat] = useState(() =>
-    "lastActivatedAt" in session ? computeHeat((session as SessionData).lastActivatedAt) : 0,
-  );
+  // Heat value — recomputed every 10s via interval + on session data change
+  const lastActivatedAt = "lastActivatedAt" in session ? (session as SessionData).lastActivatedAt : null;
+  const [heat, setHeat] = useState(() => computeHeat(lastActivatedAt));
 
   useEffect(() => {
+    // Immediate sync when data changes
+    setHeat(computeHeat(lastActivatedAt));
+    // Periodic decay
     const timer = setInterval(() => {
-      setHeat(
-        "lastActivatedAt" in session
-          ? computeHeat((session as SessionData).lastActivatedAt)
-          : 0,
-      );
+      setHeat(computeHeat(lastActivatedAt));
     }, 10_000);
     return () => clearInterval(timer);
-  }, [session]);
-
-  // Keep heat in sync when session data changes (e.g. from activate mutation)
-  useEffect(() => {
-    if ("lastActivatedAt" in session) {
-      setHeat(computeHeat((session as SessionData).lastActivatedAt));
-    }
-  }, ["lastActivatedAt" in session ? (session as SessionData).lastActivatedAt : null]);
+  }, [lastActivatedAt]);
 
   const userStatus: SessionUserStatus | null | undefined =
     "userStatus" in session ? (session as SessionData).userStatus : null;
@@ -556,7 +549,7 @@ export function SessionCard({
       {menuPos && (
         <div ref={menuRef} className="context-menu" style={{ left: menuPos.x, top: menuPos.y }}>
           {session.canRename !== false && (
-            <button type="button" className="context-menu-item" onClick={handleStartRename}>
+            <button type="button" className="context-menu-item" onClick={handleStartRename} onMouseEnter={() => setSubmenuPos(null)}>
               重命名
             </button>
           )}
@@ -570,14 +563,14 @@ export function SessionCard({
               <span className="context-menu-submenu-arrow">▸</span>
             </div>
           )}
-          <button type="button" className="context-menu-item" onClick={handleOpenInExplorer}>
+          <button type="button" className="context-menu-item" onClick={handleOpenInExplorer} onMouseEnter={() => setSubmenuPos(null)}>
             在文件管理器中打开
           </button>
-          <button type="button" className="context-menu-item" onClick={handleOpenInTerminal}>
+          <button type="button" className="context-menu-item" onClick={handleOpenInTerminal} onMouseEnter={() => setSubmenuPos(null)}>
             在终端中打开
           </button>
           {session.canReassign !== false && (
-            <button type="button" className="context-menu-item" onClick={handleReassignPorts}>
+            <button type="button" className="context-menu-item" onClick={handleReassignPorts} onMouseEnter={() => setSubmenuPos(null)}>
               重新分配端口
             </button>
           )}
@@ -588,6 +581,7 @@ export function SessionCard({
                 type="button"
                 className="context-menu-item context-menu-danger"
                 onClick={handleDelete}
+                onMouseEnter={() => setSubmenuPos(null)}
               >
                 删除
               </button>
