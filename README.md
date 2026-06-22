@@ -1,6 +1,6 @@
 # AgentDock
 
-Git Worktree + 独立运行环境的 Session 管理系统。
+开箱即用的 Git Worktree Session 管理系统 —— 为 AI Agent 开发量身打造。
 
 ## 快速开始
 
@@ -41,9 +41,23 @@ bun run dev
 
 ---
 
-## 配置文件
+## 为什么选择 AgentDock？
+
+| 特性 | 说明 |
+|------|------|
+| **开箱即用** | 零配置即可运行，配置文件可选 |
+| **Session 隔离** | 每个 Session 独立 Worktree + 独立环境 |
+| **Terminal 集成** | 内置终端，支持快速切换 Claude / Copilot |
+| **Hook 系统** | 自定义 Session 生命周期钩子 |
+| **安全加固** | 参数化调用、路径校验、端口锁等 |
+
+---
+
+## 配置文件（可选）
 
 配置文件位于**目标项目根目录**（不是 AgentDock 本身），文件名：`agentdock.config.yaml`。
+
+> 💡 **提示**：无配置文件时 AgentDock 即可正常运行，配置仅用于自定义资源同步和 Hook。
 
 ### 完整示例
 
@@ -97,7 +111,7 @@ hooks:
 
 ### 无配置文件时
 
-如果没有 `agentdock.config.yaml`，AgentDock 使用默认配置（空资源同步、空 hooks），行为与重构前完全一致。
+**开箱即用**：如果没有 `agentdock.config.yaml`，AgentDock 使用默认配置（空资源同步、空 hooks），无需任何额外设置即可正常运行。
 
 ---
 

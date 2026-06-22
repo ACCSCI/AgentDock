@@ -229,7 +229,7 @@ export class TerminalManager {
     cols?: number;
     rows?: number;
   }): Promise<TerminalInstance> {
-    const { sessionId, worktreePath, shell = "default", cols = 80, rows = 24 } = opts;
+    const { sessionId, worktreePath, shell = "Terminal", cols = 80, rows = 24 } = opts;
 
     if (!existsSync(worktreePath)) {
       throw new Error(`Worktree path not found: ${sessionId} @ ${worktreePath}`);
