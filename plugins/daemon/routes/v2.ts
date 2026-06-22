@@ -580,9 +580,18 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
       try {
         const result = await ctx.mutex.runExclusive("state", async () => {
           ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
-          // Release all old ports, pick new ones for each name
+          // Release all old ports, pick new ones for each name.
+          // Build name→oldPort mapping BEFORE releaseAllPorts so we can
+          // correctly pair old/new ports in SSE events by name.
           const oldPorts = ctx.stateV2.getSessionPorts(body.sessionId);
           const oldNames = ctx.stateV2.getSessionPortNames(body.sessionId);
+          const oldPortsByName = new Map<string, number>();
+          for (const p of oldPorts) {
+            const owner = ctx.stateV2.getPortOwner(p);
+            if (owner && owner.sessionId === body.sessionId) {
+              oldPortsByName.set(owner.name, p);
+            }
+          }
           ctx.stateV2.releaseAllPorts(body.sessionId);
           const excluded = new Set(ctx.stateV2.listAllPorts().map((p) => p.port));
           const newPorts: Record<string, number> = {};
@@ -597,16 +606,19 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
             excluded.add(p);
           }
           ctx.walV2.persist(ctx.stateV2);
-          return { ports: newPorts, oldPorts, openServers };
+          return {
+            ports: newPorts,
+            oldPorts: [...oldPortsByName.values()],
+            oldPortsByName,
+            openServers,
+          };
         });
         // §3.3 — 锁内 claim 完毕, 锁外 close 所有 open servers.
         // 不 await: 不阻塞响应; bindFailed 路径兜底.
         for (const cs of result.openServers) void cs();
-        // P5: publish per-port reassigned events
-        for (const oldP of result.oldPorts) {
-          const newP = Object.values(result.ports)[
-            result.oldPorts.indexOf(oldP)
-          ];
+        // P5: publish per-port reassigned events (paired by port name)
+        for (const [name, oldP] of result.oldPortsByName) {
+          const newP = result.ports[name];
           if (newP !== undefined) {
             ctx.sseBus.publish("port-reassigned", {
               sessionId: body.sessionId,
@@ -615,7 +627,9 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
             });
           }
         }
-        return c.json({ success: true, ...result });
+        // Exclude non-serializable fields from the HTTP response
+        const { oldPortsByName: _, openServers: __, ...body_ } = result;
+        return c.json({ success: true, ...body_ });
       } catch (err) {
         return mapError(c, err);
       }
