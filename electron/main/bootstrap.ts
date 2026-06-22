@@ -228,14 +228,19 @@ export function registerBootstrap(deps: BootstrapDeps): void {
   // in the persistent log file (plugins/logger.ts → userData/logs/).
   ipcMain.handle(
     IPC_CHANNELS["renderer:reportError"],
-    (_evt, payload: { type: string; message: string; stack?: string | null; componentStack?: string | null }) => {
+    (_evt, payload) => {
+      if (!payload || typeof payload !== "object") {
+        log.error({ source: "renderer" }, "renderer error reported with invalid payload");
+        return;
+      }
+      const p = payload as { type: string; message: string; stack?: string | null; componentStack?: string | null };
       log.error(
         {
           source: "renderer",
-          errorType: payload.type,
-          message: payload.message,
-          stack: payload.stack ?? undefined,
-          componentStack: payload.componentStack ?? undefined,
+          errorType: p.type,
+          message: p.message,
+          stack: p.stack ?? undefined,
+          componentStack: p.componentStack ?? undefined,
         },
         "renderer error",
       );

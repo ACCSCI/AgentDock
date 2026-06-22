@@ -41,7 +41,7 @@ function resolveLogFile(): string | null {
     // crash on import. `app.getPath` is only valid after `app.ready`.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { app } = require("electron") as typeof import("electron");
-    if (app?.isReady?.() || app?.getPath) {
+    if (app?.isReady?.() && app?.getPath) {
       baseDir = app.getPath("userData");
     } else {
       baseDir = join(homedir(), ".agentdock");
@@ -65,11 +65,11 @@ const logFile = resolveLogFile();
 
 // Tee to stdout (kept for `bun plugins/daemon.ts` direct invocation, dev
 // consoles, and `npm run dev` terminal output) AND to a file on disk so
-// the log survives the process. File destination is sync — pino writes
-// are buffered via sonic-boom and flushed on a short interval.
+// the log survives the process. Uses sonic-boom's default buffered mode
+// (sync=false) so log writes don't block the main event loop.
 const streams: pino.StreamEntry[] = [{ stream: process.stdout }];
 if (logFile) {
-  streams.push({ stream: pino.destination({ dest: logFile, sync: true, mkdir: true }) });
+  streams.push({ stream: pino.destination({ dest: logFile, sync: false, mkdir: true }) });
 }
 
 export const log = pino(

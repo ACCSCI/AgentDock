@@ -403,20 +403,22 @@ const api = {
   // Renderer error reporting. Called from ErrorBoundary and the global
   // `window.onerror` / `unhandledrejection` handlers in the renderer.
   // Fire-and-forget — main process logs the error and replies with void.
-  // Wrapped in try/catch so a failing main process doesn't crash the
-  // renderer in the middle of an already-broken state.
+  //
+  // CRITICAL: must use `.catch()` on the returned Promise, not a
+  // sync try/catch. A sync try/catch around `void invoke(...)` cannot
+  // see the rejected Promise — the rejection would bubble to the
+  // renderer's `unhandledrejection` handler, which calls back into
+  // reportError → infinite loop.
   reportError: (payload: {
     type: string;
     message: string;
     stack?: string | null;
     componentStack?: string | null;
   }) => {
-    try {
-      void invoke<void>("renderer:reportError", payload);
-    } catch (err) {
+    invoke<void>("renderer:reportError", payload).catch((err) => {
       // eslint-disable-next-line no-console
       console.error("[reportError] failed:", err);
-    }
+    });
   },
 };
 

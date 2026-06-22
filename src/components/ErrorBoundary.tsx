@@ -13,8 +13,13 @@ interface State {
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, error: null, errorInfo: null };
 
-  static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error };
+  static getDerivedStateFromError(error: unknown): Partial<State> {
+    // React allows `throw "string"` or `throw { custom }`.
+    // Normalize to Error so .message and .stack are always available.
+    const normalized = error instanceof Error
+      ? error
+      : new Error(typeof error === "string" ? error : JSON.stringify(error));
+    return { hasError: true, error: normalized };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
