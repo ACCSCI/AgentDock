@@ -41,7 +41,7 @@ test.describe("DaemonStatusBar — 新架构 §2 + §11.1", () => {
     const state = window.locator(`[data-testid="${TID.daemonState}"]`);
     await expect(state).toBeVisible({ timeout: 10_000 });
     const stateText = await state.textContent();
-    expect(["ready", "recovering"]).toContain(stateText);
+    expect(["Running", "Recovering"]).toContain(stateText);
 
     await expect(
       window.locator(`[data-testid="${TID.daemonPid}"]`),
