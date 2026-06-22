@@ -17,6 +17,8 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
   const [input, setInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -93,7 +95,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     [deleteTodo],
   );
 
-  // ── Edit (double-click) ──
+  // ── Edit (double-click text → edit) ──
   const handleDoubleClick = useCallback((id: string, content: string) => {
     setEditingId(id);
     setEditingContent(content);
@@ -122,26 +124,58 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     [handleEditSave],
   );
 
-  // ── Reorder (up/down) ──
-  const handleMove = useCallback(
-    (index: number, direction: -1 | 1) => {
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= todos.length) return;
-      const ids = todos.map((t) => t.id);
-      // Swap
-      [ids[index], ids[targetIndex]] = [ids[targetIndex], ids[index]];
-      reorderTodo.mutate(ids);
-    },
-    [todos, reorderTodo],
-  );
-
-  // ── Copy ──
+  // ── Copy (double-click checkbox → copy) ──
   const handleCopy = useCallback(async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
     } catch {
       // Clipboard API not available or denied
     }
+  }, []);
+
+  // ── Drag & Drop reorder ──
+  const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
+    setDragId(id);
+    e.dataTransfer.effectAllowed = "move";
+    // Required for Firefox
+    e.dataTransfer.setData("text/plain", id);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverId(id);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverId(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, targetId: string) => {
+      e.preventDefault();
+      if (!dragId || dragId === targetId) {
+        setDragId(null);
+        setDragOverId(null);
+        return;
+      }
+      const ids = todos.map((t) => t.id);
+      const fromIndex = ids.indexOf(dragId);
+      const toIndex = ids.indexOf(targetId);
+      if (fromIndex === -1 || toIndex === -1) return;
+      // Remove from old position, insert at new
+      ids.splice(fromIndex, 1);
+      ids.splice(toIndex, 0, dragId);
+      reorderTodo.mutate(ids);
+      setDragId(null);
+      setDragOverId(null);
+    },
+    [dragId, todos, reorderTodo],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setDragId(null);
+    setDragOverId(null);
   }, []);
 
   const completedCount = todos.filter((t) => t.completed).length;
@@ -190,16 +224,38 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
             {projectId ? "No tasks yet" : "Open a project to add tasks"}
           </div>
         )}
-        {todos.map((todo, index) => (
+        {todos.map((todo) => (
           <div
             key={todo.id}
-            className={`todo-dropdown-item ${todo.completed ? "todo-dropdown-item--completed" : ""}`}
+            className={[
+              "todo-dropdown-item",
+              todo.completed ? "todo-dropdown-item--completed" : "",
+              dragId === todo.id ? "todo-dropdown-item--dragging" : "",
+              dragOverId === todo.id ? "todo-dropdown-item--drag-over" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             data-testid="todo-item"
+            draggable
+            onDragStart={(e) => handleDragStart(e, todo.id)}
+            onDragOver={(e) => handleDragOver(e, todo.id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, todo.id)}
+            onDragEnd={handleDragEnd}
           >
+            <span className="todo-dropdown-drag-handle" title="Drag to reorder">
+              ⠿
+            </span>
+
             <button
               type="button"
               className="todo-dropdown-checkbox"
               onClick={() => handleToggle(todo.id, todo.completed)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                handleCopy(todo.content);
+              }}
+              title="Click: toggle · Double-click: copy"
               data-testid="todo-toggle-btn"
             >
               {todo.completed ? "☑" : "☐"}
@@ -226,46 +282,15 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               </span>
             )}
 
-            <div className="todo-dropdown-actions">
-              <button
-                type="button"
-                className="todo-dropdown-action-btn"
-                onClick={() => handleMove(index, -1)}
-                disabled={index === 0}
-                title="Move up"
-                data-testid="todo-move-up"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="todo-dropdown-action-btn"
-                onClick={() => handleMove(index, 1)}
-                disabled={index === todos.length - 1}
-                title="Move down"
-                data-testid="todo-move-down"
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                className="todo-dropdown-action-btn"
-                onClick={() => handleCopy(todo.content)}
-                title="Copy"
-                data-testid="todo-copy"
-              >
-                📋
-              </button>
-              <button
-                type="button"
-                className="todo-dropdown-delete-btn"
-                onClick={() => handleDelete(todo.id)}
-                title="Delete"
-                data-testid="todo-delete-btn"
-              >
-                ×
-              </button>
-            </div>
+            <button
+              type="button"
+              className="todo-dropdown-delete-btn"
+              onClick={() => handleDelete(todo.id)}
+              title="Delete"
+              data-testid="todo-delete-btn"
+            >
+              ×
+            </button>
           </div>
         ))}
       </div>

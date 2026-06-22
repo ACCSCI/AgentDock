@@ -2866,8 +2866,41 @@ body {
   background: var(--color-bg-secondary);
 }
 
-.todo-dropdown-item:hover .todo-dropdown-actions {
+.todo-dropdown-item:hover .todo-dropdown-delete-btn {
   opacity: 1;
+}
+
+.todo-dropdown-item--dragging {
+  opacity: 0.4;
+}
+
+.todo-dropdown-item--drag-over {
+  border-top: 2px solid var(--color-primary);
+}
+
+.todo-dropdown-drag-handle {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  cursor: grab;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  user-select: none;
+  transition: opacity 0.1s;
+}
+
+.todo-dropdown-item:hover .todo-dropdown-drag-handle {
+  opacity: 0.6;
+}
+
+.todo-dropdown-drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--color-primary);
+}
+
+.todo-dropdown-item--dragging .todo-dropdown-drag-handle {
+  cursor: grabbing;
 }
 
 .todo-dropdown-checkbox {
@@ -2910,36 +2943,6 @@ body {
   outline: none;
 }
 
-.todo-dropdown-actions {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-
-.todo-dropdown-action-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 2px 3px;
-  line-height: 1;
-  border-radius: 3px;
-  transition: color 0.1s;
-}
-
-.todo-dropdown-action-btn:hover:not(:disabled) {
-  color: var(--color-primary);
-}
-
-.todo-dropdown-action-btn:disabled {
-  opacity: 0.25;
-  cursor: default;
-}
-
 .todo-dropdown-delete-btn {
   background: none;
   border: none;
@@ -2948,7 +2951,8 @@ body {
   cursor: pointer;
   padding: 0 4px;
   line-height: 1;
-  transition: color 0.1s;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
   flex-shrink: 0;
 }
 
