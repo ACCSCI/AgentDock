@@ -56,29 +56,24 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const draggedIdRef = useRef<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
-  // Keep localOrder in sync with server data
-  useEffect(() => {
-    setLocalOrder((prev) => {
-      const serverIds = terminals.map((t) => t.terminalId);
-      if (!prev) return serverIds;
-      const existingSet = new Set(prev);
-      const currentSet = new Set(serverIds);
-      const pruned = prev.filter((id) => currentSet.has(id));
-      const added = serverIds.filter((id) => !existingSet.has(id));
-      if (pruned.length !== prev.length || added.length > 0) {
-        return [...pruned, ...added];
-      }
-      return prev;
-    });
-  }, [terminals]);
+  // Reset localOrder when sessionId changes to prevent cross-session state pollution
+  const [prevSessionId, setPrevSessionId] = useState(sessionId);
+  if (sessionId !== prevSessionId) {
+    setPrevSessionId(sessionId);
+    setLocalOrder(null);
+  }
 
-  // Derived ordered list of terminals for rendering
+  // Derived ordered list of terminals for rendering (no useEffect needed)
   const displayTerminals = useMemo(() => {
-    const order = localOrder ?? terminals.map((t) => t.terminalId);
+    if (!localOrder) return terminals;
     const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
-    return order
+    const ordered = localOrder
       .map((id) => terminalMap.get(id))
       .filter((t): t is NonNullable<typeof t> => t != null);
+    // Append any new terminals from the server that aren't in localOrder yet
+    const localSet = new Set(localOrder);
+    const added = terminals.filter((t) => !localSet.has(t.terminalId));
+    return [...ordered, ...added];
   }, [terminals, localOrder]);
 
   // Auto-focus rename input
@@ -270,8 +265,10 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     const target = e.currentTarget;
     const rect = target.getBoundingClientRect();
     const midX = rect.left + rect.width / 2;
-    setDragOverTerminalId(terminalId);
-    setDragPosition(e.clientX < midX ? "left" : "right");
+    const nextPosition = e.clientX < midX ? "left" : "right";
+    // Only re-render when target or position actually changes
+    setDragOverTerminalId((prev) => (prev !== terminalId ? terminalId : prev));
+    setDragPosition((prev) => (prev !== nextPosition ? nextPosition : prev));
   }, []);
 
   const handleTabDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -291,25 +288,29 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         return;
       }
 
-      setLocalOrder((prevOrder) => {
-        const order = prevOrder ?? terminals.map((t) => t.terminalId);
-        if (!order.includes(draggedId) || !order.includes(targetId)) return order;
-        const next = order.filter((id) => id !== draggedId);
-        let insertAt = next.indexOf(targetId);
-        if (dragPosition === "right") insertAt += 1;
-        next.splice(insertAt, 0, draggedId);
-        // Update React Query cache so the new order persists across polls
-        const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
-        const reordered = next.map((id) => terminalMap.get(id)).filter(Boolean);
-        queryClient.setQueryData(queryKeys.terminals(sessionId), reordered);
-        return next;
-      });
+      const currentOrder = displayTerminals.map((t) => t.terminalId);
+      if (!currentOrder.includes(draggedId) || !currentOrder.includes(targetId)) {
+        setDragOverTerminalId(null);
+        return;
+      }
+
+      const next = currentOrder.filter((id) => id !== draggedId);
+      let insertAt = next.indexOf(targetId);
+      if (dragPosition === "right") insertAt += 1;
+      next.splice(insertAt, 0, draggedId);
+
+      setLocalOrder(next);
+
+      // Update React Query cache (side effect outside state updater)
+      const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
+      const reordered = next.map((id) => terminalMap.get(id)).filter((t): t is NonNullable<typeof t> => t != null);
+      queryClient.setQueryData(queryKeys.terminals(sessionId), reordered);
 
       setDragOverTerminalId(null);
       setDragActive(false);
       draggedIdRef.current = null;
     },
-    [terminals, sessionId, dragPosition, queryClient],
+    [displayTerminals, terminals, sessionId, dragPosition, queryClient],
   );
 
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
