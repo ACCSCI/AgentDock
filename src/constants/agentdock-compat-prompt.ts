@@ -99,7 +99,7 @@ engine = create_engine(db_path)
 
 **Hook 方案：** 在 \`afterCreateSession\` 中为每个 Session 复制独立 DB：
 \`\`\`
-cp main.db $AGENTDOCK_WORKTREE_PATH/dev.db
+cp main.db "$AGENTDOCK_WORKTREE_PATH/dev.db"
 \`\`\`
 
 ---
@@ -150,7 +150,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 
 **Hook 方案：** 在 \`afterCreateSession\` 中同步初始数据：
 \`\`\`
-mkdir -p $AGENTDOCK_WORKTREE_PATH/uploads && cp -rn $AGENTDOCK_PROJECT_PATH/uploads/* $AGENTDOCK_WORKTREE_PATH/uploads/ 2>/dev/null
+mkdir -p "$AGENTDOCK_WORKTREE_PATH/uploads" && cp -rn "$AGENTDOCK_PROJECT_PATH/uploads/"* "$AGENTDOCK_WORKTREE_PATH/uploads/" 2>/dev/null
 \`\`\`
 
 ---
@@ -178,7 +178,7 @@ const configDir = process.env.XDG_CONFIG_HOME
 
 **Hook 方案：** 在 Hook 中设置环境变量重定向：
 \`\`\`
-XDG_CONFIG_HOME=$AGENTDOCK_WORKTREE_PATH/.config
+export XDG_CONFIG_HOME="$AGENTDOCK_WORKTREE_PATH/.config"
 \`\`\`
 
 ---
@@ -265,12 +265,12 @@ services:
       - db-data:/var/lib/postgresql/data
 
 # ✅ 使用 COMPOSE_PROJECT_NAME 自动前缀 volume 名
-# 在 Hook 中设置：export COMPOSE_PROJECT_NAME=$AGENTDOCK_SESSION_ID
+# 在 Hook 中设置：export COMPOSE_PROJECT_NAME="$AGENTDOCK_SESSION_ID"
 \`\`\`
 
 **Hook 方案：** 在 \`beforeCreateSession\` 中设置项目名前缀：
 \`\`\`
-export COMPOSE_PROJECT_NAME=$AGENTDOCK_SESSION_ID
+export COMPOSE_PROJECT_NAME="$AGENTDOCK_SESSION_ID"
 \`\`\`
 
 ---
@@ -284,7 +284,7 @@ export COMPOSE_PROJECT_NAME=$AGENTDOCK_SESSION_ID
 **检测方法：**
 \`\`\`bash
 # 检测硬编码端口（排除环境变量读取模式）
-grep -rn "listen([0-9]\\{4,5\\})" --include="*.ts" --include="*.js"
+grep -rn "listen([[:space:]]*[0-9]\\{4,5\\}" --include="*.ts" --include="*.js"
 grep -rn "PORT=[0-9]" --include="*.env" --include="*.sh" --include="*.yml"
 grep -rn "port: [0-9]\\{4,5\\}" --include="*.ts" --include="*.js" --include="*.yaml"
 \`\`\`
