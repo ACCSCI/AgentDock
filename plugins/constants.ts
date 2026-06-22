@@ -54,5 +54,5 @@ export const HEARTBEAT_PERSIST_INTERVAL_MS = 5_000;
 
 /** §2 — Daemon protocol version string. Semantic version; AgentDock only
  * compares the major version (bump on breaking change). */
-export const PROTOCOL_VERSION = "1";
-export const PROTOCOL_VERSION_MAJOR = 1;
+export const PROTOCOL_VERSION = "2";
+export const PROTOCOL_VERSION_MAJOR = 2;
