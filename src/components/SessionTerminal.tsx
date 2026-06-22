@@ -23,6 +23,7 @@ interface SessionTerminalProps {
  */
 export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TerminalCacheStatus>("connecting");
   const { terminalPrefs } = useStore();
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
@@ -47,19 +48,24 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     };
   }, [terminalId, sessionId]);
 
-  // Close context menu on outside click / right-click elsewhere / scroll / Escape
+  // Close context menu on outside mousedown / right-click elsewhere / scroll / Escape
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
+    const handleMouseDown = (e: MouseEvent) => {
+      if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target as Node)) {
+        close();
+      }
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
-    window.addEventListener("click", close);
+    window.addEventListener("mousedown", handleMouseDown);
     window.addEventListener("contextmenu", close);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("click", close);
+      window.removeEventListener("mousedown", handleMouseDown);
       window.removeEventListener("contextmenu", close);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
@@ -151,9 +157,9 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
       />
       {ctxMenu && (
         <div
+          ref={ctxMenuRef}
           className="context-menu"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
