@@ -394,7 +394,6 @@ export function createSessionLifecycle(deps?: {
     // here so the daemon's 3-table entries are dropped AFTER the worktree
     // is gone (matches the daemon's `deleting → purged` state machine).
     if (deps?.portService?.completeDeletion) {
-      emit(onStep, { step: "removeWorktree", status: "done" });
       try {
         await deps.portService.completeDeletion(sessionId);
       } catch (e) {
