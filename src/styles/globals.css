@@ -2960,6 +2960,28 @@ body {
   color: #dc2626;
 }
 
+/* Toast */
+.todo-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  z-index: 9999;
+  pointer-events: none;
+  animation: toast-in 0.15s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .config-port-list {
   display: flex;
   flex-wrap: wrap;

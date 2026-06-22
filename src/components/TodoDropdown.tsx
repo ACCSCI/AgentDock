@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   useTodos,
   useCreateTodo,
@@ -19,6 +20,8 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
   const [editingContent, setEditingContent] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -124,14 +127,21 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     [handleEditSave],
   );
 
-  // ── Copy (double-click checkbox → copy) ──
+  // ── Copy (right-click text) ──
+  const showToast = useCallback((msg: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), 1500);
+  }, []);
+
   const handleCopy = useCallback(async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      showToast("Copied!");
     } catch {
-      // Clipboard API not available or denied
+      showToast("Copy failed");
     }
-  }, []);
+  }, [showToast]);
 
   // ── Drag & Drop reorder (only from handle) ──
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
@@ -177,9 +187,17 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     setDragOverId(null);
   }, []);
 
+  // Cleanup toast timer on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
   const completedCount = todos.filter((t) => t.completed).length;
 
   return (
+    <>
     <div
       ref={dropdownRef}
       className="todo-dropdown"
@@ -298,5 +316,10 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
         ))}
       </div>
     </div>
+      {toast && createPortal(
+        <div className="todo-toast">{toast}</div>,
+        document.body,
+      )}
+    </>
   );
 }
