@@ -26,6 +26,7 @@ export function SessionSidebar() {
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<"before" | "after">("after");
   const draggedIdRef = useRef<string | null>(null);
+  const lastCreateAtRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [foreignOpen, setForeignOpen] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -169,8 +170,14 @@ export function SessionSidebar() {
     });
   };
 
+  const CREATE_COOLDOWN_MS = 1500;
+
   const handleNewSession = async () => {
     if (!activeProject) return;
+    const now = Date.now();
+    if (now - lastCreateAtRef.current < CREATE_COOLDOWN_MS) return;
+    lastCreateAtRef.current = now;
+
     const existingNames = new Set(sessions.map((s) => s.name));
     let count = sessions.length + 1;
     while (existingNames.has(`Session ${count}`)) count++;
