@@ -27,6 +27,11 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
   const [status, setStatus] = useState<TerminalCacheStatus>("connecting");
   const { terminalPrefs } = useStore();
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  // Cache selection text captured on right-click mousedown, before xterm.js
+  // clears it.  The contextmenu handler and copy handler both read from here
+  // so that "Copy" works reliably even when getSelection() returns empty by
+  // the time the user clicks the menu item.
+  const selectionCacheRef = useRef<string>("");
 
   useEffect(() => {
     const container = containerRef.current;
@@ -48,9 +53,30 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     };
   }, [terminalId, sessionId]);
 
+  // Cache selection text on right-click mousedown — xterm.js clears the
+  // internal selection during mousedown processing, so by the time the
+  // contextmenu event fires, getSelection() already returns empty.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 2) {
+        const entry = terminalCache.get(terminalId);
+        selectionCacheRef.current = entry?.terminal.getSelection() ?? "";
+      } else {
+        selectionCacheRef.current = "";
+      }
+    };
+    container.addEventListener("mousedown", onMouseDown, true);
+    return () => container.removeEventListener("mousedown", onMouseDown, true);
+  }, [terminalId]);
+
   // Close context menu on outside mousedown / right-click elsewhere / scroll / Escape
   useEffect(() => {
-    if (!ctxMenu) return;
+    if (!ctxMenu) {
+      selectionCacheRef.current = "";
+      return;
+    }
     const close = () => setCtxMenu(null);
     const handleMouseDown = (e: MouseEvent) => {
       if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target as Node)) {
@@ -75,8 +101,9 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
   const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    const entry = terminalCache.get(terminalId);
-    const hasSelection = !!(entry && entry.terminal.getSelection());
+    // Use the selection cached on mousedown (button=2) — by the time the
+    // contextmenu event fires xterm.js may have already cleared it.
+    const hasSelection = !!selectionCacheRef.current;
     // Clamp to viewport so the menu never overflows off-screen
     const menuWidth = 180;
     const menuHeight = 160;
@@ -87,7 +114,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
       ? Math.max(0, window.innerHeight - menuHeight - 10)
       : e.clientY;
     setCtxMenu({ x, y, hasSelection });
-  }, [terminalId]);
+  }, []);
 
   const handleCopy = useCallback(async () => {
     const entry = terminalCache.get(terminalId);
@@ -95,7 +122,10 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
       setCtxMenu(null);
       return;
     }
-    const text = entry.terminal.getSelection();
+    // Prefer the selection cached on right-click mousedown — xterm.js may
+    // have cleared it by now.  Fall back to the live selection in case the
+    // user opened the menu via keyboard.
+    const text = selectionCacheRef.current || entry.terminal.getSelection();
     if (text) {
       try {
         await navigator.clipboard.writeText(text);
