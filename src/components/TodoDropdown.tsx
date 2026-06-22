@@ -133,11 +133,11 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     }
   }, []);
 
-  // ── Drag & Drop reorder ──
+  // ── Drag & Drop reorder (only from handle) ──
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
+    e.stopPropagation();
     setDragId(id);
     e.dataTransfer.effectAllowed = "move";
-    // Required for Firefox
     e.dataTransfer.setData("text/plain", id);
   }, []);
 
@@ -163,7 +163,6 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       const fromIndex = ids.indexOf(dragId);
       const toIndex = ids.indexOf(targetId);
       if (fromIndex === -1 || toIndex === -1) return;
-      // Remove from old position, insert at new
       ids.splice(fromIndex, 1);
       ids.splice(toIndex, 0, dragId);
       reorderTodo.mutate(ids);
@@ -236,14 +235,18 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               .filter(Boolean)
               .join(" ")}
             data-testid="todo-item"
-            draggable
-            onDragStart={(e) => handleDragStart(e, todo.id)}
+            draggable={false}
             onDragOver={(e) => handleDragOver(e, todo.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, todo.id)}
             onDragEnd={handleDragEnd}
           >
-            <span className="todo-dropdown-drag-handle" title="Drag to reorder">
+            <span
+              className="todo-dropdown-drag-handle"
+              title="Drag to reorder"
+              draggable
+              onDragStart={(e) => handleDragStart(e, todo.id)}
+            >
               ⠿
             </span>
 
@@ -251,11 +254,6 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               type="button"
               className="todo-dropdown-checkbox"
               onClick={() => handleToggle(todo.id, todo.completed)}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                handleCopy(todo.content);
-              }}
-              title="Click: toggle · Double-click: copy"
               data-testid="todo-toggle-btn"
             >
               {todo.completed ? "☑" : "☐"}
@@ -276,6 +274,11 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               <span
                 className="todo-dropdown-item-text"
                 onDoubleClick={() => handleDoubleClick(todo.id, todo.content)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  handleCopy(todo.content);
+                }}
+                title="Double-click: edit · Right-click: copy"
                 data-testid="todo-text"
               >
                 {todo.content}
