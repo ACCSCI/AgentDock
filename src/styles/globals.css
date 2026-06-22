@@ -3068,6 +3068,19 @@ body {
   flex-shrink: 0;
   width: 20px;
   text-align: center;
+  transition: color 0.15s;
+}
+
+.todo-dropdown-checkbox--pending {
+  color: #9ca3af;
+}
+
+.todo-dropdown-checkbox--in-progress {
+  color: #22c55e;
+}
+
+.todo-dropdown-checkbox--done {
+  color: #ef4444;
 }
 
 .todo-dropdown-item-text {
@@ -3079,11 +3092,16 @@ body {
   white-space: nowrap;
   cursor: default;
   user-select: none;
+  transition: color 0.15s, opacity 0.15s;
 }
 
-.todo-dropdown-item--completed .todo-dropdown-item-text {
+.todo-dropdown-item--done .todo-dropdown-item-text {
   text-decoration: line-through;
   opacity: 0.5;
+}
+
+.todo-dropdown-item--in-progress .todo-dropdown-item-text {
+  color: #22c55e;
 }
 
 .todo-dropdown-edit-input {

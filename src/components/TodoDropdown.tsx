@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import {
   useTodos,
   useCreateTodo,
-  useToggleTodo,
+  useCycleStatusTodo,
   useDeleteTodo,
   useUpdateTodo,
   useReorderTodo,
@@ -28,7 +28,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
 
   const { data: todos = [] } = useTodos(projectId);
   const createTodo = useCreateTodo();
-  const toggleTodo = useToggleTodo();
+  const cycleStatusTodo = useCycleStatusTodo();
   const deleteTodo = useDeleteTodo();
   const updateTodo = useUpdateTodo();
   const reorderTodo = useReorderTodo();
@@ -82,12 +82,12 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     [handleCreate],
   );
 
-  // ── Toggle ──
-  const handleToggle = useCallback(
-    (id: string, completed: boolean) => {
-      toggleTodo.mutate({ id, completed: !completed });
+  // ── Cycle status (pending → in_progress → done → pending) ──
+  const handleCycleStatus = useCallback(
+    (id: string) => {
+      cycleStatusTodo.mutate(id);
     },
-    [toggleTodo],
+    [cycleStatusTodo],
   );
 
   // ── Delete ──
@@ -194,7 +194,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     };
   }, []);
 
-  const completedCount = todos.filter((t) => t.completed).length;
+  const doneCount = todos.filter((t) => t.status === "done").length;
 
   return (
     <>
@@ -207,7 +207,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
         <span className="todo-dropdown-title">Todo</span>
         {todos.length > 0 && (
           <span className="todo-dropdown-count">
-            {completedCount}/{todos.length}
+            {doneCount}/{todos.length}
           </span>
         )}
       </div>
@@ -246,7 +246,9 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
             key={todo.id}
             className={[
               "todo-dropdown-item",
-              todo.completed ? "todo-dropdown-item--completed" : "",
+              todo.status === "done" ? "todo-dropdown-item--done" : "",
+              todo.status === "in_progress" ? "todo-dropdown-item--in-progress" : "",
+              todo.status === "pending" ? "todo-dropdown-item--pending" : "",
               dragId === todo.id ? "todo-dropdown-item--dragging" : "",
               dragOverId === todo.id ? "todo-dropdown-item--drag-over" : "",
             ]
@@ -270,11 +272,14 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
 
             <button
               type="button"
-              className="todo-dropdown-checkbox"
-              onClick={() => handleToggle(todo.id, todo.completed)}
+              className={`todo-dropdown-checkbox todo-dropdown-checkbox--${todo.status}`}
+              onClick={() => handleCycleStatus(todo.id)}
+              title={todo.status === "pending" ? "Click: start" : todo.status === "in_progress" ? "Click: mark done" : "Click: reset"}
               data-testid="todo-toggle-btn"
             >
-              {todo.completed ? "☑" : "☐"}
+              {todo.status === "pending" && "○"}
+              {todo.status === "in_progress" && "●"}
+              {todo.status === "done" && "●"}
             </button>
 
             {editingId === todo.id ? (

@@ -886,11 +886,13 @@ export function useV2ProjectSessions(projectId: string | null) {
 
 // ─── Todo hooks ────────────────────────────────────────────────────
 
+export type TodoStatus = "pending" | "in_progress" | "done";
+
 export interface TodoItem {
   id: string;
   projectId: string;
   content: string;
-  completed: boolean;
+  status: TodoStatus;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -921,12 +923,12 @@ export function useCreateTodo() {
   });
 }
 
-// PATCH todos:toggle
-export function useToggleTodo() {
+// PATCH todos:cycleStatus (pending → in_progress → done → pending)
+export function useCycleStatusTodo() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, completed }: { id: string; completed: boolean }) => {
-      await api().todos.toggle(id, completed);
+    mutationFn: async (id: string) => {
+      await api().todos.cycleStatus(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });

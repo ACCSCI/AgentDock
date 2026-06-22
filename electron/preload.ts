@@ -387,11 +387,11 @@ const api = {
   // Per-project todo list
   todos: {
     list: (projectId: string) =>
-      invoke<Array<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>>("todos:list", { projectId }),
+      invoke<Array<{ id: string; projectId: string; content: string; status: string; sortOrder: number; createdAt: string; updatedAt: string }>>("todos:list", { projectId }),
     create: (projectId: string, content: string) =>
-      invoke<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>("todos:create", { projectId, content }),
-    toggle: (id: string, completed: boolean) =>
-      invoke<void>("todos:toggle", { id, completed }),
+      invoke<{ id: string; projectId: string; content: string; status: string; sortOrder: number; createdAt: string; updatedAt: string }>("todos:create", { projectId, content }),
+    cycleStatus: (id: string) =>
+      invoke<void>("todos:cycleStatus", { id }),
     update: (id: string, content: string) =>
       invoke<void>("todos:update", { id, content }),
     delete: (id: string) =>
