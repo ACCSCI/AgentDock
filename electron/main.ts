@@ -34,6 +34,7 @@ import {
 } from "../plugins/db/index.js";
 import * as schema from "../plugins/db/schema.js";
 import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-port-service.js";
+import { AGENTDOCK_DEFAULT_V2 } from "../plugins/constants.js";
 import { SseConsumer } from "./main/v2-sse-consumer.js";
 import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2SyncSnapshot } from "./main/sync-applier.js";
 import { serializeForPush } from "./main/v2-state-bridge.js";
@@ -42,6 +43,19 @@ import { registerE2eReset } from "./main/e2e-reset.js";
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * v2 启用判断（Stage 1, v1-deprecation.md）。
+ * - AGENTDOCK_V2=1 → 启用
+ * - AGENTDOCK_V2 未设 + AGENTDOCK_DEFAULT_V2=true → 启用
+ * - AGENTDOCK_V2=0 → 禁用（v1 已移除，禁用后 session 创建将失败）
+ */
+function resolveV2Enabled(): boolean {
+  const v = process.env.AGENTDOCK_V2;
+  if (v === "1") return true;
+  if (v === "0") return false;
+  return AGENTDOCK_DEFAULT_V2;
+}
 
 // Module-level state, all owned by the singleton app instance.
 let mainWindow: BrowserWindow | null = null;
@@ -490,14 +504,23 @@ async function bootstrap() {
     getV2PortService: () => v2PortService,
     getSseConsumer: () => sseConsumer,
     getSseLastSeq: () => sseConsumer?.getLastSeq() ?? 0,
-    isV2Enabled: () => process.env.AGENTDOCK_V2 === "1",
+    isV2Enabled: () => resolveV2Enabled(),
   };
 
-  // P9: when AGENTDOCK_V2=1, build the v2 PortService and SSE consumer.
-  // v2 service handles /session/create → /claim × N → /session/activate
-  // with fencingToken caching and lease renewal. SSE consumer forwards
-  // /events to renderer via daemon:events:push.
-  if (process.env.AGENTDOCK_V2 === "1" && cachedDaemonPort > 0) {
+  // P9: when v2 is enabled (default in Stage 1), build the v2 PortService
+  // and SSE consumer. v2 service handles /session/create → /claim × N →
+  // /session/activate with fencingToken caching and lease renewal. SSE
+  // consumer forwards /events to renderer via daemon:events:push.
+  if (resolveV2Enabled()) {
+    if (cachedDaemonPort <= 0) {
+      log.warn("v2 enabled but daemon port not bound — v2 service will not start");
+    } else {
+      log.info("boot: v2 mode enabled");
+    }
+  } else {
+    log.warn("boot: AGENTDOCK_V2=0 — v1 routes removed (F10-2a), session creation will fail");
+  }
+  if (resolveV2Enabled() && cachedDaemonPort > 0) {
     try {
       v2PortService = createV2PortService({
         baseUrl: `http://127.0.0.1:${cachedDaemonPort}`,
@@ -585,13 +608,13 @@ async function bootstrap() {
       reallocatedQueue = [];
       return list;
     },
-    resetV2State: process.env.AGENTDOCK_V2 === "1"
+    resetV2State: resolveV2Enabled()
       ? () => { v2State = emptyState(); }
       : undefined,
-    stopSseConsumer: process.env.AGENTDOCK_V2 === "1"
+    stopSseConsumer: resolveV2Enabled()
       ? () => { sseConsumer?.stop(); sseConsumer = null; }
       : undefined,
-    stopV2PortService: process.env.AGENTDOCK_V2 === "1"
+    stopV2PortService: resolveV2Enabled()
       ? () => { v2PortService?.dispose(); v2PortService = null; }
       : undefined,
     clearHeartbeatTimer: () => {
