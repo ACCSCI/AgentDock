@@ -44,8 +44,8 @@ export interface BootstrapDeps {
   getSseConsumer: () => SseConsumer | null;
   /** P0+ (二审修): 返回 sseConsumer 维护的真实 lastSeq. 用于 /sync body. */
   getSseLastSeq: () => number;
-  /** P9: returns true when AGENTDOCK_V2=1 is set, so the renderer can
-   *  route session mutations through the v2 channel set. */
+  /** P9+ (Stage 1): returns true when v2 is enabled (default), so the renderer
+   *  can route session mutations through the v2 channel set. */
   isV2Enabled: () => boolean;
 }
 
@@ -70,8 +70,9 @@ export function registerBootstrap(deps: BootstrapDeps): void {
     return deps.getClientId();
   });
 
-  // P9: tells the renderer whether AGENTDOCK_V2=1 is set. Renderer uses
+  // P9+ (Stage 1): tells the renderer whether v2 is enabled. Renderer uses
   // this to decide between v1 and v2 channel sets for session mutations.
+  // v2 is now the default (AGENTDOCK_DEFAULT_V2=true in constants.ts).
   ipcMain.handle(IPC_CHANNELS["bootstrap:v2Enabled"], () => {
     return deps.isV2Enabled();
   });
@@ -198,7 +199,7 @@ export function registerBootstrap(deps: BootstrapDeps): void {
     async (event) => {
       const consumer = deps.getSseConsumer();
       if (!consumer) {
-        return { success: false, error: "AGENTDOCK_V2 not enabled" };
+        return { success: false, error: "v2 not initialized — check boot logs" };
       }
       const win = BrowserWindow.fromWebContents(event.sender);
       const sender = event.sender;

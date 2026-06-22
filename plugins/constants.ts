@@ -56,3 +56,10 @@ export const HEARTBEAT_PERSIST_INTERVAL_MS = 5_000;
  * compares the major version (bump on breaking change). */
 export const PROTOCOL_VERSION = "2";
 export const PROTOCOL_VERSION_MAJOR = 2;
+
+/**
+ * Stage 1 默认值常量（v1-deprecation.md）。
+ * `true` 时 `AGENTDOCK_V2` 环境变量未设等同于 `"1"`，v2 成为默认路径。
+ * 设 `AGENTDOCK_V2=0` 可显式禁用（v1 已移除，禁用后 session 创建将失败）。
+ */
+export const AGENTDOCK_DEFAULT_V2 = true;

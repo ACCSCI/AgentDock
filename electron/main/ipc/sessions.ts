@@ -49,7 +49,7 @@ export interface SessionsDeps {
 }
 
 function v2DisabledResponse(): { success: false; error: string } {
-  return { success: false, error: "AGENTDOCK_V2 not enabled" };
+  return { success: false, error: "v2 not initialized — check boot logs for details" };
 }
 
 async function forwardV2(
@@ -86,8 +86,8 @@ function pickPortService(
   const v2 = deps.getV2PortService();
   if (!v2) {
     throw new Error(
-      "v2 port service not available — daemon v1 routes have been removed. " +
-        "Ensure the daemon is running with v2 support.",
+      "v2 port service not available — daemon may not have started correctly. " +
+        "Check boot logs for `boot: v2 mode enabled` or `AGENTDOCK_V2=0` warnings.",
     );
   }
   return v2.service;
