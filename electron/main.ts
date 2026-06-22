@@ -39,6 +39,7 @@ import { SseConsumer } from "./main/v2-sse-consumer.js";
 import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2SyncSnapshot } from "./main/sync-applier.js";
 import { serializeForPush } from "./main/v2-state-bridge.js";
 import { registerE2eReset } from "./main/e2e-reset.js";
+import { registerFontProtocol, ensureFontsReady } from "./main/fonts.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -648,6 +649,10 @@ async function bootstrap() {
 
   // 3. Create the window and load the renderer
   const win = createWindow();
+
+  // Kick off background font download — non-blocking, notifies renderer when done.
+  void ensureFontsReady(win);
+
   const devUrl = process.env.ELECTRON_RENDERER_URL;
 
   if (devUrl) {
@@ -667,6 +672,11 @@ async function bootstrap() {
 
   log.info("window loaded");
 }
+
+// Register the custom font protocol before the app is ready — required by
+// Electron so that `agentdock-fonts:///fonts/…` URLs resolve in the renderer.
+// In dev mode Vite serves fonts from public/fonts/, so the protocol is a no-op.
+registerFontProtocol();
 
 app.whenReady().then(bootstrap).catch((err) => {
   log.error({ err }, "bootstrap failed");
