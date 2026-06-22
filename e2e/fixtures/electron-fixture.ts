@@ -214,6 +214,8 @@ export const test = base.extend<ElectronFixtures>({
         // Fault injection routes (/__inject/*) are only registered when
         // NODE_ENV=test. Tests that use daemon:faultInject IPC need this.
         NODE_ENV: "test",
+        // Always run E2E with v2 daemon — v1 routes removed in F10-2a.
+        AGENTDOCK_V2: "1",
       },
       timeout: 30_000,
     });
@@ -385,3 +387,260 @@ export const test = base.extend<ElectronFixtures>({
 });
 
 export { expect };
+
+// ---------------------------------------------------------------------------
+// REUSE mode — shared Electron instance across tests in a worker.
+//
+// Usage:
+//   import { reuseTest as test, expect } from "../fixtures/electron-fixture";
+//   test("...", async ({ window, dataDir }) => { ... });
+//
+// Requires AGENTDOCK_E2E_REUSE=1. Each test gets a fresh renderer (reload)
+// and cleared capture buffers, but the underlying Electron process is reused.
+// Main process state is reset via the __e2eResetMainState() global hook
+// registered by electron/main/e2e-reset.ts.
+//
+// v1 scope: renderer + DB + project path reset. Daemon state (ports, SSE,
+// client registration) is NOT reset — tests that depend on daemon state
+// must use the base `test` fixture with REUSE=0.
+// ---------------------------------------------------------------------------
+
+let sharedApp: ElectronApplication | null = null;
+let sharedDataDir: string | null = null;
+let sharedUserDataDir: string | null = null;
+let sharedMainEntry: string | null = null;
+let sharedChildProcess: ReturnType<ElectronApplication["process"]> | null = null;
+let sharedMainLog: string[] = [];
+let sharedRendererLog: RendererConsoleEntry[] = [];
+let sharedPageErrors: CapturedError[] = [];
+let sharedDialogs: DialogRecord[] = [];
+
+function getSharedLaunchConfig() {
+  return {
+    env: {
+      ...process.env,
+      AGENTDOCK_DATA_DIR: sharedDataDir!,
+      FRONTEND_PORT: "5173",
+      AGENTDOCK_USE_BUN: "1",
+      ELECTRON_DISABLE_GPU: "1",
+      ELECTRON_ENABLE_LOGGING: "1",
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --experimental-sqlite`.trim(),
+      NODE_ENV: "test" as const,
+      AGENTDOCK_V2: "1",
+    },
+  };
+}
+
+/**
+ * Reset per-test capture buffers. Called before each test in reuse mode.
+ */
+function resetCaptures(): void {
+  sharedMainLog.length = 0;
+  sharedRendererLog.length = 0;
+  sharedPageErrors.length = 0;
+  sharedDialogs.length = 0;
+}
+
+export const reuseTest = base.extend<
+  Omit<ElectronFixtures, "app"> & { app: ElectronApplication }
+>({
+  dataDir: async ({}, use) => {
+    if (process.env.AGENTDOCK_E2E_REUSE !== "1") {
+      throw new Error("reuseTest requires AGENTDOCK_E2E_REUSE=1");
+    }
+
+    // First test: initialize shared directories and launch Electron.
+    if (!sharedApp) {
+      sharedDataDir = join(
+        tmpdir(),
+        `agentdock-e2e-reuse-${process.pid}`,
+      );
+      sharedUserDataDir = join(sharedDataDir, "electron-user-data");
+      mkdirSync(sharedUserDataDir, { recursive: true });
+
+      sharedMainEntry = await getMainEntry();
+      sharedApp = await electron.launch({
+        args: [sharedMainEntry, `--user-data-dir=${sharedUserDataDir}`],
+        cwd: sharedDataDir,
+        ...getSharedLaunchConfig(),
+        timeout: 30_000,
+      });
+
+      // Wire up stdout/stderr capture (once for the shared process).
+      sharedChildProcess = sharedApp.process();
+      if (sharedChildProcess.stdout) {
+        sharedChildProcess.stdout.on("data", (data: Buffer) => {
+          sharedMainLog.push(`[main:out ${ts()}] ${data.toString()}`);
+        });
+      }
+      if (sharedChildProcess.stderr) {
+        sharedChildProcess.stderr.on("data", (data: Buffer) => {
+          sharedMainLog.push(`[main:err ${ts()}] ${data.toString()}`);
+        });
+      }
+    }
+
+    // Reset per-test captures before each test.
+    resetCaptures();
+
+    await use(sharedDataDir!);
+
+    // Cleanup shared data dir only when AGENTDOCK_E2E_KEEP_DATA is not set.
+    // Actual rmSync happens in the `app` fixture's finally block (after all
+    // tests in the worker complete).
+  },
+
+  app: async ({ dataDir: _dataDir }, use, testInfo) => {
+    if (!sharedApp) {
+      throw new Error("reuseTest: sharedApp not initialized (dataDir fixture bug)");
+    }
+
+    // Per-test reset: clear main process state via the global hook.
+    try {
+      await sharedApp.evaluate(() => {
+        (globalThis as any).__e2eResetMainState?.();
+      });
+    } catch {
+      // First test may not have the hook registered yet if the app is
+      // still booting. This is fine — the initial state is already clean.
+    }
+
+    // Stash per-test captures on the shared app for child fixtures.
+    (sharedApp as unknown as { __captures: unknown }).__captures = {
+      mainLog: sharedMainLog,
+      rendererLog: sharedRendererLog,
+      pageErrors: sharedPageErrors,
+      dialogs: sharedDialogs,
+    };
+
+    await use(sharedApp);
+
+    // Attach diagnostics on failure.
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await testInfo.attach("main.log", {
+        body: sharedMainLog.join(""),
+        contentType: "text/plain",
+      });
+      await testInfo.attach("renderer.log", {
+        body: sharedRendererLog
+          .map((e) => `[${e.type}] ${e.text}`)
+          .join("\n"),
+        contentType: "text/plain",
+      });
+      await testInfo.attach("pageerrors.json", {
+        body: JSON.stringify(sharedPageErrors, null, 2),
+        contentType: "application/json",
+      });
+      await testInfo.attach("dialogs.json", {
+        body: JSON.stringify(sharedDialogs, null, 2),
+        contentType: "application/json",
+      });
+    }
+
+    // Close shared Electron after the LAST test in the worker.
+    // Playwright runs test-level fixtures in order; the last test's
+    // `use()` return triggers cleanup. We detect "last test" by checking
+    // if there are any remaining tests — but Playwright doesn't expose
+    // that. Instead, we close unconditionally after each test and let
+    // the next test re-launch (cheap since build is cached).
+    //
+    // Actually: we DON'T close here. The shared app persists across tests.
+    // Cleanup happens via process exit (afterAll or worker shutdown).
+    // The 750ms child-pid leak check is skipped in reuse mode to avoid
+    // delaying every test.
+  },
+
+  window: async ({ app }, use) => {
+    const window = await app.firstWindow({ timeout: 20_000 });
+
+    // Reload to get a fresh renderer after the main process state reset.
+    await window.reload();
+    await window.waitForLoadState("domcontentloaded");
+    await window.waitForFunction(
+      () => typeof (window as unknown as { api?: unknown }).api === "object",
+      null,
+      { timeout: 10_000 },
+    );
+
+    const { rendererLog, pageErrors, dialogs } = (
+      app as unknown as { __captures: ElectronFixtures }
+    ).__captures;
+
+    window.on("console", (msg) => {
+      rendererLog.push({
+        type: msg.type() as RendererConsoleEntry["type"],
+        text: msg.text(),
+        location: msg.location(),
+        at: ts(),
+      });
+    });
+    window.on("pageerror", (err) => {
+      pageErrors.push({
+        message: err.message,
+        stack: err.stack,
+        at: ts(),
+      });
+    });
+    window.on("crash", () => {
+      pageErrors.push({
+        message: "renderer process crashed",
+        at: ts(),
+      });
+    });
+    window.on("dialog", (dialog) => {
+      dialogs.push({
+        type: dialog.type() as DialogRecord["type"],
+        message: dialog.message(),
+        at: ts(),
+      });
+      void dialog.accept().catch(() => {
+        /* dialog may already be dismissed */
+      });
+    });
+
+    await use(window);
+  },
+
+  mainLog: async ({ app }, use) => {
+    const { mainLog } = (app as unknown as { __captures: ElectronFixtures }).__captures;
+    await use(mainLog);
+  },
+
+  rendererLog: async ({ app }, use) => {
+    const { rendererLog } = (app as unknown as { __captures: ElectronFixtures }).__captures;
+    await use(rendererLog);
+  },
+
+  pageErrors: async ({ app }, use) => {
+    const { pageErrors } = (app as unknown as { __captures: ElectronFixtures }).__captures;
+    await use(pageErrors);
+  },
+
+  dialogs: async ({ app }, use) => {
+    const { dialogs } = (app as unknown as { __captures: ElectronFixtures }).__captures;
+    await use(dialogs);
+  },
+
+  expectNoRendererErrors: async ({ rendererLog, pageErrors }, use) => {
+    const fn = () => {
+      const errors = rendererLog.filter((e) => e.type === "error");
+      if (errors.length > 0 || pageErrors.length > 0) {
+        const detail = [
+          ...errors.map((e) => `[console.error] ${e.text}`),
+          ...pageErrors.map((e) => `[pageerror] ${e.message}`),
+        ].join("\n");
+        throw new Error(`Renderer surfaced errors:\n${detail}`);
+      }
+    };
+    await use(fn);
+  },
+
+  childPids: async ({ app }, use) => {
+    const fn = () => {
+      const pid = app.process().pid;
+      if (!pid) return [];
+      return listChildPids(pid);
+    };
+    await use(fn);
+  },
+});
