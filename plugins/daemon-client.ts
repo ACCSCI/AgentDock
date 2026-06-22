@@ -1,26 +1,20 @@
 /**
  * DaemonClient — Hono-typed HTTP client to the AgentDock Daemon.
  *
- * Phase 2: this class used to be a hand-rolled fetch wrapper. It's now a
- * thin facade over `createDaemonClient()` from electron/main/hono-client.ts
+ * A thin facade over `createDaemonClient()` from electron/main/hono-client.ts
  * (which itself wraps Hono's `hc<AppType>` proxy).
  *
- * The class shape is preserved for backward compat with api.ts and the 8
- * daemon test files that import `{ DaemonClient }`. New Electron main
- * code can use `createDaemonClient(url)` directly to get the raw Hono
- * proxy — bypass this class entirely.
+ * The v1 session/port routes (/sessions/allocate, /sessions/release,
+ * /sessions/reassign, /sessions/list, /ports/allocate, /ports/release,
+ * /sync/declare) were removed from the daemon in F10-2a, so the class
+ * only exposes the still-existing endpoints:
+ *   - /health, /register, /unregister, /status (instance lifecycle)
+ *   - /client/register, /client/heartbeat (Electron client lifecycle)
  *
- * Why keep the class around at all?
- *   - 6 daemon-client tests import `DaemonClient` and exercise the named
- *     methods (allocate, release, registerClient, etc.). Rewriting those
- *     tests is Phase 6 work.
- *   - api.ts uses `new DaemonClient(port).allocateSession(...)`. Phase 6
- *     moves api.ts to Electron main + IPC, at which point this class can
- *     be deleted.
+ * Session/port management now goes through `plugins/v2-port-service.ts`
+ * (raw fetch against /session/create, /claim, /session/activate, etc.).
  */
 import { hc } from "hono/client";
-import type { PortAllocator } from "./port-allocator.js";
-import type { SessionPorts } from "./daemon-state.js";
 import type { AppType } from "./daemon/app.js";
 import { readDaemonInfo, isProcessAlive } from "./daemon-discovery.js";
 
@@ -33,9 +27,6 @@ type HonoDaemonClient = ReturnType<typeof hc<AppType>>;
 interface EnvelopeOk<T> {
   success: true;
   data?: T;
-  ports?: T;
-  sessions?: T;
-  status?: string;
   [key: string]: unknown;
 }
 
@@ -60,7 +51,7 @@ async function unwrap<T>(res: Response): Promise<T> {
   return body.data as T;
 }
 
-export class DaemonClient implements PortAllocator {
+export class DaemonClient {
   private baseUrl: string;
   private hc: HonoDaemonClient;
 
@@ -88,24 +79,6 @@ export class DaemonClient implements PortAllocator {
       throw new Error("No daemon discovered: daemon process not responding");
     }
     return client;
-  }
-
-  async allocate(count: number, exclude?: Set<number>): Promise<number[]> {
-    const res = await this.hc.ports.allocate.$post({
-      json: { count, exclude: exclude ? [...exclude] : [] },
-    });
-    if (!res.ok) {
-      throw new Error(`POST /ports/allocate ${res.status}`);
-    }
-    const data = (await res.json()) as { data: { ports: number[] } };
-    return data.data.ports;
-  }
-
-  release(ports: number[]): void {
-    // Synchronous wrapper — fire and forget for release
-    this.hc.ports.release.$post({ json: { ports } }).catch(() => {
-      // Best-effort: daemon may be down during shutdown
-    });
   }
 
   /**
@@ -156,7 +129,7 @@ export class DaemonClient implements PortAllocator {
     return unwrap(res);
   }
 
-  // --- Session-aware methods ---
+  // --- Client-lifecycle methods ---
 
   /**
    * Register a client with the daemon.
@@ -178,120 +151,6 @@ export class DaemonClient implements PortAllocator {
       throw new Error(`POST /client/heartbeat ${res.status}: ${await res.text()}`);
     }
     await unwrap<void>(res);
-  }
-
-  /**
-   * Allocate a session with named ports.
-   * Idempotent — returns existing ports if session already exists.
-   * @param portKeys - Optional list of port variable names. Defaults to 5 standard ports.
-   */
-  async allocateSession(params: {
-    clientId: string;
-    sessionId: string;
-    projectPath: string;
-    worktreePath: string;
-    portKeys?: string[];
-  }): Promise<SessionPorts> {
-    const res = await this.hc.sessions.allocate.$post({ json: params });
-    if (!res.ok) {
-      throw new Error(`POST /sessions/allocate ${res.status}: ${await res.text()}`);
-    }
-    // /sessions/allocate returns `{ success, ports }` — no `data` wrapper.
-    const body = (await res.json()) as { success: boolean; ports: SessionPorts };
-    if (!body.success) {
-      throw new Error("sessions/allocate returned non-success envelope");
-    }
-    return body.ports;
-  }
-
-  /**
-   * Release a session's ports.
-   */
-  async releaseSession(clientId: string, sessionId: string): Promise<void> {
-    const res = await this.hc.sessions.release.$post({ json: { clientId, sessionId } });
-    if (!res.ok) {
-      throw new Error(`POST /sessions/release ${res.status}: ${await res.text()}`);
-    }
-    await unwrap<void>(res);
-  }
-
-  /**
-   * Reassign ports for an existing session.
-   * Returns new ports guaranteed to differ from old ones.
-   */
-  async reassignSession(clientId: string, sessionId: string): Promise<SessionPorts> {
-    const res = await this.hc.sessions.reassign.$post({ json: { clientId, sessionId } });
-    if (!res.ok) {
-      throw new Error(`POST /sessions/reassign ${res.status}: ${await res.text()}`);
-    }
-    // /sessions/reassign returns `{ success, ports, status }` — no `data` wrapper.
-    const body = (await res.json()) as { success: boolean; ports: SessionPorts };
-    if (!body.success) {
-      throw new Error("sessions/reassign returned non-success envelope");
-    }
-    return body.ports;
-  }
-
-  /**
-   * Declare all sessions for a client (startup sync).
-   * Returns results per session and list of orphaned sessions.
-   */
-  async declareSessions(clientId: string, sessions: Array<{
-    sessionId: string;
-    worktreePath: string;
-    projectPath: string;
-    ports?: SessionPorts | null;
-    portKeys?: string[];
-  }>): Promise<{
-    results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
-    orphans: string[];
-  }> {
-    const res = await this.hc.sync.declare.$post({ json: { clientId, sessions } });
-    if (!res.ok) {
-      throw new Error(`POST /sync/declare ${res.status}: ${await res.text()}`);
-    }
-    // /sync/declare returns the results + orphans fields at the top level
-    // (not under `data`), so unwrap differently than the other routes.
-    const body = (await res.json()) as {
-      success: boolean;
-      results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
-      orphans: string[];
-    };
-    if (!body.success) {
-      throw new Error("sync/declare returned non-success envelope");
-    }
-    return { results: body.results, orphans: body.orphans };
-  }
-
-  /**
-   * List all sessions known to the daemon.
-   */
-  async listSessions(): Promise<Array<{
-    sessionId: string;
-    worktreePath: string;
-    projectPath: string;
-    ports: SessionPorts;
-    ownerClientId: string;
-  }>> {
-    const res = await this.hc.sessions.list.$get();
-    if (!res.ok) {
-      throw new Error(`GET /sessions/list ${res.status}`);
-    }
-    // /sessions/list returns `{ success, sessions }` — sessions is at the top.
-    const body = (await res.json()) as {
-      success: boolean;
-      sessions: Array<{
-        sessionId: string;
-        worktreePath: string;
-        projectPath: string;
-        ports: SessionPorts;
-        ownerClientId: string;
-      }>;
-    };
-    if (!body.success) {
-      throw new Error("sessions/list returned non-success envelope");
-    }
-    return body.sessions;
   }
 }
 

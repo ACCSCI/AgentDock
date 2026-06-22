@@ -18,7 +18,6 @@ import { eq, asc } from "drizzle-orm";
 import { ipcMain } from "electron";
 import { nanoid } from "nanoid";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
 import {
@@ -33,17 +32,21 @@ import {
 } from "../../../plugins/worktree.js";
 import { writePortsToEnv } from "../../../plugins/port-write-env.js";
 import { log } from "../../../plugins/logger.js";
-import type { DaemonHonoClient } from "../hono-client.js";
+import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
 
 export interface DbContext {
   getProjectPath: () => string | null;
   setProjectPath: (path: string) => void;
-  getDaemonClient: () => DaemonHonoClient | null;
   getClientId: () => string;
   /** Foreign-session tracking — mirrors master's _sessionStatuses. */
   getSessionStatus: (sessionId: string) => string;
   setSessionStatus: (sessionId: string, status: string) => void;
   clearSessionStatuses: () => void;
+  /** P9: v2 service when AGENTDOCK_V2=1, else null. Used for v2 /sync
+   *  + releaseSession in place of the removed v1 endpoints. */
+  getV2PortService: () => V2PortServiceHandle | null;
+  /** P9: daemon port for direct v2 fetch to /sync. 0 if no daemon. */
+  getDaemonPort: () => number;
 }
 
 let dbBindingBroken = false;
@@ -73,12 +76,70 @@ function getDb(ctx: DbContext) {
 }
 
 /**
+ * Fetch all v2 daemon sessions via /sync. Returns a map keyed by
+ * worktreePath (so callers can match against DB rows, since v2's
+ * sessionId is a daemon-assigned UUID, not the Electron short ID).
+ */
+async function fetchV2Sessions(
+  daemonPort: number,
+  clientId: string,
+): Promise<Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>> {
+  const out = new Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>();
+  if (daemonPort <= 0) return out;
+  try {
+    const res = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
+    });
+    if (!res.ok) return out;
+    const body = (await res.json()) as {
+      sessions?: Array<{
+        sessionId: string;
+        projectRoot: string;
+        displayName: string;
+        status: string;
+        ports: Record<string, number>;
+      }>;
+    };
+    for (const s of body?.sessions ?? []) {
+      out.set(s.projectRoot, {
+        v2SessionId: s.sessionId,
+        projectRoot: s.projectRoot,
+        ports: s.ports,
+        status: s.status,
+      });
+    }
+  } catch (err) {
+    log.warn({ err }, "fetchV2Sessions: v2 /sync failed");
+  }
+  return out;
+}
+
+/**
+ * Resolve the worktreePath → ports map for sessions known to the daemon.
+ * Combines v2PortService's locally tracked sessions with the /sync
+ * snapshot (so disk-worktree auto-discovery still gets ports for
+ * sessions that exist on the daemon).
+ */
+function buildWorktreePorts(
+  _v2: V2PortServiceHandle | null,
+  v2Snapshot: Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number> }>,
+): Map<string, Record<string, number>> {
+  const out = new Map<string, Record<string, number>>();
+  for (const [, ds] of v2Snapshot) {
+    out.set(ds.projectRoot, ds.ports);
+  }
+  return out;
+}
+
+/**
  * Full project sync — mirrors origin/master `GET /api/projects` side-effects.
- * Reconciles disk worktrees ↔ DB ↔ daemon port state.
+ * Reconciles disk worktrees ↔ DB ↔ daemon port state via v2 endpoints.
  */
 async function syncProject(
   projectPath: string,
-  daemonClient: DaemonHonoClient | null,
+  ctx: DbContext,
   force = false,
 ): Promise<void> {
   const last = lastScanAt.get(projectPath) ?? 0;
@@ -87,23 +148,16 @@ async function syncProject(
 
   const db = ensureActiveDb(projectPath);
 
-  // 1. Fetch all known sessions from daemon.
-  const daemonSessions = new Map<string, { ports: Record<string, number>; worktreePath: string }>();
-  if (daemonClient) {
-    try {
-      const res = await daemonClient.sessions.list.$get();
-      if (res.ok) {
-        const body = (await res.json()) as {
-          sessions: Array<{ sessionId: string; ports: Record<string, number>; worktreePath: string }>;
-        };
-        for (const s of body.sessions) {
-          daemonSessions.set(s.sessionId, { ports: s.ports, worktreePath: s.worktreePath });
-        }
-      }
-    } catch (err) {
-      log.warn({ err, projectPath }, "syncProject: daemon /sessions/list failed");
-    }
-  }
+  // 1. Fetch all v2 sessions from daemon /sync, plus locally-known
+  //    sessions from v2PortService. The /sync route was added in
+  //    P9 §7.3 and returns the full v2 state snapshot.
+  const daemonPort = ctx.getDaemonPort();
+  const clientId = ctx.getClientId();
+  const v2 = ctx.getV2PortService();
+  const v2Snapshot = await fetchV2Sessions(daemonPort, clientId);
+
+  // Map worktreePath → ports for sessions known to the daemon.
+  const worktreePorts = buildWorktreePorts(v2, v2Snapshot);
 
   // 2. Per-project sync (caller passes one project at a time).
   const project = db
@@ -113,8 +167,8 @@ async function syncProject(
     .get();
   if (!project) return;
 
-  // (a) Daemon ports → DB for existing rows.
-  syncProjectPortsToDb(db, project.id, daemonSessions);
+  // (a) Daemon ports → DB for existing rows (by worktreePath).
+  syncProjectPortsToDb(db, project.id, worktreePorts);
 
   // (b) Scan disk worktrees.
   let disk: ReturnType<typeof scanDiskWorktrees> = [];
@@ -136,26 +190,12 @@ async function syncProject(
   for (const wt of disk) {
     if (existingIds.has(wt.sessionId)) continue;
 
-    // Declare to daemon — it may already know this session's ports.
-    let daemonResult: { ports: Record<string, number>; status: string } | null = null;
-    if (daemonClient) {
-      try {
-        const declareRes = await daemonClient.sync.declare.$post({
-          json: {
-            clientId: "auto-discover",
-            sessions: [{ sessionId: wt.sessionId, worktreePath: wt.worktreePath, projectPath }],
-          },
-        });
-        if (declareRes.ok) {
-          const body = (await declareRes.json()) as {
-            results: Array<{ sessionId: string; ports: Record<string, number>; status: string }>;
-          };
-          daemonResult = body.results.find((r) => r.sessionId === wt.sessionId) ?? null;
-        }
-      } catch (err) {
-        log.warn({ err, sessionId: wt.sessionId }, "syncProject: declareDiscoveredSession failed");
-      }
-    }
+    // v2 has no /sync/declare equivalent. If the daemon knows this
+    // worktree (matched by path in the /sync snapshot), use its ports.
+    // Otherwise the session is an orphan — null ports, status="orphan".
+    const daemonEntry = v2Snapshot.get(wt.worktreePath);
+    const daemonPorts = daemonEntry?.ports ?? null;
+    const daemonStatus = daemonEntry ? daemonEntry.status : "orphan";
 
     try {
       db.insert(schema.sessions)
@@ -165,19 +205,17 @@ async function syncProject(
           name: wt.sessionId,
           branch: wt.branch,
           worktreePath: wt.worktreePath,
-          ports: daemonResult?.ports ? JSON.stringify(daemonResult.ports) : null,
+          ports: daemonPorts ? JSON.stringify(daemonPorts) : null,
           backgroundHookStatus: null,
         })
         .run();
-      // Track the runtime ownership status from the daemon's declare response.
-      const status = daemonResult?.status ?? "orphan";
-      ctx.setSessionStatus(wt.sessionId, status);
-      if (daemonResult?.ports && wt.worktreePath && existsSync(wt.worktreePath)) {
-        writePortsToEnv(wt.worktreePath, daemonResult.ports, projectPath);
+      ctx.setSessionStatus(wt.sessionId, daemonStatus);
+      if (daemonPorts && wt.worktreePath && existsSync(wt.worktreePath)) {
+        writePortsToEnv(wt.worktreePath, daemonPorts, projectPath);
       }
       log.info(
-        { sessionId: wt.sessionId, projectPath, status },
-        "syncProject: declared disk worktree",
+        { sessionId: wt.sessionId, projectPath, status: daemonStatus },
+        "syncProject: inserted disk worktree",
       );
     } catch (err) {
       log.warn({ err, sessionId: wt.sessionId }, "syncProject: insert failed");
@@ -185,18 +223,17 @@ async function syncProject(
   }
 
   // (e) Reconcile ports again — catch any newly inserted rows.
-  syncProjectPortsToDb(db, project.id, daemonSessions);
+  syncProjectPortsToDb(db, project.id, worktreePorts);
 
   // (f) Clean up stale DB sessions (worktree gone from disk).
   for (const row of existingRows) {
     if (diskWtIds.has(row.id)) continue;
-    if (daemonClient) {
+    // v2: best-effort release via v2PortService (no-op if unknown).
+    if (v2) {
       try {
-        await daemonClient.sessions.release.$post({
-          json: { clientId: "auto-discover", sessionId: row.id },
-        });
+        await v2.service.releaseSession(row.id);
       } catch (err) {
-        log.warn({ err, sessionId: row.id }, "syncProject: release stale session failed");
+        log.warn({ err, sessionId: row.id }, "syncProject: v2 release stale session failed");
       }
     }
     try {
@@ -221,7 +258,7 @@ async function syncProject(
 function syncProjectPortsToDb(
   db: ReturnType<typeof ensureActiveDb>,
   projectId: string,
-  daemonSessions: Map<string, { ports: Record<string, number>; worktreePath: string }>,
+  worktreePorts: Map<string, Record<string, number>>,
 ): void {
   const rows = db
     .select()
@@ -229,13 +266,13 @@ function syncProjectPortsToDb(
     .where(eq(schema.sessions.projectId, projectId))
     .all();
   for (const row of rows) {
-    const ds = daemonSessions.get(row.id);
-    if (!ds) continue;
-    const wantPorts = JSON.stringify(ds.ports);
+    const ports = worktreePorts.get(row.worktreePath);
+    if (!ports) continue;
+    const wantPorts = JSON.stringify(ports);
     if (row.ports === wantPorts) continue;
     db.update(schema.sessions).set({ ports: wantPorts }).where(eq(schema.sessions.id, row.id)).run();
-    if (ds.worktreePath && existsSync(ds.worktreePath)) {
-      try { writePortsToEnv(ds.worktreePath, ds.ports); } catch (err) {
+    if (existsSync(row.worktreePath)) {
+      try { writePortsToEnv(row.worktreePath, ports); } catch (err) {
         log.warn({ err, sessionId: row.id }, "syncProject: writePortsToEnv failed");
       }
     }
@@ -258,7 +295,7 @@ export function registerDb(ctx: DbContext): void {
     const db = getDb(ctx);
     const projectPath = ctx.getProjectPath();
     if (projectPath) {
-      await syncProject(projectPath, ctx.getDaemonClient());
+      await syncProject(projectPath, ctx);
     }
     const allProjects = db.select().from(schema.projects).all();
     const sessionRows = db
@@ -301,15 +338,16 @@ export function registerDb(ctx: DbContext): void {
     if (!project) return { deleted: 0, sessionIds: [], failed: [] };
     const sessionsForProject = db
       .select().from(schema.sessions).where(eq(schema.sessions.projectId, projectId)).all();
-    const daemonClient = ctx.getDaemonClient();
+    const v2 = ctx.getV2PortService();
     const clientId = ctx.getClientId();
     const failed: Array<{ sessionId: string; stage: string; error: string }> = [];
     for (const s of sessionsForProject) {
-      if (daemonClient) {
+      // v2: release ports via v2PortService (no-op if session is unknown).
+      if (v2) {
         try {
-          await daemonClient.sessions.release.$post({ json: { clientId, sessionId: s.id } });
+          await v2.service.releaseSession(s.id);
         } catch (err) {
-          log.warn({ err, sessionId: s.id }, "db:projects:delete daemon release failed");
+          log.warn({ err, sessionId: s.id }, "db:projects:delete v2 release failed");
           failed.push({ sessionId: s.id, stage: "daemon-release", error: err instanceof Error ? err.message : String(err) });
         }
       }
@@ -340,7 +378,7 @@ export function registerDb(ctx: DbContext): void {
     const projectPath = ctx.getProjectPath();
     if (!projectPath) throw new Error("db:init must be called first");
     getDb(ctx);
-    await syncProject(projectPath, ctx.getDaemonClient(), true);
+    await syncProject(projectPath, ctx, true);
     const db = getActiveDb();
     if (!db) return { synced: 0 };
     return { synced: db.select().from(schema.sessions).all().length };

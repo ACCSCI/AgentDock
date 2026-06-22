@@ -174,13 +174,16 @@ describe("Phase 4: Full IPC surface (29 channels)", () => {
       expect(body).toMatchObject({ success: true, status: "ok" });
     });
 
-    it("daemon accepts a sample /sessions/list call (proves typed Hono client path)", async () => {
+    it("daemon accepts a sample /sync call (proves typed Hono client path)", async () => {
       const info = JSON.parse(readFileSync(daemonJsonPath, "utf-8"));
-      const res = await fetch(`http://127.0.0.1:${info.port}/sessions/list`, {
-        method: "GET",
+      const res = await fetch(`http://127.0.0.1:${info.port}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: "phase4-test", pid: process.pid, lastSeq: 0 }),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { sessions: unknown[] };
+      const body = (await res.json()) as { success: boolean; sessions: unknown[] };
+      expect(body.success).toBe(true);
       expect(Array.isArray(body.sessions)).toBe(true);
     });
   });

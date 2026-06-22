@@ -15,6 +15,11 @@
  * The calls are wrapped in a function so vitest doesn't execute them
  * (which would fail with EADDRNOTAVAIL on the fake URL). tsc still
  * type-checks the body.
+ *
+ * Note: v1 session/port routes (/sessions/allocate, /sessions/release,
+ * /sessions/reassign, /sessions/list, /ports/allocate, /ports/release,
+ * /sync/declare) were removed in F10-2a. The daemon's current surface
+ * is in plugins/daemon/routes/{v2,health,registry,clients,debug}.ts.
  */
 
 import { createDaemonClient } from "../hono-client.js";
@@ -28,8 +33,6 @@ function _typeChecks(): void {
   // --- Valid calls (should compile) ---
 
   void client.health.$get();
-  void client.ports.allocate.$post({ json: { count: 5 } });
-  void client.ports.release.$post({ json: { ports: [30000] } });
   void client.register.$post({ json: { dir: "/x", pid: 1 } });
   void client.unregister.$post({ json: { dir: "/x" } });
   void client.status.$get();
@@ -38,22 +41,21 @@ function _typeChecks(): void {
   });
   void client.client.unregister.$post({ json: { clientId: "c1" } });
   void client.client.heartbeat.$post({ json: { clientId: "c1" } });
-  void client.sessions.allocate.$post({
-    json: {
-      clientId: "c1",
-      sessionId: "s1",
-      projectPath: "/p",
-      worktreePath: "/w",
-    },
+  // v2 endpoints (P9+)
+  void client.sync.$post({
+    json: { clientId: "c1", pid: 1, lastSeq: 0 },
   });
-  void client.sessions.release.$post({ json: { clientId: "c1", sessionId: "s1" } });
-  void client.sessions.reassign.$post({ json: { clientId: "c1", sessionId: "s1" } });
-  void client.sessions.list.$get();
-  void client.sync.declare.$post({ json: { clientId: "c1", sessions: [] } });
+  void client.session.create.$post({
+    json: { clientId: "c1", projectRoot: "/p", displayName: "s1" },
+  });
+  void client.session.activate.$post({
+    json: { sessionId: "v2-1", fencingToken: 1 },
+  });
+  void client.session.delete.$post({
+    json: { sessionId: "v2-1", fencingToken: 1 },
+  });
   void client.debug.state.$get();
-  void client.debug.invariants.$get();
-  void client.debug.wal.$get();
-  void client.debug.ports.$get();
+  void client.debug["invariants-v2"].$get();
   void client.debug.clients.$get();
   void client.debug["simulate-stale"].$post({ json: { clientId: "c1" } });
   void client.debug["trigger-cleanup"].$post({ json: {} });
@@ -62,24 +64,20 @@ function _typeChecks(): void {
 
   // @ts-expect-error - missing required json body
   void client.health.$get();
-  // @ts-expect-error - missing required field 'count'
-  void client.ports.allocate.$post({ json: {} });
   // @ts-expect-error - missing required field 'dir'
   void client.register.$post({ json: { json: { dir: "/x" } } });
   // @ts-expect-error - missing required field 'pid'
   void client.register.$post({ json: { dir: "/x" } });
   // @ts-expect-error - missing required fields 'pid' and 'projectPaths'
   void client.client.register.$post({ json: { clientId: "c1" } });
-  // @ts-expect-error - missing required field 'sessionId'
-  void client.sessions.allocate.$post({
-    json: { clientId: "c1", projectPath: "/p", worktreePath: "/w" },
+  // @ts-expect-error - missing required field 'projectRoot'
+  void client.session.create.$post({
+    json: { clientId: "c1", displayName: "s1" },
   });
-  // @ts-expect-error - missing required field 'worktreePath'
-  void client.sessions.allocate.$post({
-    json: { clientId: "c1", sessionId: "s1", projectPath: "/p" },
+  // @ts-expect-error - missing required field 'fencingToken'
+  void client.session.activate.$post({
+    json: { sessionId: "v2-1" },
   });
-  // @ts-expect-error - sessions must be an array
-  void client.sync.declare.$post({ json: { clientId: "c1", sessions: "not-an-array" } });
 }
 
 describe("Hono client type fixture", () => {

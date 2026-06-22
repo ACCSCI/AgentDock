@@ -69,11 +69,12 @@ export function registerAllIpc(deps: AllIpcDeps): void {
   const dbCtx: DbContext = {
     getProjectPath: deps.getProjectPath,
     setProjectPath: deps.setProjectPath,
-    getDaemonClient: deps.getDaemonClient,
     getClientId: deps.getClientId,
     getSessionStatus: deps.getSessionStatus,
     setSessionStatus: deps.setSessionStatus,
     clearSessionStatuses: deps.clearSessionStatuses,
+    getV2PortService: deps.getV2PortService,
+    getDaemonPort: deps.getDaemonPort,
   };
   registerDb(dbCtx);
 
