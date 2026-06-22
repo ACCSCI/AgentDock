@@ -134,6 +134,8 @@ const api = {
               createdAt: string;
               /** §4.3.1: 客户端 syncProject() 设置的运行时状态 */
               runtimeStatus?: string;
+              userStatus: string | null;
+              lastActivatedAt: string | null;
             }>;
           }>
         >("db:projects:list"),
@@ -179,6 +181,10 @@ const api = {
       invoke<string | null>("sessions:bgHookStatus", sessionId),
     hookErrors: (sessionId: string) =>
       invoke<unknown[]>("sessions:hookErrors", sessionId),
+    setUserStatus: (sessionId: string, status: string | null) =>
+      invoke<{ success: true }>("sessions:setUserStatus", { sessionId, status }),
+    activate: (sessionId: string) =>
+      invoke<{ success: true }>("sessions:activate", { sessionId }),
   },
 
   // P9: v2 daemon API — direct endpoints for renderer-driven lifecycle.
@@ -362,6 +368,34 @@ const api = {
   shell: {
     openExplorer: (targetPath: string) => invoke<{ success: true }>("shell:openExplorer", targetPath),
     openTerminal: (targetPath: string) => invoke<{ success: true }>("shell:openTerminal", targetPath),
+  },
+
+  // Window controls for custom titlebar (non-macOS frameless window)
+  windowControls: {
+    minimize: () => invoke<void>("window:minimize"),
+    maximize: () => invoke<void>("window:maximize"),
+    close: () => invoke<void>("window:close"),
+    isMaximized: () => invoke<boolean>("window:isMaximized"),
+    platform: () => invoke<string>("window:platform"),
+    onMaximizeChange: (cb: (maximized: boolean) => void) => {
+      return on<boolean>("window:maximize-change", cb);
+    },
+  },
+
+  // Per-project todo list
+  todos: {
+    list: (projectId: string) =>
+      invoke<Array<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>>("todos:list", { projectId }),
+    create: (projectId: string, content: string) =>
+      invoke<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>("todos:create", { projectId, content }),
+    toggle: (id: string, completed: boolean) =>
+      invoke<void>("todos:toggle", { id, completed }),
+    update: (id: string, content: string) =>
+      invoke<void>("todos:update", { id, content }),
+    delete: (id: string) =>
+      invoke<void>("todos:delete", { id }),
+    reorder: (todoIds: string[]) =>
+      invoke<void>("todos:reorder", { todoIds }),
   },
 };
 

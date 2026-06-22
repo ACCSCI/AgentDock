@@ -50,6 +50,8 @@ export const IPC_CHANNELS = {
   "sessions:stream": "sessions:stream",
   "sessions:bgHookStatus": "sessions:bgHookStatus",
   "sessions:hookErrors": "sessions:hookErrors",
+  "sessions:setUserStatus": "sessions:setUserStatus",
+  "sessions:activate": "sessions:activate",
 
   // terminals (REST for create/list/rename/delete + IPC for streaming)
   "terminals:create": "terminals:create",
@@ -105,6 +107,21 @@ export const IPC_CHANNELS = {
   "sessions:v2:reassign": "sessions:v2:reassign",
   "sessions:v2:status": "sessions:v2:status",
   "sessions:v2:takeover": "sessions:v2:takeover",
+
+  // window (custom titlebar controls — non-macOS)
+  "window:minimize": "window:minimize",
+  "window:maximize": "window:maximize",
+  "window:close": "window:close",
+  "window:isMaximized": "window:isMaximized",
+  "window:platform": "window:platform",
+
+  // todos (per-project todo list in custom titlebar)
+  "todos:list": "todos:list",
+  "todos:create": "todos:create",
+  "todos:toggle": "todos:toggle",
+  "todos:update": "todos:update",
+  "todos:delete": "todos:delete",
+  "todos:reorder": "todos:reorder",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;

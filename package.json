@@ -33,7 +33,9 @@
     "acceptance:phase4": "vitest run scripts/acceptance/phase4-ipc.test.ts",
     "acceptance:all": "vitest run scripts/acceptance/",
     "kill-all": "bun run scripts/kill-all.ts",
-    "debug": "bun run scripts/debug-start.ts"
+    "debug": "bun run scripts/debug-start.ts",
+    "download-fonts": "bun run scripts/download-fonts.ts",
+    "prebuild": "bun run download-fonts"
   },
   "dependencies": {
     "@ai-sdk/devtools": "^0.0.18",
@@ -47,6 +49,7 @@
     "ai": "^6.0.195",
     "drizzle-orm": "^1.0.0-rc.3",
     "hono": "^4.12.25",
+    "lucide-react": "^1.21.0",
     "nanoid": "^5.1.11",
     "node-pty": "^1.1.0",
     "pino": "^10.3.1",
@@ -62,12 +65,12 @@
     "@tanstack/react-router-devtools": "^1.120.3",
     "@tanstack/router-plugin": "^1.120.3",
     "@types/node": "^25.9.1",
-    "cross-env": "^7.0.3",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.6",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.5.2",
     "@vitest/coverage-v8": "^4.1.8",
+    "cross-env": "^7.0.3",
     "drizzle-kit": "^0.31.10",
     "electron": "^42.4.0",
     "electron-builder": "^26.15.2",

@@ -20,6 +20,8 @@ export const sessions = sqliteTable("sessions", {
   ports: text("ports"),
   backgroundHookStatus: text("background_hook_status"),
   backgroundHookErrors: text("background_hook_errors"),
+  userStatus: text("user_status"),
+  lastActivatedAt: text("last_activated_at"),
   sortOrder: integer("sort_order").$defaultFn(() => Date.now()),
   createdAt: text("created_at")
     .notNull()
@@ -28,3 +30,21 @@ export const sessions = sqliteTable("sessions", {
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
+
+export const todos = sqliteTable("todos", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type TodoRow = typeof todos.$inferSelect;

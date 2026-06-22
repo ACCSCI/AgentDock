@@ -1,5 +1,65 @@
 /* Global styles for AgentDock */
 
+/* Maple Mono (NF + CN) — bundled with the app */
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* JetBrains Mono — bundled with the app */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -27,7 +87,7 @@
   --radius: 12px;
   --radius-sm: 6px;
   --radius-md: 8px;
-  --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  --font-mono: "Maple Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
   --tab-height: 40px;
   --sidebar-width: 240px;
 
@@ -405,8 +465,7 @@ body {
 
 .session-card-active {
   background: #ffe8ec;
-  border-color: var(--color-primary-hover);
-  box-shadow: 0 0 0 1px var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 /* Drag-and-drop reordering styles */
@@ -698,12 +757,12 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  padding: 4px;
 }
 
 .session-terminal-xterm {
   flex: 1;
   overflow: hidden;
-  padding: 4px;
 }
 
 .session-terminal-xterm .xterm {
@@ -808,6 +867,111 @@ body {
   height: 1px;
   margin: 4px 0;
   background: var(--color-border-light);
+}
+
+/* ── Context menu: status submenu ────────────────────────────────── */
+.context-menu-submenu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: default;
+  position: relative;
+}
+
+.context-menu-submenu-arrow {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: 12px;
+}
+
+.context-menu-submenu {
+  position: fixed;
+  z-index: 1001;
+}
+
+.context-menu-status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-menu-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.context-menu-check {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.context-menu-status-active {
+  background: var(--color-bg-secondary);
+  font-weight: 500;
+}
+
+/* ── Session card: heatmap overlay + status icon ─────────────────── */
+.session-card-user-status {
+  position: relative;
+}
+
+.session-card-user-status::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--session-status-color, transparent);
+  opacity: var(--session-heat, 0);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.8s ease;
+}
+
+/* Left accent bar — always visible when status is set, opacity tied to heat */
+.session-card-user-status::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--session-status-color, transparent);
+  opacity: calc(var(--session-heat, 0) + 0.15);
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.8s ease;
+}
+
+.session-card-user-status > * {
+  position: relative;
+  z-index: 1;
+}
+
+.session-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 6px;
+  border: 1.5px solid var(--session-status-color, #d1d5db);
+  background: transparent;
+}
+
+/* Empty circle when no status is set */
+.session-status-icon-empty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
 }
 
 /* Workspace Session Info */
@@ -1082,6 +1246,33 @@ body {
 
 .terminal-tab-exited {
   opacity: 0.5;
+}
+
+/* Terminal tab drag-and-drop reordering */
+.terminal-tab-bar.drag-active {
+  background: var(--color-bg-tertiary);
+}
+
+.terminal-tab[draggable="true"] {
+  cursor: grab;
+}
+
+.terminal-tab[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.terminal-tab.dragging {
+  opacity: 0.4;
+}
+
+.terminal-tab.drag-over-left {
+  border-left: 2px solid var(--color-primary, #e11931);
+  padding-left: 8px;
+}
+
+.terminal-tab.drag-over-right {
+  border-right: 2px solid var(--color-primary, #e11931);
+  padding-right: 8px;
 }
 
 .terminal-tab-icon {
@@ -2568,6 +2759,345 @@ body {
    Config Editor — Port Configuration (env.ports)
    ============================================ */
 
+/* ============================================
+   Custom Titlebar
+   ============================================ */
+
+.custom-titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.custom-titlebar--macos {
+  height: 28px;
+  padding-left: 70px; /* Space for native traffic lights */
+}
+
+.custom-titlebar-left {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.custom-titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.custom-titlebar-drag {
+  flex: 1;
+  -webkit-app-region: drag;
+  height: 100%;
+}
+
+.custom-titlebar-drag--macos {
+  -webkit-app-region: drag;
+}
+
+.custom-titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn {
+  width: 46px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.custom-titlebar-btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.custom-titlebar-todo-btn {
+  width: 36px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-todo-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* ============================================
+   Todo Dropdown
+   ============================================ */
+
+.todo-dropdown {
+  position: fixed;
+  top: 36px;
+  right: 12px;
+  width: 280px;
+  max-height: 400px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fade-in 0.1s ease-out;
+}
+
+.todo-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.todo-dropdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.todo-dropdown-count {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.todo-dropdown-input-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.todo-dropdown-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.todo-dropdown-input:focus {
+  border-color: var(--color-primary);
+}
+
+.todo-dropdown-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-dropdown-input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.todo-dropdown-add-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.todo-dropdown-add-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.todo-dropdown-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.todo-dropdown-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 60px;
+  max-height: 300px;
+}
+
+.todo-dropdown-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.todo-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  transition: background 0.1s;
+}
+
+.todo-dropdown-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.todo-dropdown-item:hover .todo-dropdown-delete-btn {
+  opacity: 1;
+}
+
+.todo-dropdown-item--dragging {
+  opacity: 0.4;
+}
+
+.todo-dropdown-item--drag-over {
+  border-top: 2px solid var(--color-primary);
+}
+
+.todo-dropdown-drag-handle {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  cursor: grab;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  user-select: none;
+  transition: opacity 0.1s;
+}
+
+.todo-dropdown-item:hover .todo-dropdown-drag-handle {
+  opacity: 0.6;
+}
+
+.todo-dropdown-drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--color-primary);
+}
+
+.todo-dropdown-item--dragging .todo-dropdown-drag-handle {
+  cursor: grabbing;
+}
+
+.todo-dropdown-checkbox {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.todo-dropdown-item-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.todo-dropdown-item--completed .todo-dropdown-item-text {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.todo-dropdown-edit-input {
+  flex: 1;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.todo-dropdown-delete-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.todo-dropdown-delete-btn:hover {
+  color: #dc2626;
+}
+
+/* Toast */
+.todo-toast {
+  position: fixed;
+  top: 40px;
+  right: 16px;
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  z-index: 9999;
+  pointer-events: none;
+  animation: toast-in 0.15s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 .config-port-list {
   display: flex;
   flex-wrap: wrap;
@@ -2943,4 +3473,168 @@ body {
 .file-picker-btn-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ==================== Settings Page ==================== */
+.settings-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.settings-back-btn {
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-back-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.settings-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: 14px;
+}
+
+/* Shortcut row */
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.settings-shortcut-label {
+  font-size: 14px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.settings-shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Key badge: shows the current keybinding */
+.settings-shortcut-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.settings-shortcut-badge-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.settings-shortcut-badge-remove:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--color-primary);
+}
+
+.settings-shortcut-badge-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* "+ 添加" / "请按下快捷键…" button */
+.settings-shortcut-add {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+
+.settings-shortcut-add:hover:not(:disabled) {
+  background: var(--color-primary-bg);
+}
+
+.settings-shortcut-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Footer: reset button */
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 8px;
+}
+
+.settings-reset-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.settings-reset-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }

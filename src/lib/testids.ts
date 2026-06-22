@@ -40,6 +40,10 @@ export const TID = {
   // IconSidebar
   iconSidebar: "icon-sidebar",
   copyCompatPrompt: "copy-compat-prompt",
+  openSettings: "open-settings",
+
+  // Settings page
+  settingsPage: "settings-page",
 
   // DaemonStatusBar (新架构 §2 + §11.1)
   daemonStatusBar: "daemon-status-bar",

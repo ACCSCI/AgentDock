@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useV2Projects } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useV2Projects } from "../lib/queries";
+import type { SessionUserStatus } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
+import { toast } from "../lib/toast";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
@@ -21,10 +23,13 @@ export function SessionSidebar() {
   const reassignPorts = useReassignPorts();
   const retryHook = useRetryHook();
   const reorderSessions = useReorderSessions();
+  const setUserStatus = useSetSessionUserStatus();
+  const activateSession = useActivateSession();
 
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<"before" | "after">("after");
   const draggedIdRef = useRef<string | null>(null);
+  const lastCreateAtRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [foreignOpen, setForeignOpen] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -168,8 +173,14 @@ export function SessionSidebar() {
     });
   };
 
+  const CREATE_COOLDOWN_MS = 1500;
+
   const handleNewSession = async () => {
     if (!activeProject) return;
+    const now = Date.now();
+    if (now - lastCreateAtRef.current < CREATE_COOLDOWN_MS) return;
+    lastCreateAtRef.current = now;
+
     const existingNames = new Set(sessions.map((s) => s.name));
     let count = sessions.length + 1;
     while (existingNames.has(`Session ${count}`)) count++;
@@ -180,7 +191,8 @@ export function SessionSidebar() {
         tempId: `temp-${Date.now()}`,
       });
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to create session:", err);
+      toast.error(`创建失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -190,7 +202,8 @@ export function SessionSidebar() {
       await deleteSession.mutateAsync({ sessionId, projectId: activeProject.id });
       terminalCache.disposeBySession(sessionId);
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to delete session:", err);
+      toast.error(`删除失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -198,7 +211,8 @@ export function SessionSidebar() {
     try {
       await renameSession.mutateAsync({ sessionId, name: newName });
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to rename session:", err);
+      toast.error(`重命名失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -222,7 +236,8 @@ export function SessionSidebar() {
     try {
       await reassignPorts.mutateAsync(sessionId);
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to reassign ports:", err);
+      toast.error(`重新分配端口失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -230,8 +245,22 @@ export function SessionSidebar() {
     try {
       await retryHook.mutateAsync(sessionId);
     } catch (err) {
-      alert(`重试失败: ${err instanceof Error ? err.message : "未知错误"}`);
+      console.error("Failed to retry hooks:", err);
+      toast.error(`重试失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
+  };
+
+  const handleSetUserStatus = async (sessionId: string, status: SessionUserStatus | null) => {
+    try {
+      await setUserStatus.mutateAsync({ sessionId, status });
+    } catch (err) {
+      alert(`设置状态失败: ${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  };
+
+  const handleActivate = (sessionId: string) => {
+    // Fire-and-forget — UI shows optimistic update immediately
+    activateSession.mutate(sessionId);
   };
 
   if (!activeProject) return null;
@@ -279,6 +308,8 @@ export function SessionSidebar() {
               onOpenInTerminal={handleOpenInTerminal}
               onReassignPorts={handleReassignPorts}
               onRetryHooks={handleRetryHooks}
+              onSetUserStatus={handleSetUserStatus}
+              onActivate={handleActivate}
               onHover={prefetchTerminals}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -305,6 +336,8 @@ export function SessionSidebar() {
                     onOpenInTerminal={handleOpenInTerminal}
                     onReassignPorts={handleReassignPorts}
                     onRetryHooks={handleRetryHooks}
+                    onSetUserStatus={handleSetUserStatus}
+                    onActivate={handleActivate}
                     onHover={prefetchTerminals}
                   />
                 ))}
@@ -317,7 +350,6 @@ export function SessionSidebar() {
         type="button"
         className="session-add"
         onClick={handleNewSession}
-        disabled={createSession.isPending}
         data-testid="new-session"
       >
         +

@@ -33,6 +33,8 @@ export type SessionRuntimeStatus =
   | "deleting"
   | "takeover";
 
+export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "done";
+
 export interface SessionPorts {
   FRONTEND_PORT: number;
   BACKEND_PORT: number;
@@ -58,6 +60,8 @@ export interface SessionData {
   canDelete?: boolean;
   canReassign?: boolean;
   canRename?: boolean;
+  userStatus?: SessionUserStatus | null;
+  lastActivatedAt?: string | null;
 }
 
 export interface SessionStep {
@@ -601,6 +605,73 @@ export function useRetryHook() {
   });
 }
 
+// PATCH sessions:setUserStatus
+export function useSetSessionUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, status }: { sessionId: string; status: SessionUserStatus | null }) => {
+      return api().sessions.setUserStatus(sessionId, status);
+    },
+    onMutate: async ({ sessionId, status }) => {
+      // Optimistic update
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prev = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => ({
+          ...p,
+          sessions: p.sessions.map((s) =>
+            s.id === sessionId ? { ...s, userStatus: status } : s,
+          ),
+        }));
+      });
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(queryKeys.projects, context.prev);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// PATCH sessions:activate
+export function useActivateSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      return api().sessions.activate(sessionId);
+    },
+    onMutate: async (sessionId) => {
+      // Optimistic update: set lastActivatedAt to now
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prev = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+      const now = new Date().toISOString();
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => ({
+          ...p,
+          sessions: p.sessions.map((s) =>
+            s.id === sessionId ? { ...s, lastActivatedAt: now } : s,
+          ),
+        }));
+      });
+      return { prev };
+    },
+    onError: (_err, _sessionId, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(queryKeys.projects, context.prev);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
 // GET orphans
 export function useOrphans(projectId: string | null) {
   return useQuery({
@@ -809,4 +880,93 @@ export function useV2ProjectSessions(projectId: string | null) {
     sessions,
     isV2: v2State?.ready ?? false,
   };
+}
+
+// ─── Todo hooks ────────────────────────────────────────────────────
+
+export interface TodoItem {
+  id: string;
+  projectId: string;
+  content: string;
+  completed: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// GET todos for a project
+export function useTodos(projectId: string | null) {
+  return useQuery({
+    queryKey: ["todos", projectId] as const,
+    queryFn: async (): Promise<TodoItem[]> => {
+      if (!projectId) return [];
+      return api().todos.list(projectId);
+    },
+    enabled: !!projectId,
+  });
+}
+
+// POST todos:create
+export function useCreateTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, content }: { projectId: string; content: string }) => {
+      return api().todos.create(projectId, content);
+    },
+    onSuccess: (_data, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ["todos", projectId] });
+    },
+  });
+}
+
+// PATCH todos:toggle
+export function useToggleTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, completed }: { id: string; completed: boolean }) => {
+      await api().todos.toggle(id, completed);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+}
+
+// PATCH todos:update (edit content)
+export function useUpdateTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, content }: { id: string; content: string }) => {
+      await api().todos.update(id, content);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+}
+
+// DELETE todos:delete
+export function useDeleteTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api().todos.delete(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+}
+
+// PATCH todos:reorder
+export function useReorderTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (todoIds: string[]) => {
+      await api().todos.reorder(todoIds);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
 }

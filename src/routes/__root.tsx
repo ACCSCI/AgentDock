@@ -1,5 +1,7 @@
 import { Outlet, createRootRoute } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { CustomTitleBar } from "../components/CustomTitleBar";
+import { ShortcutsProvider } from "../hooks/useShortcuts";
 import { TabBar } from "../components/TabBar";
 import { StoreProvider } from "../lib/store";
 
@@ -10,13 +12,16 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <StoreProvider>
-      <div className="app-shell">
-        <TabBar />
-        <div className="app-content">
-          <Outlet />
+      <ShortcutsProvider>
+        <div className="app-shell">
+          <CustomTitleBar />
+          <TabBar />
+          <div className="app-content">
+            <Outlet />
+          </div>
         </div>
-      </div>
-      {import.meta.env.DEV && <TanStackRouterDevtools position="bottom-right" />}
+        {import.meta.env.DEV && <TanStackRouterDevtools position="bottom-right" />}
+      </ShortcutsProvider>
     </StoreProvider>
   );
 }
