@@ -244,6 +244,7 @@ const api = {
         terminalId: string;
         sessionId: string;
         shell: string;
+        name: string;
         status: string;
         pid: number | null;
         createdAt: string;
@@ -254,6 +255,7 @@ const api = {
           terminalId: string;
           sessionId: string;
           shell: string;
+          name: string;
           status: string;
           pid: number | null;
           createdAt: string;
@@ -261,6 +263,8 @@ const api = {
       >("terminals:list", sessionId),
     rename: (terminalId: string, name: string) =>
       invoke<{ success: true }>("terminals:rename", { terminalId, name }),
+    write: (terminalId: string, data: string) =>
+      invoke<{ success: true }>("terminals:write", { terminalId, data }),
     delete: (terminalId: string) => invoke<{ success: true }>("terminals:delete", terminalId),
     open: (terminalId: string) => invoke<{ ready: true }>("terminals:open", terminalId),
     onPort: (cb: (data: { terminalId: string }, port: MessagePort) => void) => {

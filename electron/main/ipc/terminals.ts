@@ -56,6 +56,7 @@ export function registerTerminals(): void {
       terminalId: terminal.terminalId,
       sessionId: terminal.sessionId,
       shell: terminal.shell,
+      name: terminal.name,
       status: terminal.status,
       pid: terminal.pid,
       createdAt: new Date().toISOString(),
@@ -71,6 +72,7 @@ export function registerTerminals(): void {
       terminalId: t.terminalId,
       sessionId: t.sessionId,
       shell: t.shell,
+      name: t.name,
       status: t.status,
       pid: t.pid,
       createdAt: new Date().toISOString(),
@@ -90,6 +92,14 @@ export function registerTerminals(): void {
       throw new Error("terminalId required");
     }
     await terminalManager.kill(terminalId);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS["terminals:write"], (_e, params: { terminalId: string; data: string }) => {
+    if (!params?.terminalId || typeof params?.data !== "string") {
+      throw new Error("terminalId and data required");
+    }
+    terminalManager.write(params.terminalId, params.data);
     return { success: true };
   });
 

@@ -3,6 +3,29 @@ import type { ReactNode } from "react";
 
 export type TerminalStatus = "spawning" | "running" | "exited";
 
+export type TerminalDefaultAction = "terminal" | "claude" | "copilot";
+
+export const TERMINAL_FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24] as const;
+export type TerminalFontSize = (typeof TERMINAL_FONT_SIZES)[number];
+
+export const TERMINAL_FONT_FAMILIES = [
+  { label: "Cascadia Code", value: "'Cascadia Code', monospace" },
+  { label: "Fira Code", value: "'Fira Code', monospace" },
+  { label: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
+  { label: "Consolas", value: "'Consolas', monospace" },
+  { label: "monospace", value: "monospace" },
+] as const;
+
+export interface TerminalPreferences {
+  fontSize: TerminalFontSize;
+  fontFamily: string;
+}
+
+export const DEFAULT_TERMINAL_PREFS: TerminalPreferences = {
+  fontSize: 14,
+  fontFamily: "'Cascadia Code', monospace",
+};
+
 export interface TerminalInfo {
   terminalId: string;
   sessionId: string;
@@ -19,6 +42,8 @@ interface UIState {
   sidebarWidth: number;
   closedProjectIds: string[];
   activeTerminals: Map<string, string>; // sessionId → terminalId
+  terminalDefaultAction: TerminalDefaultAction;
+  terminalPrefs: TerminalPreferences;
 }
 
 interface StoreContextValue extends UIState {
@@ -30,6 +55,8 @@ interface StoreContextValue extends UIState {
   getActiveTerminal: (sessionId: string) => string | null;
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
+  setTerminalDefaultAction: (action: TerminalDefaultAction) => void;
+  setTerminalPrefs: (prefs: TerminalPreferences) => void;
 }
 
 const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
@@ -65,6 +92,35 @@ function saveClosedProjects(ids: string[]) {
   } catch { /* localStorage full or unavailable */ }
 }
 
+const TERMINAL_DEFAULT_ACTION_KEY = "agentdock_terminal_default_action";
+
+function loadTerminalDefaultAction(): TerminalDefaultAction {
+  try {
+    const raw = localStorage.getItem(TERMINAL_DEFAULT_ACTION_KEY);
+    if (raw === "terminal" || raw === "claude" || raw === "copilot") return raw;
+  } catch { /* ignore */ }
+  return "terminal";
+}
+
+const TERMINAL_PREFS_KEY = "agentdock_terminal_prefs";
+
+function loadTerminalPrefs(): TerminalPreferences {
+  try {
+    const raw = localStorage.getItem(TERMINAL_PREFS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<TerminalPreferences>;
+      const fontSize = (typeof parsed.fontSize === "number" && TERMINAL_FONT_SIZES.includes(parsed.fontSize as TerminalFontSize))
+        ? (parsed.fontSize as TerminalFontSize)
+        : DEFAULT_TERMINAL_PREFS.fontSize;
+      const fontFamily = typeof parsed.fontFamily === "string" && parsed.fontFamily
+        ? parsed.fontFamily
+        : DEFAULT_TERMINAL_PREFS.fontFamily;
+      return { fontSize, fontFamily };
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_TERMINAL_PREFS;
+}
+
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -75,6 +131,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     sidebarWidth: loadSidebarWidth(),
     closedProjectIds: loadClosedProjects(),
     activeTerminals: new Map(),
+    terminalDefaultAction: loadTerminalDefaultAction(),
+    terminalPrefs: loadTerminalPrefs(),
   });
 
   const setActiveProject = useCallback((projectId: string | null) => {
@@ -130,6 +188,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* localStorage full */ }
   }, []);
 
+  const setTerminalDefaultAction = useCallback((action: TerminalDefaultAction) => {
+    setState((prev) => ({ ...prev, terminalDefaultAction: action }));
+    try { localStorage.setItem(TERMINAL_DEFAULT_ACTION_KEY, action); } catch { /* ignore */ }
+  }, []);
+
+  const setTerminalPrefs = useCallback((prefs: TerminalPreferences) => {
+    setState((prev) => ({ ...prev, terminalPrefs: prefs }));
+    try { localStorage.setItem(TERMINAL_PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
@@ -142,6 +210,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         getActiveTerminal,
         toggleSidebar,
         setSidebarWidth,
+        setTerminalDefaultAction,
+        setTerminalPrefs,
       }}
     >
       {children}

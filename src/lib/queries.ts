@@ -89,6 +89,7 @@ export interface TerminalData {
   terminalId: string;
   sessionId: string;
   shell: string;
+  name: string;
   status: string;
   pid: number | null;
   createdAt: string;

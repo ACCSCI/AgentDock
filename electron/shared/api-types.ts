@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   "terminals:list": "terminals:list",
   "terminals:rename": "terminals:rename",
   "terminals:delete": "terminals:delete",
+  "terminals:write": "terminals:write",
   "terminals:open": "terminals:open",
 
   // fs (direct node:fs calls in main)

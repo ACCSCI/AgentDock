@@ -41,30 +41,32 @@ function ProjectWorkspace() {
       </div>
       {activeSession && (
         <div className="workspace-session-info">
-          <span className="workspace-session-label">{activeSession.name}</span>
-          <span className="workspace-session-path">{activeSession.worktreePath}</span>
-          {activeSession.backgroundHookStatus === "failed" && (
-            <button
-              type="button"
-              className="workspace-hook-errors-btn"
-              onClick={() => setShowHookErrors(true)}
-            >
-              ⚠ 查看失败日志
-            </button>
-          )}
-          {shouldShowStatus && (
-            <button
-              type="button"
-              className={`workspace-session-status workspace-session-status-${transientStatus}`}
-              onClick={() => {
-                if (!dismissKey) return;
-                setDismissedStatuses((prev) => ({ ...prev, [dismissKey]: true }));
-              }}
-              title={transientStatus === "reclaimed" ? "This session was recovered from a stale owner. Click to dismiss." : "Ports were refreshed during recovery. Click to dismiss."}
-            >
-              {transientStatus === "reclaimed" ? "Recovered" : "Ports refreshed"} ×
-            </button>
-          )}
+          <div className="workspace-session-row">
+            <span className="workspace-session-label">{activeSession.name}</span>
+            <span className="workspace-session-path">{activeSession.worktreePath}</span>
+            {activeSession.backgroundHookStatus === "failed" && (
+              <button
+                type="button"
+                className="workspace-hook-errors-btn"
+                onClick={() => setShowHookErrors(true)}
+              >
+                ⚠ 查看失败日志
+              </button>
+            )}
+            {shouldShowStatus && (
+              <button
+                type="button"
+                className={`workspace-session-status workspace-session-status-${transientStatus}`}
+                onClick={() => {
+                  if (!dismissKey) return;
+                  setDismissedStatuses((prev) => ({ ...prev, [dismissKey]: true }));
+                }}
+                title={transientStatus === "reclaimed" ? "This session was recovered from a stale owner. Click to dismiss." : "Ports were refreshed during recovery. Click to dismiss."}
+              >
+                {transientStatus === "reclaimed" ? "Recovered" : "Ports refreshed"} ×
+              </button>
+            )}
+          </div>
           {activeSession.ports && (
             <span className="workspace-session-ports">
               {Object.entries(activeSession.ports).map(([key, value]) => (
