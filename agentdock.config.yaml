@@ -1,11 +1,17 @@
-﻿version: "1"
-
+version: "1"
 resources:
   sync: []
-
 hooks:
   afterCreateSession:
-    - run: "bun install"
+    - run: bun install
       required: true
       timeout: 120000
-      async: true
+      cwd: worktree
+      async: false
+env:
+  ports:
+    - FRONTEND_PORT
+    - BACKEND_PORT
+    - WS_PORT
+    - DEBUG_PORT
+    - PREVIEW_PORT
