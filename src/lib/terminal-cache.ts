@@ -506,13 +506,32 @@ class TerminalCache {
     };
   }
 
-  /** Send text input to a terminal via IPC (reliable, no port needed). */
-  sendText(terminalId: string, text: string, delayMs = 600): void {
-    setTimeout(() => {
-      window.api.terminals.write(terminalId, text).catch((err) => {
-        console.warn(`[TerminalCache] sendText(${terminalId}) failed:`, err);
+  /** Send text input to a terminal via IPC — waits for connection dynamically. */
+  sendText(terminalId: string, text: string): void {
+    const trySend = () => {
+      const entry = this.cache.get(terminalId);
+      if (!entry) {
+        setTimeout(trySend, 50);
+        return;
+      }
+      if (entry.status === "connected") {
+        window.api.terminals.write(terminalId, text).catch((err) => {
+          console.warn(`[TerminalCache] sendText(${terminalId}) failed:`, err);
+        });
+        return;
+      }
+      const unsubscribe = this.onStatusChange(terminalId, (status) => {
+        if (status === "connected") {
+          unsubscribe();
+          window.api.terminals.write(terminalId, text).catch((err) => {
+            console.warn(`[TerminalCache] sendText(${terminalId}) failed:`, err);
+          });
+        } else if (status === "exited" || status === "error") {
+          unsubscribe();
+        }
       });
-    }, delayMs);
+    };
+    trySend();
   }
 
   /** Update font size/family on all existing terminal instances. */

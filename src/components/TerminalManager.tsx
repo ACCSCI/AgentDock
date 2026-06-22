@@ -75,6 +75,14 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     return () => window.removeEventListener("mousedown", close);
   }, [showAddMenu]);
 
+  // Clean up hover timers on unmount
+  useEffect(() => {
+    return () => {
+      if (addHoverTimer.current) clearTimeout(addHoverTimer.current);
+      if (addLeaveTimer.current) clearTimeout(addLeaveTimer.current);
+    };
+  }, []);
+
   // Single effect for terminal selection
   useEffect(() => {
     if (justCreatedRef.current && terminals.find((t) => t.terminalId === justCreatedRef.current)) {
@@ -110,17 +118,6 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     addLeaveTimer.current = setTimeout(() => setShowAddMenu(false), 200);
   }, []);
 
-  const handleMenuEnter = useCallback(() => {
-    if (addLeaveTimer.current) {
-      clearTimeout(addLeaveTimer.current);
-      addLeaveTimer.current = null;
-    }
-  }, []);
-
-  const handleMenuLeave = useCallback(() => {
-    addLeaveTimer.current = setTimeout(() => setShowAddMenu(false), 200);
-  }, []);
-
   // --- Terminal creation ---
 
   const createTerminalWithAction = useCallback(async (action: TerminalDefaultAction) => {
@@ -139,7 +136,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       // Inject command for claude/copilot (\r = Enter key on Windows terminal)
       const cmd = ACTION_ITEMS.find((a) => a.key === action)?.command;
       if (cmd) {
-        terminalCache.sendText(terminal.terminalId, cmd + "\r", 1200);
+        terminalCache.sendText(terminal.terminalId, cmd + "\r");
       }
     } catch (err) {
       alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -288,11 +285,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
           </button>
 
           {showAddMenu && (
-            <div
-              className="terminal-add-dropdown"
-              onMouseEnter={handleMenuEnter}
-              onMouseLeave={handleMenuLeave}
-            >
+            <div className="terminal-add-dropdown">
               {ACTION_ITEMS.map((item) => (
                 <div
                   key={item.key}
