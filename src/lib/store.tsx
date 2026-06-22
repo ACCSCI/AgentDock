@@ -9,6 +9,7 @@ export const TERMINAL_FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24] 
 export type TerminalFontSize = (typeof TERMINAL_FONT_SIZES)[number];
 
 export const TERMINAL_FONT_FAMILIES = [
+  { label: "Maple Mono", value: "'Maple Mono', monospace" },
   { label: "Cascadia Code", value: "'Cascadia Code', monospace" },
   { label: "Fira Code", value: "'Fira Code', monospace" },
   { label: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
@@ -23,7 +24,7 @@ export interface TerminalPreferences {
 
 export const DEFAULT_TERMINAL_PREFS: TerminalPreferences = {
   fontSize: 14,
-  fontFamily: "'Cascadia Code', monospace",
+  fontFamily: "'Maple Mono', monospace",
 };
 
 export interface TerminalInfo {
