@@ -1,5 +1,65 @@
 /* Global styles for AgentDock */
 
+/* Maple Mono (NF + CN) — bundled with the app */
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono";
+  src: url("/fonts/MapleMono-NF-CN-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* JetBrains Mono — bundled with the app */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -27,7 +87,7 @@
   --radius: 12px;
   --radius-sm: 6px;
   --radius-md: 8px;
-  --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  --font-mono: "Maple Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
   --tab-height: 40px;
   --sidebar-width: 240px;
 
@@ -712,12 +772,12 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  padding: 4px;
 }
 
 .session-terminal-xterm {
   flex: 1;
   overflow: hidden;
-  padding: 4px;
 }
 
 .session-terminal-xterm .xterm {
@@ -3228,4 +3288,168 @@ body {
 .file-picker-btn-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ==================== Settings Page ==================== */
+.settings-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.settings-back-btn {
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-back-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.settings-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: 14px;
+}
+
+/* Shortcut row */
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.settings-shortcut-label {
+  font-size: 14px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.settings-shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Key badge: shows the current keybinding */
+.settings-shortcut-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.settings-shortcut-badge-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.settings-shortcut-badge-remove:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--color-primary);
+}
+
+.settings-shortcut-badge-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* "+ 添加" / "请按下快捷键…" button */
+.settings-shortcut-add {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+
+.settings-shortcut-add:hover:not(:disabled) {
+  background: var(--color-primary-bg);
+}
+
+.settings-shortcut-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Footer: reset button */
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 8px;
+}
+
+.settings-reset-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.settings-reset-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }
