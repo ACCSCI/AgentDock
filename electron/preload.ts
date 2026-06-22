@@ -386,6 +386,8 @@ const api = {
       invoke<void>("todos:update", { id, content }),
     delete: (id: string) =>
       invoke<void>("todos:delete", { id }),
+    reorder: (todoIds: string[]) =>
+      invoke<void>("todos:reorder", { todoIds }),
   },
 };
 

@@ -825,12 +825,38 @@ export function useToggleTodo() {
   });
 }
 
+// PATCH todos:update (edit content)
+export function useUpdateTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, content }: { id: string; content: string }) => {
+      await api().todos.update(id, content);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+}
+
 // DELETE todos:delete
 export function useDeleteTodo() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       await api().todos.delete(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+}
+
+// PATCH todos:reorder
+export function useReorderTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (todoIds: string[]) => {
+      await api().todos.reorder(todoIds);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });

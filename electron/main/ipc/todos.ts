@@ -97,4 +97,18 @@ export function registerTodos(): void {
     const db = getDb();
     db.delete(schema.todos).where(eq(schema.todos.id, id)).run();
   });
+
+  ipcMain.handle(
+    "todos:reorder",
+    (_event, args: { todoIds: string[] }) => {
+      const { todoIds } = args as { todoIds: string[] };
+      const db = getDb();
+      for (let i = 0; i < todoIds.length; i++) {
+        db.update(schema.todos)
+          .set({ sortOrder: i, updatedAt: new Date().toISOString() })
+          .where(eq(schema.todos.id, todoIds[i]))
+          .run();
+      }
+    },
+  );
 }

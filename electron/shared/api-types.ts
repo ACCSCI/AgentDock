@@ -119,6 +119,7 @@ export const IPC_CHANNELS = {
   "todos:toggle": "todos:toggle",
   "todos:update": "todos:update",
   "todos:delete": "todos:delete",
+  "todos:reorder": "todos:reorder",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;
