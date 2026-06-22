@@ -13,10 +13,14 @@
  * Font versions must stay in sync with `scripts/download-fonts.ts`.
  */
 import { app, protocol, type BrowserWindow } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { readFile, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { exec, type ExecOptions } from "node:child_process";
+import { promisify } from "node:util";
 import { log } from "../../plugins/logger.js";
+
+const execAsync = promisify(exec);
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -70,12 +74,12 @@ export function registerFontProtocol(): void {
     mkdirSync(dir, { recursive: true });
   }
 
-  protocol.handle("agentdock-fonts", (request) => {
+  protocol.handle("agentdock-fonts", async (request) => {
     // URL shape: agentdock-fonts:///fonts/MapleMono-NF-CN-Regular.ttf
     const relativePath = new URL(request.url).pathname; // e.g. "/fonts/MapleMono-..."
     const filePath = join(dir, relativePath.replace(/^\/fonts\//, ""));
     try {
-      const data = readFileSync(filePath);
+      const data = await readFile(filePath);
       return new Response(data);
     } catch {
       return new Response(null, { status: 404 });
@@ -106,29 +110,30 @@ async function downloadFile(url: string, dest: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Download failed ${url}: ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  writeFileSync(dest, buf);
+  await writeFile(dest, buf);
 }
 
-function unzipSingle(zipPath: string, outDir: string, innerPath: string, destPath: string): void {
+async function unzipSingle(zipPath: string, outDir: string, innerPath: string, destPath: string): Promise<void> {
   const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const opts: ExecOptions = { stdio: "ignore" };
   const cmds = [
     `unzip -o '${esc(zipPath)}' '${esc(innerPath)}' -d '${esc(outDir)}'`,
     `tar -xf '${esc(zipPath)}' '${esc(innerPath)}' -C '${esc(outDir)}'`,
   ];
   for (const cmd of cmds) {
     try {
-      execSync(cmd, { stdio: "ignore" });
-      renameSync(join(outDir, innerPath), destPath);
+      await execAsync(cmd, opts);
+      await rename(join(outDir, innerPath), destPath);
       return;
     } catch { /* try next */ }
   }
   // PowerShell fallback
   try {
-    execSync(
+    await execAsync(
       `powershell -Command "Expand-Archive -Path '${esc(zipPath)}' -DestinationPath '${esc(outDir)}' -Force"`,
-      { stdio: "ignore" },
+      opts,
     );
-    renameSync(join(outDir, innerPath), destPath);
+    await rename(join(outDir, innerPath), destPath);
     return;
   } catch { /* fail */ }
   throw new Error(`Could not extract ${innerPath} from ${zipPath}`);
@@ -137,14 +142,16 @@ function unzipSingle(zipPath: string, outDir: string, innerPath: string, destPat
 // ── Font download ──────────────────────────────────────────────────────
 
 async function downloadMapleMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
-  for (const file of MAPLE_MONO_FILES) {
-    const dest = join(destDir, file);
-    if (existsSync(dest)) continue;
-    const asset = assets.get(file);
-    if (!asset) throw new Error(`Asset ${file} not found in maple-font@${MAPLE_MONO_TAG}`);
-    log.info({ file }, "downloading Maple Mono");
-    await downloadFile(asset.browser_download_url, dest);
-  }
+  await Promise.all(
+    MAPLE_MONO_FILES.map(async (file) => {
+      const dest = join(destDir, file);
+      if (existsSync(dest)) return;
+      const asset = assets.get(file);
+      if (!asset) throw new Error(`Asset ${file} not found in maple-font@${MAPLE_MONO_TAG}`);
+      log.info({ file }, "downloading Maple Mono");
+      await downloadFile(asset.browser_download_url, dest);
+    }),
+  );
 }
 
 async function downloadJetBrainsMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
@@ -162,9 +169,9 @@ async function downloadJetBrainsMono(destDir: string, assets: Map<string, GhAsse
     const destPath = join(destDir, dest);
     if (existsSync(destPath)) continue;
     log.info({ file: dest }, "extracting JetBrains Mono");
-    unzipSingle(zipDest, destDir, inner, destPath);
+    await unzipSingle(zipDest, destDir, inner, destPath);
   }
-  rmSync(zipDest, { force: true });
+  await rm(zipDest, { force: true });
 }
 
 async function downloadFonts(): Promise<void> {
@@ -173,19 +180,25 @@ async function downloadFonts(): Promise<void> {
     mkdirSync(dir, { recursive: true });
   }
 
-  // Fast-path: if the first Maple font exists, assume all are present.
-  if (fontExists(MAPLE_MONO_FILES[0]) && fontExists(JETBRAINS_EXTRACT[0].dest)) {
+  // Fast-path: only skip when ALL font files are present.
+  const allMaplePresent = MAPLE_MONO_FILES.every((f) => fontExists(f));
+  const allJetbrainsPresent = JETBRAINS_EXTRACT.every((e) => fontExists(e.dest));
+  if (allMaplePresent && allJetbrainsPresent) {
     log.info("bundled fonts already present — skipping download");
     return;
   }
 
   log.info("downloading bundled fonts …");
 
-  const mapleAssets = await ghReleaseAssets("subframe7536/maple-font", MAPLE_MONO_TAG);
-  await downloadMapleMono(dir, mapleAssets);
+  const [mapleAssets, jetbrainsAssets] = await Promise.all([
+    ghReleaseAssets("subframe7536/maple-font", MAPLE_MONO_TAG),
+    ghReleaseAssets("JetBrains/JetBrainsMono", JETBRAINS_TAG),
+  ]);
 
-  const jetbrainsAssets = await ghReleaseAssets("JetBrains/JetBrainsMono", JETBRAINS_TAG);
-  await downloadJetBrainsMono(dir, jetbrainsAssets);
+  await Promise.all([
+    downloadMapleMono(dir, mapleAssets),
+    downloadJetBrainsMono(dir, jetbrainsAssets),
+  ]);
 
   log.info("bundled fonts downloaded");
 }
