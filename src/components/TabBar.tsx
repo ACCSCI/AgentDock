@@ -3,13 +3,24 @@ import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
+import { GitInitConfirmModal } from "./GitInitConfirmModal";
 import { DaemonStatusBar } from "./DaemonStatusBar";
 
 export function TabBar() {
   const navigate = useNavigate();
   const { activeProjectId, activeSessionId, setActiveProject, setActiveSession, closedProjectIds, closeProject } = useStore();
   const { data: projects } = useProjects();
-  const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
+  const {
+    openProject,
+    modalOpen,
+    onModalConfirm,
+    onModalCancel,
+    gitInitModalOpen,
+    gitInitLoading,
+    selectedDirPath,
+    onGitInitConfirm,
+    onGitInitCancel,
+  } = useOpenProject();
   const openProjects = projects?.filter((p) => !closedProjectIds.includes(p.id)) ?? [];
 
   const handleRemoveProject = (projectId: string) => {
@@ -70,6 +81,13 @@ export function TabBar() {
         +
       </button>
       <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
+      <GitInitConfirmModal
+        open={gitInitModalOpen}
+        dirPath={selectedDirPath}
+        onConfirm={onGitInitConfirm}
+        onCancel={onGitInitCancel}
+        loading={gitInitLoading}
+      />
       </div>
     </>
   );

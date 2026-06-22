@@ -36,6 +36,21 @@ export function isGitRepo(dirPath: string): boolean {
   }
 }
 
+/**
+ * Initialize a new git repository in `dirPath` using `-b main` as the
+ * default branch (modern convention; avoids `master`). `-q` suppresses
+ * the "Initialized empty Git repository..." banner. Throws on failure
+ * (e.g. git binary missing, EACCES, read-only filesystem) — callers
+ * should catch and surface via toast/error.
+ */
+export function initGitRepo(dirPath: string): void {
+  execSync("git init -q -b main", {
+    cwd: dirPath,
+    encoding: "utf-8",
+    stdio: "pipe",
+  });
+}
+
 export function getCurrentBranch(projectPath: string): string {
   return execSync("git branch --show-current", {
     cwd: projectPath,
