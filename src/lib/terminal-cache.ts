@@ -110,6 +110,10 @@ const TERMINAL_BASE_CONFIG = {
   cursorStyle: "block" as const,
   scrollback: 50000,
   allowProposedApi: true,
+  // Required so terminal.paste() wraps multi-line input with bracketed-paste
+  // sequences (\x1b[200~...\x1b[201~). The shell then treats the block as a
+  // single paste rather than executing each line immediately.
+  enableBracketedPaste: true,
   theme: {
     background: "#1e1e1e",
     foreground: "#d4d4d4",

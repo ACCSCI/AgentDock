@@ -102,14 +102,18 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
 
   const handlePaste = useCallback(async () => {
     const entry = terminalCache.get(terminalId);
-    if (!entry || entry.websocket?.readyState !== 1) {
+    if (!entry) {
       setCtxMenu(null);
       return;
     }
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        entry.websocket.send(JSON.stringify({ type: "input", data: text }));
+        // Delegate to xterm.js: it wraps the payload with bracketed-paste
+        // sequences (\x1b[200~...\x1b[201~) and re-fires `onData`, so the
+        // shell treats multi-line input as one paste instead of executing
+        // each line immediately. Mirrors what Ctrl+Shift+V already does.
+        entry.terminal.paste(text);
       }
     } catch {
       // Clipboard access denied — silently ignore
