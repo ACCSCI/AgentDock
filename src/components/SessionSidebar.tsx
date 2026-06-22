@@ -30,7 +30,6 @@ export function SessionSidebar() {
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<"before" | "after">("after");
   const draggedIdRef = useRef<string | null>(null);
-  const lastCreateAtRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [foreignOpen, setForeignOpen] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -174,13 +173,8 @@ export function SessionSidebar() {
     });
   };
 
-  const CREATE_COOLDOWN_MS = 1500;
-
   const handleNewSession = async () => {
     if (!activeProject) return;
-    const now = Date.now();
-    if (now - lastCreateAtRef.current < CREATE_COOLDOWN_MS) return;
-    lastCreateAtRef.current = now;
 
     const existingNames = new Set(sessions.map((s) => s.name));
     let count = sessions.length + 1;
@@ -305,11 +299,10 @@ export function SessionSidebar() {
           type="button"
           className="session-sidebar-new-btn"
           onClick={handleNewSession}
-          disabled={createSession.isPending}
           title="新建 Session"
           data-testid="new-session"
         >
-          {createSession.isPending ? <span className="step-spinner" /> : <Plus size={16} />}
+          <Plus size={16} />
         </button>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
       </div>
