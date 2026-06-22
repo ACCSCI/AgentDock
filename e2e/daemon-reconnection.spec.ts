@@ -123,7 +123,7 @@ test.describe("daemon reconnection", () => {
         .locator(`[data-testid="${TID.daemonState}"]`)
         .textContent()
         .catch(() => null);
-      if (stateText && stateText.toLowerCase() !== "ready") {
+      if (stateText && stateText.toLowerCase() !== "running") {
         degradedState = true;
         break;
       }

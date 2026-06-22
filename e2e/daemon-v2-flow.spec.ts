@@ -179,6 +179,6 @@ test.describe("DaemonStatusBar health recovery (新架构 §5.2)", () => {
     const stateText = await window
       .locator(`[data-testid="${TID.daemonState}"]`)
       .textContent({ timeout: 20_000 });
-    expect(["ready", "recovering"]).toContain(stateText);
+    expect(["Running", "Recovering"]).toContain(stateText);
   });
 });
