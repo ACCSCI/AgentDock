@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { terminalCache, type TerminalCacheStatus } from "../lib/terminal-cache";
 import { useStore } from "../lib/store";
 import "@xterm/xterm/css/xterm.css";
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+}
 
 interface SessionTerminalProps {
   terminalId: string;
@@ -19,6 +25,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
   const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TerminalCacheStatus>("connecting");
   const { terminalPrefs } = useStore();
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -40,6 +47,88 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     };
   }, [terminalId, sessionId]);
 
+  // Close context menu on outside click / right-click elsewhere / scroll / Escape
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const entry = terminalCache.get(terminalId);
+    const hasSelection = !!(entry && entry.terminal.getSelection());
+    // Clamp to viewport so the menu never overflows off-screen
+    const menuWidth = 180;
+    const menuHeight = 160;
+    const x = e.clientX + menuWidth > window.innerWidth
+      ? Math.max(0, window.innerWidth - menuWidth - 10)
+      : e.clientX;
+    const y = e.clientY + menuHeight > window.innerHeight
+      ? Math.max(0, window.innerHeight - menuHeight - 10)
+      : e.clientY;
+    setCtxMenu({ x, y, hasSelection });
+  }, [terminalId]);
+
+  const handleCopy = useCallback(async () => {
+    const entry = terminalCache.get(terminalId);
+    if (!entry) {
+      setCtxMenu(null);
+      return;
+    }
+    const text = entry.terminal.getSelection();
+    if (text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Fallback: leave selection — user can still Ctrl+C
+      }
+    }
+    setCtxMenu(null);
+  }, [terminalId]);
+
+  const handlePaste = useCallback(async () => {
+    const entry = terminalCache.get(terminalId);
+    if (!entry || entry.websocket?.readyState !== 1) {
+      setCtxMenu(null);
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        entry.websocket.send(JSON.stringify({ type: "input", data: text }));
+      }
+    } catch {
+      // Clipboard access denied — silently ignore
+    }
+    setCtxMenu(null);
+  }, [terminalId]);
+
+  const handleSelectAll = useCallback(() => {
+    const entry = terminalCache.get(terminalId);
+    entry?.terminal.selectAll();
+    setCtxMenu(null);
+  }, [terminalId]);
+
+  const handleClearSelection = useCallback(() => {
+    const entry = terminalCache.get(terminalId);
+    entry?.terminal.clearSelection();
+    setCtxMenu(null);
+  }, [terminalId]);
+
   return (
     <div className="session-terminal" data-testid="session-terminal" data-status={status}>
       {status !== "connected" && (
@@ -54,7 +143,46 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
         ref={containerRef}
         className="session-terminal-xterm"
         data-testid="terminal-xterm"
+        onContextMenu={handleContextMenu}
       />
+      {ctxMenu && (
+        <div
+          className="context-menu"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handleCopy}
+            disabled={!ctxMenu.hasSelection}
+          >
+            Copy
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handlePaste}
+          >
+            Paste
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handleSelectAll}
+          >
+            Select All
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handleClearSelection}
+          >
+            Clear Selection
+          </button>
+        </div>
+      )}
     </div>
   );
 }

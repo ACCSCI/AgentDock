@@ -37,6 +37,39 @@ declare global {
 
 const POLL_INTERVAL_MS = 5_000;
 
+function getStatusClass(state: string): string {
+  switch (state) {
+    case "READY":
+      return "ready";
+    case "RECOVERING":
+      return "recovering";
+    default:
+      return "connecting";
+  }
+}
+
+function getStateLabel(state: string): string {
+  switch (state) {
+    case "READY":
+      return "Running";
+    case "RECOVERING":
+      return "Recovering";
+    default:
+      return "Connecting...";
+  }
+}
+
+function buildTooltip(health: DaemonHealth): string {
+  const capsList = health.capabilities || [];
+  const caps = capsList.join(", ");
+  return [
+    "AgentDock 守护进程",
+    `进程: PID ${health.pid} · 端口 ${health.port}`,
+    `协议: v${health.protocolVersion} · Schema: v${health.schemaVersion}`,
+    `功能: ${capsList.length}个 (${caps})`,
+  ].join("\n");
+}
+
 export function DaemonStatusBar() {
   const [health, setHealth] = useState<DaemonHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,9 +103,16 @@ export function DaemonStatusBar() {
         className="daemon-status-bar daemon-status-bar--error"
         data-testid={TID.daemonStatusBar}
         data-status="error"
+        title={`守护进程离线\n错误: ${error}`}
       >
-        <span data-testid={TID.daemonState}>down</span>
-        <span data-testid={TID.daemonError}>{error}</span>
+        <span className="daemon-status-dot" />
+        <span className="daemon-status-label" data-testid={TID.daemonState}>
+          Offline
+        </span>
+        <span className="daemon-status-sep" />
+        <span className="daemon-status-info">
+          <span data-testid={TID.daemonError}>{error}</span>
+        </span>
       </div>
     );
   }
@@ -80,28 +120,62 @@ export function DaemonStatusBar() {
   if (!health) {
     return (
       <div
-        className="daemon-status-bar"
+        className="daemon-status-bar daemon-status-bar--connecting"
         data-testid={TID.daemonStatusBar}
         data-status="connecting"
       >
-        <span data-testid={TID.daemonState}>connecting…</span>
+        <span className="daemon-status-dot" />
+        <span className="daemon-status-label" data-testid={TID.daemonState}>
+          Connecting...
+        </span>
       </div>
     );
   }
 
+  const statusClass = getStatusClass(health.state);
+  const stateLabel = getStateLabel(health.state);
   const isReady = health.state === "READY";
+  const tooltip = buildTooltip(health);
+
   return (
     <div
-      className={`daemon-status-bar${isReady ? "" : " daemon-status-bar--warn"}`}
+      className={`daemon-status-bar daemon-status-bar--${statusClass}`}
       data-testid={TID.daemonStatusBar}
       data-status={isReady ? "ready" : "recovering"}
+      title={tooltip}
     >
-      <span data-testid={TID.daemonState}>{health.state.toLowerCase()}</span>
-      <span data-testid={TID.daemonPid}>pid {health.pid}</span>
-      <span data-testid={TID.daemonPort}>port {health.port}</span>
-      <span data-testid={TID.daemonProtocol}>v{health.protocolVersion}</span>
-      <span data-testid={TID.daemonCapabilities}>
-        {health.capabilities.length} caps
+      <span className="daemon-status-dot" />
+      <span className="daemon-status-label" data-testid={TID.daemonState}>
+        {stateLabel}
+      </span>
+
+      {/* Hidden span for E2E compatibility */}
+      <span className="sr-only" data-testid={TID.daemonPid}>
+        pid {health.pid}
+      </span>
+
+      <span className="daemon-status-sep" />
+
+      <span className="daemon-status-info" title={`守护进程通信端口: ${health.port}`}>
+        <span className="daemon-status-icon">📋</span>
+        <span>port</span>
+        <span className="daemon-status-info-value" data-testid={TID.daemonPort}>
+          {health.port}
+        </span>
+      </span>
+
+      <span className="daemon-status-sep" />
+
+      <span
+        className="daemon-status-info"
+        title={`协议版本: v${health.protocolVersion}\n功能: ${(health.capabilities || []).join(", ")}`}
+      >
+        <span className="daemon-status-icon">🔧</span>
+        <span data-testid={TID.daemonProtocol}>v{health.protocolVersion}</span>
+        <span>·</span>
+        <span data-testid={TID.daemonCapabilities}>
+          {(health.capabilities || []).length} caps
+        </span>
       </span>
     </div>
   );

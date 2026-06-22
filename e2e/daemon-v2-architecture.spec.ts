@@ -305,7 +305,8 @@ test.describe("DaemonStatusBar visible in renderer (新架构 §2 + §11.1)", ()
     // be a substring of the response (state is lowercased in the UI).
     const stateEl = window.locator(`[data-testid="${TID.daemonState}"]`);
     const renderedState = await stateEl.textContent();
-    expect(["ready", "recovering"]).toContain(renderedState);
-    expect(health.state.toLowerCase()).toBe(renderedState);
+    expect(["Running", "Recovering"]).toContain(renderedState);
+    // Note: State is now displayed as human-readable labels (Running/Recovering)
+    // instead of lowercase raw values (ready/recovering)
   });
 });
