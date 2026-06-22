@@ -299,19 +299,26 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
   const service: PortService = {
     async allocateSession(params): Promise<SessionPorts> {
-      const { sessionId, projectPath, portKeys } = params;
+      const { sessionId, projectPath, portKeys, displayName } = params;
       if (disposed) throw new Error("v2PortService disposed");
       // The orchestrator passes the actual projectPath (the per-session
       // project being opened, not the active cwd). Fall back to
       // `getProjectRoot()` only when not provided.
       const projectRoot = projectPath ?? deps.getProjectRoot();
 
+      // F6 (新架构 §4.1) — pass the user-supplied displayName through to
+      // the daemon verbatim. The daemon's `sanitizeDisplayName` does the
+      // minimum cleansing (strip control chars, cap at 128). We fall
+      // back to `sessionId` only when the caller did not supply one —
+      // defensive default that mirrors the schema's `displayName?` field.
+      const effectiveDisplayName = displayName ?? sessionId;
+
       // 1. Create — daemon generates its own sessionId (UUID), returns fencingToken=1.
       const create = await postJson("/session/create", {
         clientId: deps.clientId,
         pid: deps.pid,
         projectRoot,
-        displayName: sessionId,
+        displayName: effectiveDisplayName,
       });
       if (!create.ok) {
         throw new Error(`v2 /session/create failed: ${create.status}`);

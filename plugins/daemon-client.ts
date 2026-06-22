@@ -1,28 +1,76 @@
-import http from "node:http";
+/**
+ * DaemonClient — Hono-typed HTTP client to the AgentDock Daemon.
+ *
+ * Phase 2: this class used to be a hand-rolled fetch wrapper. It's now a
+ * thin facade over `createDaemonClient()` from electron/main/hono-client.ts
+ * (which itself wraps Hono's `hc<AppType>` proxy).
+ *
+ * The class shape is preserved for backward compat with api.ts and the 8
+ * daemon test files that import `{ DaemonClient }`. New Electron main
+ * code can use `createDaemonClient(url)` directly to get the raw Hono
+ * proxy — bypass this class entirely.
+ *
+ * Why keep the class around at all?
+ *   - 6 daemon-client tests import `DaemonClient` and exercise the named
+ *     methods (allocate, release, registerClient, etc.). Rewriting those
+ *     tests is Phase 6 work.
+ *   - api.ts uses `new DaemonClient(port).allocateSession(...)`. Phase 6
+ *     moves api.ts to Electron main + IPC, at which point this class can
+ *     be deleted.
+ */
+import { hc } from "hono/client";
 import type { PortAllocator } from "./port-allocator.js";
 import type { SessionPorts } from "./daemon-state.js";
-
-// ============================================================
-// DaemonClient — HTTP client to AgentDock Daemon
-// ============================================================
+import type { AppType } from "./daemon/app.js";
+import { readDaemonInfo, isProcessAlive } from "./daemon-discovery.js";
 
 /**
- * HTTP client that implements PortAllocator by calling the daemon API.
- *
- * Endpoints used:
- *   POST /ports/allocate  { count, exclude } → { ports: number[] }
- *   POST /ports/release   { ports }          → { success: true }
- *   GET  /health          → { status: "ok" }
+ * The Hono client shape. We re-derive it from AppType so the route surface
+ * stays in sync with the daemon without manual maintenance.
  */
+type HonoDaemonClient = ReturnType<typeof hc<AppType>>;
+
+interface EnvelopeOk<T> {
+  success: true;
+  data?: T;
+  ports?: T;
+  sessions?: T;
+  status?: string;
+  [key: string]: unknown;
+}
+
+interface EnvelopeErr {
+  success: false;
+  error: string;
+}
+
+type Envelope<T> = EnvelopeOk<T> | EnvelopeErr;
+
+/**
+ * Internal helper: unwrap a daemon envelope response. Hono returns the
+ * `c.json(...)` body verbatim, which is the envelope. We narrow to the
+ * success shape and return the data field; on failure, throw a descriptive
+ * Error so the legacy try/catch flow keeps working.
+ */
+async function unwrap<T>(res: Response): Promise<T> {
+  const body = (await res.json()) as Envelope<T>;
+  if (!body.success) {
+    throw new Error(body.error || "Daemon error");
+  }
+  return body.data as T;
+}
+
 export class DaemonClient implements PortAllocator {
   private baseUrl: string;
+  private hc: HonoDaemonClient;
 
   /**
    * Create a client connected to a known port.
    * @param port - The daemon's listening port.
    */
-  constructor(port: number = 20000) {
+  constructor(public readonly port: number = 20000) {
     this.baseUrl = `http://127.0.0.1:${port}`;
+    this.hc = hc<AppType>(this.baseUrl);
   }
 
   /**
@@ -31,7 +79,6 @@ export class DaemonClient implements PortAllocator {
    * Throws if no daemon is available.
    */
   static async createFromDiscovery(): Promise<DaemonClient> {
-    const { readDaemonInfo, isProcessAlive } = await import("./daemon-discovery.js");
     const info = readDaemonInfo();
     if (!info || !isProcessAlive(info.pid)) {
       throw new Error("No daemon discovered: daemon.json missing or process not alive");
@@ -44,17 +91,19 @@ export class DaemonClient implements PortAllocator {
   }
 
   async allocate(count: number, exclude?: Set<number>): Promise<number[]> {
-    const res = await this.post("/ports/allocate", {
-      count,
-      exclude: exclude ? [...exclude] : [],
+    const res = await this.hc.ports.allocate.$post({
+      json: { count, exclude: exclude ? [...exclude] : [] },
     });
-    return res.data.ports;
+    if (!res.ok) {
+      throw new Error(`POST /ports/allocate ${res.status}`);
+    }
+    const data = (await res.json()) as { data: { ports: number[] } };
+    return data.data.ports;
   }
 
   release(ports: number[]): void {
     // Synchronous wrapper — fire and forget for release
-    // The daemon processes it, and the file lock ensures consistency
-    this.post("/ports/release", { ports }).catch(() => {
+    this.hc.ports.release.$post({ json: { ports } }).catch(() => {
       // Best-effort: daemon may be down during shutdown
     });
   }
@@ -64,8 +113,10 @@ export class DaemonClient implements PortAllocator {
    */
   async health(): Promise<boolean> {
     try {
-      const res = await this.get("/health");
-      return res.status === "ok";
+      const res = await this.hc.health.$get();
+      if (!res.ok) return false;
+      const body = (await res.json()) as { status: string };
+      return body.status === "ok";
     } catch {
       return false;
     }
@@ -76,22 +127,33 @@ export class DaemonClient implements PortAllocator {
    * Fails if directory is already registered by an alive process.
    */
   async register(dir: string, pid: number): Promise<void> {
-    await this.post("/register", { dir, pid });
+    const res = await this.hc.register.$post({ json: { dir, pid } });
+    if (!res.ok) {
+      throw new Error(`POST /register ${res.status}: ${await res.text()}`);
+    }
+    await unwrap<void>(res);
   }
 
   /**
    * Unregister a directory from the daemon.
    */
-  async unregister(dir: string, pid: number): Promise<void> {
-    await this.post("/unregister", { dir, pid });
+  async unregister(dir: string, _pid: number): Promise<void> {
+    const res = await this.hc.unregister.$post({ json: { dir } });
+    if (!res.ok) {
+      throw new Error(`POST /unregister ${res.status}: ${await res.text()}`);
+    }
+    await unwrap<void>(res);
   }
 
   /**
    * Get status of all registered instances.
    */
   async status(): Promise<{ instances: Array<{ dir: string; pid: number; status: string }> }> {
-    const res = await this.get("/status");
-    return res.data;
+    const res = await this.hc.status.$get();
+    if (!res.ok) {
+      throw new Error(`GET /status ${res.status}`);
+    }
+    return unwrap(res);
   }
 
   // --- Session-aware methods ---
@@ -100,14 +162,22 @@ export class DaemonClient implements PortAllocator {
    * Register a client with the daemon.
    */
   async registerClient(clientId: string, pid: number, projectPaths: string[]): Promise<void> {
-    await this.post("/client/register", { clientId, pid, projectPaths });
+    const res = await this.hc.client.register.$post({ json: { clientId, pid, projectPaths } });
+    if (!res.ok) {
+      throw new Error(`POST /client/register ${res.status}: ${await res.text()}`);
+    }
+    await unwrap<void>(res);
   }
 
   /**
    * Send a heartbeat to keep the client alive.
    */
   async heartbeat(clientId: string): Promise<void> {
-    await this.post("/client/heartbeat", { clientId });
+    const res = await this.hc.client.heartbeat.$post({ json: { clientId } });
+    if (!res.ok) {
+      throw new Error(`POST /client/heartbeat ${res.status}: ${await res.text()}`);
+    }
+    await unwrap<void>(res);
   }
 
   /**
@@ -122,15 +192,27 @@ export class DaemonClient implements PortAllocator {
     worktreePath: string;
     portKeys?: string[];
   }): Promise<SessionPorts> {
-    const res = await this.post("/sessions/allocate", params);
-    return res.ports;
+    const res = await this.hc.sessions.allocate.$post({ json: params });
+    if (!res.ok) {
+      throw new Error(`POST /sessions/allocate ${res.status}: ${await res.text()}`);
+    }
+    // /sessions/allocate returns `{ success, ports }` — no `data` wrapper.
+    const body = (await res.json()) as { success: boolean; ports: SessionPorts };
+    if (!body.success) {
+      throw new Error("sessions/allocate returned non-success envelope");
+    }
+    return body.ports;
   }
 
   /**
    * Release a session's ports.
    */
   async releaseSession(clientId: string, sessionId: string): Promise<void> {
-    await this.post("/sessions/release", { clientId, sessionId });
+    const res = await this.hc.sessions.release.$post({ json: { clientId, sessionId } });
+    if (!res.ok) {
+      throw new Error(`POST /sessions/release ${res.status}: ${await res.text()}`);
+    }
+    await unwrap<void>(res);
   }
 
   /**
@@ -138,8 +220,16 @@ export class DaemonClient implements PortAllocator {
    * Returns new ports guaranteed to differ from old ones.
    */
   async reassignSession(clientId: string, sessionId: string): Promise<SessionPorts> {
-    const res = await this.post("/sessions/reassign", { clientId, sessionId });
-    return res.ports;
+    const res = await this.hc.sessions.reassign.$post({ json: { clientId, sessionId } });
+    if (!res.ok) {
+      throw new Error(`POST /sessions/reassign ${res.status}: ${await res.text()}`);
+    }
+    // /sessions/reassign returns `{ success, ports, status }` — no `data` wrapper.
+    const body = (await res.json()) as { success: boolean; ports: SessionPorts };
+    if (!body.success) {
+      throw new Error("sessions/reassign returned non-success envelope");
+    }
+    return body.ports;
   }
 
   /**
@@ -156,8 +246,21 @@ export class DaemonClient implements PortAllocator {
     results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
     orphans: string[];
   }> {
-    const res = await this.post("/sync/declare", { clientId, sessions });
-    return { results: res.results, orphans: res.orphans };
+    const res = await this.hc.sync.declare.$post({ json: { clientId, sessions } });
+    if (!res.ok) {
+      throw new Error(`POST /sync/declare ${res.status}: ${await res.text()}`);
+    }
+    // /sync/declare returns the results + orphans fields at the top level
+    // (not under `data`), so unwrap differently than the other routes.
+    const body = (await res.json()) as {
+      success: boolean;
+      results: Array<{ sessionId: string; ports: SessionPorts; status: string }>;
+      orphans: string[];
+    };
+    if (!body.success) {
+      throw new Error("sync/declare returned non-success envelope");
+    }
+    return { results: body.results, orphans: body.orphans };
   }
 
   /**
@@ -170,61 +273,29 @@ export class DaemonClient implements PortAllocator {
     ports: SessionPorts;
     ownerClientId: string;
   }>> {
-    const res = await this.get("/sessions/list");
-    return res.sessions;
-  }
-
-  // --- HTTP helpers ---
-
-  private async post(path: string, body: unknown): Promise<any> {
-    const payload = JSON.stringify(body);
-    return new Promise((resolve, reject) => {
-      const req = http.request(`${this.baseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
-        },
-      }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (!parsed.success) {
-              reject(new Error(parsed.error || "Daemon error"));
-            } else {
-              resolve(parsed);
-            }
-          } catch (err) {
-            reject(err);
-          }
-        });
-      });
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
-    });
-  }
-
-  private async get(path: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      http.get(`${this.baseUrl}${path}`, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (!parsed.success) {
-              reject(new Error(parsed.error || "Daemon error"));
-            } else {
-              resolve(parsed);
-            }
-          } catch (err) {
-            reject(err);
-          }
-        });
-      }).on("error", reject);
-    });
+    const res = await this.hc.sessions.list.$get();
+    if (!res.ok) {
+      throw new Error(`GET /sessions/list ${res.status}`);
+    }
+    // /sessions/list returns `{ success, sessions }` — sessions is at the top.
+    const body = (await res.json()) as {
+      success: boolean;
+      sessions: Array<{
+        sessionId: string;
+        worktreePath: string;
+        projectPath: string;
+        ports: SessionPorts;
+        ownerClientId: string;
+      }>;
+    };
+    if (!body.success) {
+      throw new Error("sessions/list returned non-success envelope");
+    }
+    return body.sessions;
   }
 }
+
+// Re-export the typed Hono factory for new code paths that don't need
+// the class wrapper. Electron main will use this directly in Phase 3+.
+export { createDaemonClient } from "../electron/main/hono-client.js";
+export type { DaemonHonoClient } from "../electron/main/hono-client.js";

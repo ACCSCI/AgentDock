@@ -30,6 +30,14 @@ export interface PortService {
     projectPath: string;
     worktreePath: string;
     portKeys?: string[];
+    /**
+     * User-supplied display name (新架构 §4.1 — 自由文本). Optional —
+     * implementations fall back to `sessionId` when omitted. The v2
+     * service forwards this to `/session/create`'s `displayName` field
+     * so the daemon stores the user's name verbatim (the renderer
+     * passes this through from `name` in `sessions:create`).
+     */
+    displayName?: string;
   }): Promise<SessionPorts>;
   releaseSession(sessionId: string): Promise<void>;
   /**
@@ -210,7 +218,15 @@ export function createSessionLifecycle(deps?: {
       const portsStepStart = Date.now();
       if (!deps?.portService) throw new Error("portService is required");
       const portKeys = config.env?.ports?.length ? config.env.ports : undefined;
-      const ports = await deps.portService.allocateSession({ sessionId, projectPath, worktreePath: wt.worktreePath, portKeys });
+      // F6 — pass user-supplied displayName through so the v2 service
+      // can forward it to /session/create. v1 implementations ignore it.
+      const ports = await deps.portService.allocateSession({
+        sessionId,
+        projectPath,
+        worktreePath: wt.worktreePath,
+        portKeys,
+        displayName: sessionName,
+      });
       writePortsToEnv(wt.worktreePath, ports);
       // §4.2 — 提交点值匹配 (内联校验). writePortsToEnv 后立即读回
       // .env 与 daemon claim 返回的端口逐项比对, 不一致立即抛错 (不

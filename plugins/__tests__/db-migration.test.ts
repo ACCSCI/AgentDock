@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { createDb, getDbPath, SCHEMA_VERSION } from "../db/index.js";
 
 function tmpProject(): string {
@@ -10,7 +10,7 @@ function tmpProject(): string {
 }
 
 function columns(dbPath: string, table: string): string[] {
-  const db = new Database(dbPath);
+  const db = new DatabaseSync(dbPath);
   try {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     return rows.map((r) => r.name);
@@ -20,10 +20,12 @@ function columns(dbPath: string, table: string): string[] {
 }
 
 function userVersion(dbPath: string): number {
-  const db = new Database(dbPath);
+  const db = new DatabaseSync(dbPath);
   try {
-    const row = db.pragma("user_version", { simple: true }) as number;
-    return row;
+    const row = db.prepare("PRAGMA user_version").get() as
+      | { user_version: number }
+      | undefined;
+    return row?.user_version ?? 0;
   } finally {
     db.close();
   }
@@ -76,7 +78,7 @@ describe("DB migration — PRAGMA user_version", () => {
     const dbDir = path.join(projectDir, ".data");
     mkdirSync(dbDir, { recursive: true });
     const dbPath = getDbPath(projectDir);
-    const legacy = new Database(dbPath);
+    const legacy = new DatabaseSync(dbPath);
     legacy.exec(`
       CREATE TABLE projects (
         id TEXT PRIMARY KEY,
@@ -99,7 +101,9 @@ describe("DB migration — PRAGMA user_version", () => {
     legacy.prepare(
       "INSERT INTO sessions (id, project_id, name, branch, worktree_path, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).run("s1", "p1", "Old Session", "agentdock/s1", "/tmp/wt", "2024-01-01T00:00:00.000Z");
-    expect(legacy.pragma("user_version", { simple: true })).toBe(0);
+    expect(
+      (legacy.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(0);
     legacy.close();
 
     // Run the real migration path.
@@ -113,7 +117,7 @@ describe("DB migration — PRAGMA user_version", () => {
     expect(userVersion(dbPath)).toBe(SCHEMA_VERSION);
 
     // Pre-existing data preserved.
-    const check = new Database(dbPath);
+    const check = new DatabaseSync(dbPath);
     try {
       const session = check
         .prepare("SELECT id, name, branch FROM sessions WHERE id = ?")

@@ -19,7 +19,7 @@ let baseUrl: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "agentdock-v2-"));
-  daemon = new AgentDockDaemon({ port: 0, baseDir: dir });
+  daemon = new AgentDockDaemon({ port: 0, baseDir: dir, recoveringSoftMinMs: 0 });
   await daemon.start();
   baseUrl = `http://127.0.0.1:${daemon.getPort()}`;
 });

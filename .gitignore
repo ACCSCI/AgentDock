@@ -11,3 +11,14 @@ scripts/e2e-*
 .agentdock/
 .claude/
 .data/
+out/
+test-results/
+e2e-report.json
+e2e-report-html/
+e2e-results.json
+e2e-run-output.json
+e2e-full-output.txt
+e2e-stderr.txt
+*.bak.*
+sse-probe2.ts
+probe-config.mjs

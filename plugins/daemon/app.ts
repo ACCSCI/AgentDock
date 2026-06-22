@@ -39,7 +39,12 @@ export function createApp(ctx: DaemonContext): Hono {
   registerV2(app, ctx);
 
   // Fault injection (新架构 §11.2) — only active when NODE_ENV=test.
-  registerFaultEndpoints(app, ctx.faults);
+  // Gated at call-site for compile-time exclusion: when esbuild replaces
+  // process.env.NODE_ENV with "production", the branch is dead-code-eliminated
+  // so the fault-injector module's process.exit(1) never lands in prod binaries.
+  if (process.env.NODE_ENV === "test") {
+    registerFaultEndpoints(app, ctx.faults);
+  }
 
   registerHealth(app, ctx);
   registerRegistry(app, ctx);
