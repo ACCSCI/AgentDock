@@ -384,6 +384,12 @@ const api = {
     },
   },
 
+  // Font availability — main pushes "fonts:ready" once the background
+  // download finishes so the renderer can trigger a stylesheet refresh.
+  fonts: {
+    ready: (cb: () => void) => on("fonts:ready", cb),
+  },
+
   // Per-project todo list
   todos: {
     list: (projectId: string) =>
