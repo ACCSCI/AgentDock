@@ -147,12 +147,13 @@ function loadShortcuts(): ShortcutMap {
   try {
     const raw = localStorage.getItem(SHORTCUTS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ShortcutMap>;
-      // Validate: every known action must be an array of strings.
-      const dirSearchFocus = Array.isArray(parsed.dirSearchFocus)
-        ? parsed.dirSearchFocus.filter((s): s is KeyBinding => typeof s === "string")
-        : DEFAULT_SHORTCUTS.dirSearchFocus;
-      return { dirSearchFocus };
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const dirSearchFocus = Array.isArray(parsed.dirSearchFocus)
+          ? (parsed.dirSearchFocus as unknown[]).filter((s): s is KeyBinding => typeof s === "string")
+          : DEFAULT_SHORTCUTS.dirSearchFocus;
+        return { dirSearchFocus };
+      }
     }
   } catch { /* ignore */ }
   return DEFAULT_SHORTCUTS;

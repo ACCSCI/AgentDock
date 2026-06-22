@@ -65,7 +65,7 @@ function SettingsPage() {
   const { resetShortcuts } = useStore();
 
   return (
-    <div className="settings-page" data-testid="settings-page" data-shortcut-passthrough>
+    <div className="settings-page" data-testid="settings-page">
       <div className="settings-header">
         <button
           type="button"
