@@ -1,0 +1,55 @@
+# AgentDock E2E Pipeline Configuration
+#
+# Controls how specs are grouped, run, and monitored.
+# Schema: e2e/pipeline-config.schema.ts
+#
+# Usage:
+#   bun run e2e:run                   # Run entire pipeline
+#   bun run e2e:run -- --tags @smoke  # Filter by tag
+#
+# Why a YAML pipeline:
+#   - Specs have different isolation needs: quick UI checks can reuse
+#     a single Electron instance; full lifecycle tests need isolation.
+#   - The pipeline groups specs by mode so `reuse` tests share one
+#     Electron while `isolate` tests get their own — no wasted boot time.
+#   - Monitoring settings live here so failure artifacts are consistent
+#     across CI and local runs.
+
+version: "1"
+project:
+  type: electron
+  entry: "electron/main.ts"
+
+pipeline:
+  global:
+    parallel: 1
+    timeout: 60000
+    retries: 0
+  specs: []
+  default:
+    mode: isolate
+    parallel: 1
+
+monitoring:
+  screenshots: on-failure
+  traces: retain-on-failure
+  logs: on-failure
+  domSnapshot: never
+
+debugging:
+  classifier:
+    enabled: true
+    rules:
+      - type: flaky
+        pattern: "ECONNREFUSED|ETIMEOUT|ECONNRESET"
+        action: retry
+      - type: environment
+        pattern: "EADDRINUSE|EBUSY|EPERM|EACCES"
+        action: skip
+  fixSuggester:
+    enabled: false
+    maxSuggestions: 3
+  notifications:
+    onTestComplete: false
+    onPipelineComplete: true
+    channel: file
