@@ -94,7 +94,7 @@ async function fetchV2Sessions(
     });
     if (!res.ok) return out;
     const body = (await res.json()) as {
-      sessions: Array<{
+      sessions?: Array<{
         sessionId: string;
         projectRoot: string;
         displayName: string;
@@ -102,7 +102,7 @@ async function fetchV2Sessions(
         ports: Record<string, number>;
       }>;
     };
-    for (const s of body.sessions) {
+    for (const s of body?.sessions ?? []) {
       out.set(s.projectRoot, {
         v2SessionId: s.sessionId,
         projectRoot: s.projectRoot,
@@ -123,28 +123,12 @@ async function fetchV2Sessions(
  * sessions that exist on the daemon).
  */
 function buildWorktreePorts(
-  v2: V2PortServiceHandle | null,
+  _v2: V2PortServiceHandle | null,
   v2Snapshot: Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number> }>,
 ): Map<string, Record<string, number>> {
   const out = new Map<string, Record<string, number>>();
-  // First, seed from the /sync snapshot (all daemon-known sessions).
   for (const [, ds] of v2Snapshot) {
     out.set(ds.projectRoot, ds.ports);
-  }
-  // Then add locally-known sessions that may not appear in the snapshot
-  // (e.g. session is creating and hasn't been committed yet).
-  if (v2) {
-    for (const known of v2.listKnownSessions()) {
-      for (const [, ds] of v2Snapshot) {
-        if (ds.v2SessionId === known.v2SessionId) {
-          // Ensure ports from the snapshot are used.
-          if (!out.has(ds.projectRoot)) {
-            out.set(ds.projectRoot, ds.ports);
-          }
-          break;
-        }
-      }
-    }
   }
   return out;
 }
@@ -247,7 +231,7 @@ async function syncProject(
     // v2: best-effort release via v2PortService (no-op if unknown).
     if (v2) {
       try {
-        await v2.service.releaseSession(clientId, row.id);
+        await v2.service.releaseSession(row.id);
       } catch (err) {
         log.warn({ err, sessionId: row.id }, "syncProject: v2 release stale session failed");
       }
@@ -361,7 +345,7 @@ export function registerDb(ctx: DbContext): void {
       // v2: release ports via v2PortService (no-op if session is unknown).
       if (v2) {
         try {
-          await v2.service.releaseSession(clientId, s.id);
+          await v2.service.releaseSession(s.id);
         } catch (err) {
           log.warn({ err, sessionId: s.id }, "db:projects:delete v2 release failed");
           failed.push({ sessionId: s.id, stage: "daemon-release", error: err instanceof Error ? err.message : String(err) });

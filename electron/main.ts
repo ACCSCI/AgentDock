@@ -245,9 +245,9 @@ async function reconcileAndDeclareSessions(): Promise<void> {
       return;
     }
     const body = (await res.json()) as {
-      sessions: typeof daemonSessions;
+      sessions?: typeof daemonSessions;
     };
-    daemonSessions = body.sessions;
+    daemonSessions = body?.sessions ?? [];
   } catch (err) {
     log.warn({ err }, "reconcile: v2 /sync failed");
     return;
