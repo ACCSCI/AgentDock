@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GitPullRequest } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useV2Projects } from "../lib/queries";
 import type { SessionUserStatus } from "../lib/queries";
@@ -263,6 +264,19 @@ export function SessionSidebar() {
     activateSession.mutate(sessionId);
   };
 
+  const [prLoading, setPrLoading] = useState(false);
+  const handleOpenPullRequests = async () => {
+    if (!activeProject) return;
+    setPrLoading(true);
+    try {
+      await window.api.shell.openPullRequests(activeProject.id);
+    } catch (err) {
+      toast.error(`无法打开 Pull Requests: ${err instanceof Error ? err.message : "未知错误"}`);
+    } finally {
+      setPrLoading(false);
+    }
+  };
+
   if (!activeProject) return null;
 
   if (sidebarCollapsed) {
@@ -277,6 +291,16 @@ export function SessionSidebar() {
     <div className="session-sidebar" style={{ width: sidebarWidth }} data-testid="session-sidebar">
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
+        <button
+          type="button"
+          className="session-sidebar-pr-btn"
+          onClick={handleOpenPullRequests}
+          disabled={prLoading}
+          title="查看 Pull Requests"
+          data-testid="open-pull-requests"
+        >
+          <GitPullRequest size={16} />
+        </button>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
       </div>
       <div

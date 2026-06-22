@@ -368,6 +368,8 @@ const api = {
   shell: {
     openExplorer: (targetPath: string) => invoke<{ success: true }>("shell:openExplorer", targetPath),
     openTerminal: (targetPath: string) => invoke<{ success: true }>("shell:openTerminal", targetPath),
+    openPullRequests: (projectId?: string) =>
+      invoke<{ url: string }>("shell:openPullRequests", projectId),
   },
 
   // Window controls for custom titlebar (non-macOS frameless window)
