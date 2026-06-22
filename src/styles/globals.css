@@ -2642,6 +2642,345 @@ body {
    Config Editor — Port Configuration (env.ports)
    ============================================ */
 
+/* ============================================
+   Custom Titlebar
+   ============================================ */
+
+.custom-titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.custom-titlebar--macos {
+  height: 28px;
+  padding-left: 70px; /* Space for native traffic lights */
+}
+
+.custom-titlebar-left {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.custom-titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.custom-titlebar-drag {
+  flex: 1;
+  -webkit-app-region: drag;
+  height: 100%;
+}
+
+.custom-titlebar-drag--macos {
+  -webkit-app-region: drag;
+}
+
+.custom-titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn {
+  width: 46px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.custom-titlebar-btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.custom-titlebar-todo-btn {
+  width: 36px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-todo-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* ============================================
+   Todo Dropdown
+   ============================================ */
+
+.todo-dropdown {
+  position: fixed;
+  top: 36px;
+  right: 12px;
+  width: 280px;
+  max-height: 400px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fade-in 0.1s ease-out;
+}
+
+.todo-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.todo-dropdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.todo-dropdown-count {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.todo-dropdown-input-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.todo-dropdown-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.todo-dropdown-input:focus {
+  border-color: var(--color-primary);
+}
+
+.todo-dropdown-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-dropdown-input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.todo-dropdown-add-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.todo-dropdown-add-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.todo-dropdown-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.todo-dropdown-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 60px;
+  max-height: 300px;
+}
+
+.todo-dropdown-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.todo-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  transition: background 0.1s;
+}
+
+.todo-dropdown-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.todo-dropdown-item:hover .todo-dropdown-delete-btn {
+  opacity: 1;
+}
+
+.todo-dropdown-item--dragging {
+  opacity: 0.4;
+}
+
+.todo-dropdown-item--drag-over {
+  border-top: 2px solid var(--color-primary);
+}
+
+.todo-dropdown-drag-handle {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  cursor: grab;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  user-select: none;
+  transition: opacity 0.1s;
+}
+
+.todo-dropdown-item:hover .todo-dropdown-drag-handle {
+  opacity: 0.6;
+}
+
+.todo-dropdown-drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--color-primary);
+}
+
+.todo-dropdown-item--dragging .todo-dropdown-drag-handle {
+  cursor: grabbing;
+}
+
+.todo-dropdown-checkbox {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.todo-dropdown-item-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.todo-dropdown-item--completed .todo-dropdown-item-text {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.todo-dropdown-edit-input {
+  flex: 1;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.todo-dropdown-delete-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.todo-dropdown-delete-btn:hover {
+  color: #dc2626;
+}
+
+/* Toast */
+.todo-toast {
+  position: fixed;
+  top: 40px;
+  right: 16px;
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  z-index: 9999;
+  pointer-events: none;
+  animation: toast-in 0.15s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 .config-port-list {
   display: flex;
   flex-wrap: wrap;

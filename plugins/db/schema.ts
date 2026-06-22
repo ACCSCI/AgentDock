@@ -28,3 +28,21 @@ export const sessions = sqliteTable("sessions", {
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
+
+export const todos = sqliteTable("todos", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type TodoRow = typeof todos.$inferSelect;

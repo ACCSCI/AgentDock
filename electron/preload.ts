@@ -361,6 +361,34 @@ const api = {
     openExplorer: (targetPath: string) => invoke<{ success: true }>("shell:openExplorer", targetPath),
     openTerminal: (targetPath: string) => invoke<{ success: true }>("shell:openTerminal", targetPath),
   },
+
+  // Window controls for custom titlebar (non-macOS frameless window)
+  windowControls: {
+    minimize: () => invoke<void>("window:minimize"),
+    maximize: () => invoke<void>("window:maximize"),
+    close: () => invoke<void>("window:close"),
+    isMaximized: () => invoke<boolean>("window:isMaximized"),
+    platform: () => invoke<string>("window:platform"),
+    onMaximizeChange: (cb: (maximized: boolean) => void) => {
+      return on<boolean>("window:maximize-change", cb);
+    },
+  },
+
+  // Per-project todo list
+  todos: {
+    list: (projectId: string) =>
+      invoke<Array<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>>("todos:list", { projectId }),
+    create: (projectId: string, content: string) =>
+      invoke<{ id: string; projectId: string; content: string; completed: boolean; sortOrder: number; createdAt: string; updatedAt: string }>("todos:create", { projectId, content }),
+    toggle: (id: string, completed: boolean) =>
+      invoke<void>("todos:toggle", { id, completed }),
+    update: (id: string, content: string) =>
+      invoke<void>("todos:update", { id, content }),
+    delete: (id: string) =>
+      invoke<void>("todos:delete", { id }),
+    reorder: (todoIds: string[]) =>
+      invoke<void>("todos:reorder", { todoIds }),
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);
