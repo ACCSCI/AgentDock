@@ -717,7 +717,6 @@ body {
 .session-terminal-xterm {
   flex: 1;
   overflow: hidden;
-  padding: 4px;
 }
 
 .session-terminal-xterm .xterm {
