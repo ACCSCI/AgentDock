@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { OrphanCleanModal } from "./OrphanCleanModal";
 
 export function IconSidebar() {
+  const navigate = useNavigate();
   const [orphanModalOpen, setOrphanModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
@@ -63,6 +65,8 @@ export function IconSidebar() {
             type="button"
             className="icon-sidebar-btn"
             title="设置"
+            onClick={() => navigate({ to: "/settings" })}
+            data-testid="open-settings"
           >
             ⚙
           </button>

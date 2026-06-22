@@ -7,7 +7,9 @@ import {
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { routeTree } from "./routeTree.gen";
+import { ToastContainer } from "./components/Toast";
 import "./styles/globals.css";
+import "./styles/toast.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,6 +48,7 @@ if (rootElement && !rootElement.innerHTML) {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
+        <ToastContainer />
       </QueryClientProvider>
     </StrictMode>,
   );

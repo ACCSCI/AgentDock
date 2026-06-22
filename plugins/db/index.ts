@@ -58,7 +58,21 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
   (sqlite) => {
     addColumnIfMissing(sqlite, "sessions", "background_hook_errors", "TEXT");
   },
-  // v6: add sessions.user_status + last_activated_at for session labeling.
+  // v6: add todos table for per-project todo list in custom titlebar.
+  (sqlite) => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS todos (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        completed INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  },
+  // v7: add sessions.user_status + last_activated_at for session labeling.
   (sqlite) => {
     addColumnIfMissing(sqlite, "sessions", "user_status", "TEXT");
     addColumnIfMissing(sqlite, "sessions", "last_activated_at", "TEXT");

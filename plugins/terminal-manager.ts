@@ -241,7 +241,7 @@ export class TerminalManager {
     const terminal: TerminalInstance = {
       terminalId,
       sessionId,
-      name: shell,
+      name: shell === "default" ? "Terminal" : shell,
       shell,
       cwd: worktreePath,
       cols,

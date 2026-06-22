@@ -230,77 +230,55 @@ export async function removeWorktree(
     throw new Error(`Worktree not found: ${worktreePath}`);
   }
 
+  // Non-force: block removal when worktree has uncommitted changes.
   if (!force) {
     try {
       const status = execSync("git status --porcelain", {
-        cwd: worktreePath,
-        encoding: "utf-8",
-        stdio: "pipe",
+        cwd: worktreePath, encoding: "utf-8", stdio: "pipe",
       });
       if (status.trim().length > 0) {
         throw new Error("Worktree has uncommitted changes. Use force=true to override.");
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes("uncommitted changes")) {
-        throw err;
-      }
+      if (err instanceof Error && err.message.includes("uncommitted changes")) throw err;
     }
   }
 
-  // Only attempt git worktree remove if this is a registered worktree
-  if (await isRegisteredWorktree(projectPath, worktreePath)) {
-    try {
-      await execAsync(`git worktree remove ${force ? "--force " : ""}"${worktreePath}"`, {
-        cwd: projectPath,
-        encoding: "utf-8",
-      });
-    } catch {
-      // git worktree remove may fail (e.g., "Directory not empty" on Windows
-      // when untracked files exist from hooks). Fall through to fs.rm below.
-    }
+  // Check worktree registration once — reused below and for prune.
+  const isRegistered = await isRegisteredWorktree(projectPath, worktreePath).catch(() => false);
 
-    try {
-      // Use the caller-provided branch name when available — this is
-      // critical for renamed sessions where the on-disk branch no longer
-      // matches `agentdock/<sessionId>` (8ec663a fix).
-      await execAsync(`git branch -D "${branchToDelete}"`, {
-        cwd: projectPath,
-        encoding: "utf-8",
-      });
-    } catch {
-      // Branch deletion is best-effort
-    }
+  // Non-force path: run git worktree remove + branch delete (safe but slow).
+  // Force path: skip these entirely — on Windows they take 20+ seconds due
+  // to antivirus scanning and file-handle contention.
+  if (!force && isRegistered) {
+    try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
+    try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
   }
 
   // Always ensure directory is removed (handles git failure or non-worktree directories)
   if (existsSync(worktreePath)) {
-    // Retry loop: kill processes and attempt removal up to 3 times.
-    // On Windows, shell processes spawned by the PTY host hold the worktree
-    // directory as their CWD, which causes EBUSY on rmdir even after they've
-    // been told to exit — the handle takes a moment to release.
     const MAX_DIR_REMOVE_ATTEMPTS = 3;
     for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {
       if (!existsSync(worktreePath)) break;
 
-      // Kill any process holding handles on the worktree (ExecutablePath and
-      // CommandLine match — see killProcessesUnderPath for details).
       await killProcessesUnderPath(worktreePath);
 
       try {
-        // maxRetries + retryDelay: Node.js's fs.rm retries internally on
-        // EBUSY/EPERM/ENOTEMPTY, handling transient locks (e.g. AV scanner).
         await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         break; // success
       } catch (err) {
         if (attempt < MAX_DIR_REMOVE_ATTEMPTS) {
-          // Back off with increasing delay before retrying — filesystem
-          // handles may need more time on Windows.
           await new Promise((resolve) => setTimeout(resolve, attempt * 500));
         } else {
-          throw err; // final attempt failed, propagate
+          throw err;
         }
       }
     }
+  }
+
+  // Clean up stale git worktree registration left behind by force removal
+  if (isRegistered) {
+    try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8" }); } catch {}
   }
 
   return { removed: worktreePath };

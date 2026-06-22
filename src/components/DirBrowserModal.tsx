@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useShortcutAction } from "../hooks/useShortcuts";
 
 export interface DirEntry {
   name: string;
@@ -12,6 +13,7 @@ interface DirBrowserModalProps {
 }
 
 export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalProps) {
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -21,6 +23,11 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   const listRef = useRef<HTMLDivElement>(null);
   /** Stores the scrollTop for each directory path we've visited. */
   const scrollPositions = useRef<Map<string, number>>(new Map());
+
+  // Register the shortcut so Alt+D (or whatever the user configured) focuses the search input.
+  useShortcutAction("dirSearchFocus", useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []), open);
 
   // Filter entries by search keyword
   const displayEntries = search.trim()
@@ -206,6 +213,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             data-testid="dir-search-input"
+            ref={searchInputRef}
           />
         </div>
 

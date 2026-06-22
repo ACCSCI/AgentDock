@@ -9,6 +9,7 @@ export const TERMINAL_FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24] 
 export type TerminalFontSize = (typeof TERMINAL_FONT_SIZES)[number];
 
 export const TERMINAL_FONT_FAMILIES = [
+  { label: "Maple Mono", value: "'Maple Mono', monospace" },
   { label: "Cascadia Code", value: "'Cascadia Code', monospace" },
   { label: "Fira Code", value: "'Fira Code', monospace" },
   { label: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
@@ -23,7 +24,7 @@ export interface TerminalPreferences {
 
 export const DEFAULT_TERMINAL_PREFS: TerminalPreferences = {
   fontSize: 14,
-  fontFamily: "'Cascadia Code', monospace",
+  fontFamily: "'Maple Mono', monospace",
 };
 
 export interface TerminalInfo {
@@ -35,6 +36,23 @@ export interface TerminalInfo {
   createdAt: string;
 }
 
+/** Identifies a user-configurable shortcut action. Add new actions here as features need them. */
+export type ShortcutAction = "dirSearchFocus";
+
+/** A single key combo string, e.g. "Alt+d" or "Ctrl+Shift+k". */
+export type KeyBinding = string;
+
+export interface ShortcutMap {
+  dirSearchFocus: KeyBinding[];
+}
+
+export const DEFAULT_SHORTCUTS: ShortcutMap = {
+  dirSearchFocus: ["Alt+d"],
+};
+
+/** Hard cap on bindings per action. UI enforces this too; it's here for input validation. */
+export const MAX_BINDINGS_PER_ACTION = 2;
+
 interface UIState {
   activeProjectId: string | null;
   activeSessionId: string | null;
@@ -44,6 +62,7 @@ interface UIState {
   activeTerminals: Map<string, string>; // sessionId → terminalId
   terminalDefaultAction: TerminalDefaultAction;
   terminalPrefs: TerminalPreferences;
+  shortcuts: ShortcutMap;
 }
 
 interface StoreContextValue extends UIState {
@@ -57,6 +76,8 @@ interface StoreContextValue extends UIState {
   setSidebarWidth: (width: number) => void;
   setTerminalDefaultAction: (action: TerminalDefaultAction) => void;
   setTerminalPrefs: (prefs: TerminalPreferences) => void;
+  updateShortcut: (action: ShortcutAction, bindings: KeyBinding[]) => void;
+  resetShortcuts: () => void;
 }
 
 const SIDEBAR_WIDTH_KEY = "agentdock_sidebar_width";
@@ -121,6 +142,30 @@ function loadTerminalPrefs(): TerminalPreferences {
   return DEFAULT_TERMINAL_PREFS;
 }
 
+const SHORTCUTS_KEY = "agentdock_shortcuts";
+
+function loadShortcuts(): ShortcutMap {
+  try {
+    const raw = localStorage.getItem(SHORTCUTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const dirSearchFocus = Array.isArray(parsed.dirSearchFocus)
+          ? (parsed.dirSearchFocus as unknown[]).filter((s): s is KeyBinding => typeof s === "string")
+          : DEFAULT_SHORTCUTS.dirSearchFocus;
+        return { dirSearchFocus };
+      }
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_SHORTCUTS;
+}
+
+function saveShortcuts(map: ShortcutMap) {
+  try {
+    localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(map));
+  } catch { /* localStorage full or unavailable */ }
+}
+
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -133,6 +178,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeTerminals: new Map(),
     terminalDefaultAction: loadTerminalDefaultAction(),
     terminalPrefs: loadTerminalPrefs(),
+    shortcuts: loadShortcuts(),
   });
 
   const setActiveProject = useCallback((projectId: string | null) => {
@@ -198,6 +244,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(TERMINAL_PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
   }, []);
 
+  const updateShortcut = useCallback((action: ShortcutAction, bindings: KeyBinding[]) => {
+    // Normalize: dedupe + cap to MAX_BINDINGS_PER_ACTION. Trims empty strings.
+    const cleaned = Array.from(
+      new Set(bindings.map((b) => b.trim()).filter((b) => b.length > 0)),
+    ).slice(0, MAX_BINDINGS_PER_ACTION);
+    setState((prev) => {
+      const next: ShortcutMap = { ...prev.shortcuts, [action]: cleaned };
+      saveShortcuts(next);
+      return { ...prev, shortcuts: next };
+    });
+  }, []);
+
+  const resetShortcuts = useCallback(() => {
+    setState((prev) => {
+      saveShortcuts(DEFAULT_SHORTCUTS);
+      return { ...prev, shortcuts: DEFAULT_SHORTCUTS };
+    });
+  }, []);
+
   return (
     <StoreContext.Provider
       value={{
@@ -212,6 +277,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setSidebarWidth,
         setTerminalDefaultAction,
         setTerminalPrefs,
+        updateShortcut,
+        resetShortcuts,
       }}
     >
       {children}
