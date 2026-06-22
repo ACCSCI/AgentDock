@@ -2,17 +2,27 @@
  * Todo IPC handlers — per-project todo list CRUD.
  *
  * Channels:
- *   todos:list     — list todos for a project
- *   todos:create   — create a new todo
- *   todos:toggle   — toggle completed state
- *   todos:update   — update todo content
- *   todos:delete   — delete a todo
+ *   todos:list          — list todos for a project
+ *   todos:create        — create a new todo
+ *   todos:cycleStatus   — cycle pending → in_progress → done → pending
+ *   todos:update        — update todo content
+ *   todos:delete        — delete a todo
  */
 import { ipcMain } from "electron";
 import { eq, asc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import * as schema from "../../../plugins/db/schema.js";
+
+const STATUS_CYCLE: Record<string, schema.TodoStatus> = {
+  pending: "in_progress",
+  in_progress: "done",
+  done: "pending",
+};
+
+function nextStatus(current: string): schema.TodoStatus {
+  return STATUS_CYCLE[current] ?? "pending";
+}
 
 function getDb() {
   const db = getActiveDb();
@@ -53,7 +63,7 @@ export function registerTodos(): void {
           id,
           projectId,
           content,
-          completed: false,
+          status: "pending",
           sortOrder: maxSort + 1,
           createdAt: now,
           updatedAt: now,
@@ -69,12 +79,12 @@ export function registerTodos(): void {
   );
 
   ipcMain.handle(
-    "todos:toggle",
-    (_event, args: { id: string; completed: boolean }) => {
-      const { id, completed } = args as { id: string; completed: boolean };
+    "todos:cycleStatus",
+    (_event, args: { id: string; currentStatus: string }) => {
+      const { id, currentStatus } = args as { id: string; currentStatus: string };
       const db = getDb();
       db.update(schema.todos)
-        .set({ completed, updatedAt: new Date().toISOString() })
+        .set({ status: nextStatus(currentStatus), updatedAt: new Date().toISOString() })
         .where(eq(schema.todos.id, id))
         .run();
     },

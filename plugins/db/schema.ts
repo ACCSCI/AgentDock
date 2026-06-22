@@ -31,13 +31,15 @@ export const sessions = sqliteTable("sessions", {
 export type ProjectRow = typeof projects.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 
+export type TodoStatus = "pending" | "in_progress" | "done";
+
 export const todos = sqliteTable("todos", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
-  completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  status: text("status").$type<TodoStatus>().notNull().default("pending"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: text("created_at")
     .notNull()

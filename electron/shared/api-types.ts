@@ -119,7 +119,7 @@ export const IPC_CHANNELS = {
   // todos (per-project todo list in custom titlebar)
   "todos:list": "todos:list",
   "todos:create": "todos:create",
-  "todos:toggle": "todos:toggle",
+  "todos:cycleStatus": "todos:cycleStatus",
   "todos:update": "todos:update",
   "todos:delete": "todos:delete",
   "todos:reorder": "todos:reorder",

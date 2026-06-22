@@ -77,6 +77,12 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
     addColumnIfMissing(sqlite, "sessions", "user_status", "TEXT");
     addColumnIfMissing(sqlite, "sessions", "last_activated_at", "TEXT");
   },
+  // v8: replace todos.completed boolean with todos.status tri-state.
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "todos", "status", "TEXT NOT NULL DEFAULT 'pending'");
+    // Backfill: any row with completed = 1 becomes "done"; default "pending" covers the rest.
+    sqlite.exec(`UPDATE todos SET status = 'done' WHERE completed = 1`);
+  },
 ];
 
 /** Target schema version after all migrations are applied. */
