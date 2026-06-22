@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useV2Projects } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
-  const { data: projects } = useProjects();
+
+  // F11b: Use v2State hook with fallback to old polling
+  const { data: v2Projects, isV2: isV2Data } = useV2Projects();
+  const { data: oldProjects } = useProjects();
+
+  // Prefer v2State data if available, otherwise use old polling
+  const projects = isV2Data ? v2Projects : oldProjects;
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
   const deleteSession = useDeleteSessionSSE();
@@ -198,11 +204,7 @@ export function SessionSidebar() {
 
   const handleOpenInExplorer = async (worktreePath: string) => {
     try {
-      await fetch("/api/open-explorer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: worktreePath }),
-      });
+      await window.api.shell.openExplorer(worktreePath);
     } catch {
       navigator.clipboard.writeText(worktreePath);
     }
@@ -210,11 +212,7 @@ export function SessionSidebar() {
 
   const handleOpenInTerminal = async (worktreePath: string) => {
     try {
-      await fetch("/api/open-terminal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: worktreePath }),
-      });
+      await window.api.shell.openTerminal(worktreePath);
     } catch {
       navigator.clipboard.writeText(worktreePath);
     }
@@ -247,7 +245,7 @@ export function SessionSidebar() {
   }
 
   return (
-    <div className="session-sidebar" style={{ width: sidebarWidth }}>
+    <div className="session-sidebar" style={{ width: sidebarWidth }} data-testid="session-sidebar">
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
@@ -263,6 +261,7 @@ export function SessionSidebar() {
           <div
             key={session.id}
             data-session-id={session.id}
+            data-testid="session-card"
             className={
               dragOverSessionId === session.id
                 ? `session-card-wrapper ${dragPosition === "before" ? "drop-before" : "drop-after"}`
@@ -314,7 +313,15 @@ export function SessionSidebar() {
           </div>
         )}
       </div>
-      <button type="button" className="session-add" onClick={handleNewSession} disabled={createSession.isPending}>+</button>
+      <button
+        type="button"
+        className="session-add"
+        onClick={handleNewSession}
+        disabled={createSession.isPending}
+        data-testid="new-session"
+      >
+        +
+      </button>
       <div
         ref={handleRef}
         className="session-sidebar-resize-handle"

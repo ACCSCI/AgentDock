@@ -17,13 +17,14 @@ export function IconSidebar() {
 
   return (
     <>
-      <div className="icon-sidebar">
+      <div className="icon-sidebar" data-testid="icon-sidebar">
         <div className="icon-sidebar-top">
           <button
             type="button"
             className="icon-sidebar-btn"
             title="清理孤儿目录"
             onClick={openOrphanModal}
+            data-testid="open-orphan-modal"
           >
             🧹
           </button>

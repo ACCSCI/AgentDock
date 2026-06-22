@@ -3,6 +3,7 @@ import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
+import { DaemonStatusBar } from "./DaemonStatusBar";
 
 export function TabBar() {
   const navigate = useNavigate();
@@ -34,7 +35,9 @@ export function TabBar() {
   };
 
   return (
-    <div className="tab-bar">
+    <>
+      <DaemonStatusBar />
+      <div className="tab-bar" data-testid="tab-bar">
       {openProjects.map((project) => (
         <div
           key={project.id}
@@ -46,6 +49,8 @@ export function TabBar() {
           tabIndex={0}
           role="tab"
           aria-selected={project.id === activeProjectId}
+          data-testid="project-tab"
+          data-project-id={project.id}
         >
           <span className="tab-name">{project.name}</span>
           <button
@@ -55,15 +60,17 @@ export function TabBar() {
               e.stopPropagation();
               handleRemoveProject(project.id);
             }}
+            data-testid="project-tab-close"
           >
             ✕
           </button>
         </div>
       ))}
-      <button type="button" className="tab-add" onClick={openProject}>
+      <button type="button" className="tab-add" onClick={openProject} data-testid="new-project">
         +
       </button>
       <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
-    </div>
+      </div>
+    </>
   );
 }

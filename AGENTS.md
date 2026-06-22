@@ -1,5 +1,9 @@
 # AGENTS
 
+## Architecture
+
+- **[新架构.md](docs/新架构.md)** — AgentDock 核心架构设计文档，定义 Daemon 职责边界、端口仲裁模型、崩溃恢复与并发所有权语义。所有涉及 daemon/session/端口的改动必须遵循该文档的不变式（§0）。
+
 ## Environment loading
 
 - Reuse `plugins/env.ts` helpers when loading `.env` files in AgentDock runtime code.

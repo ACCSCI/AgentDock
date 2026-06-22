@@ -208,22 +208,21 @@ export function createWorktree(
   return { worktreePath, branch };
 }
 
-/**
- * Remove a session's worktree from disk and delete its git branch.
- *
- * @param currentBranch The branch name the session is currently checked out
- *   to (i.e. `sessions.branch` in the DB). After a session rename, the branch
- *   becomes `agentdock/${newName}` — falling back to `agentdock/${sessionId}`
- *   would leave the renamed branch dangling. Pass the stored branch name to
- *   ensure the correct branch is deleted.
- */
 export async function removeWorktree(
   projectPath: string,
   sessionId: string,
-  options: { currentBranch?: string; force?: boolean } = {},
+  options: { currentBranch?: string; force?: boolean } | boolean = {},
 ): Promise<{ removed: string }> {
-  const { currentBranch, force = false } = options;
+  // Accept the legacy positional-boolean form so older callers
+  // (`removeWorktree(p, id, true)`) keep working. Internally normalize.
+  const opts =
+    typeof options === "boolean" ? { force: options } : options;
+  const force = opts.force ?? false;
+  const branchToDelete =
+    opts.currentBranch ?? `agentdock/${sessionId}`;
+
   validateSessionId(sessionId);
+  validateBranchName(branchToDelete);
 
   const worktreePath = getWorktreePath(projectPath, sessionId);
 
@@ -248,11 +247,6 @@ export async function removeWorktree(
     }
   }
 
-  // The branch to delete. Prefer the caller's stored branch (handles
-  // renamed sessions); fall back to the default `agentdock/${sessionId}`
-  // for un-renamed sessions and older callers.
-  const branchToDelete = currentBranch ?? `agentdock/${sessionId}`;
-
   // Only attempt git worktree remove if this is a registered worktree
   if (await isRegisteredWorktree(projectPath, worktreePath)) {
     try {
@@ -266,9 +260,9 @@ export async function removeWorktree(
     }
 
     try {
-      // Use execFileSync (not shell) so the branch name is passed as a
-      // single argv entry. validateBranchName keeps it safe to interpolate.
-      validateBranchName(branchToDelete);
+      // Use the caller-provided branch name when available — this is
+      // critical for renamed sessions where the on-disk branch no longer
+      // matches `agentdock/<sessionId>` (8ec663a fix).
       await execAsync(`git branch -D "${branchToDelete}"`, {
         cwd: projectPath,
         encoding: "utf-8",
@@ -365,34 +359,37 @@ export function renameWorktree(
   }
 
   const oldBranch = currentBranch ?? `agentdock/${sessionId}`;
-  const newBranch = `agentdock/${newName}`;
+  // §4.1 — branch 派生自 sessionId (不可变), 不派生自 newName (自由文本).
+  // 防 displayName → branch 注入 (§11.3 #7).
+  const newBranch = `agentdock/${sessionId}`;
 
-  // oldBranch derives from validated sessionId; newBranch derives from caller
-  // input and MUST be validated before reaching git.
+  // §4.1 — rename 只改 displayName, 不改 branch.
+  // oldBranch 与 newBranch 必然相同 (都派生自 sessionId), 所以 branch
+  // rename 是 no-op. 跳过 git 操作, 只更新 displayName.
   validateBranchName(oldBranch);
-  validateBranchName(newBranch);
-
-  // Check if new branch name already exists
-  try {
-    execFileSync("git", ["rev-parse", "--verify", newBranch], {
-      cwd: projectPath,
+  if (oldBranch !== newBranch) {
+    validateBranchName(newBranch);
+    // Check if new branch name already exists (only when actually renaming)
+    try {
+      execFileSync("git", ["rev-parse", "--verify", newBranch], {
+        cwd: projectPath,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      throw new Error(`Branch '${newBranch}' already exists`);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("already exists")) {
+        throw err;
+      }
+      // Branch doesn't exist - good
+    }
+    // Rename the branch
+    execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
+      cwd: worktreePath,
       encoding: "utf-8",
       stdio: "pipe",
     });
-    throw new Error(`Branch '${newBranch}' already exists`);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("already exists")) {
-      throw err;
-    }
-    // Branch doesn't exist - good
   }
-
-  // Rename the branch
-  execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
-    cwd: worktreePath,
-    encoding: "utf-8",
-    stdio: "pipe",
-  });
 
   return { newBranch, worktreePath };
 }
@@ -430,7 +427,7 @@ export interface OrphanDir {
   sessionId: string;
   worktreePath: string;
   reason: "no-git-file" | "empty-dir" | "orphan-branch";
-  /** Branch name; only set when `reason === "orphan-branch"`. */
+  /** Populated for `orphan-branch`; the agentdock/<sessionId> branch name. */
   branch?: string;
 }
 
@@ -470,40 +467,6 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
 }
 
 /**
- * Find `agentdock/*` branches that have no matching session in `knownBranches`.
- *
- * These are dangling branches left behind when a session was deleted but its
- * branch cleanup missed (e.g., older callers of removeWorktree that hard-coded
- * the branch name to `agentdock/${sessionId}` rather than the stored branch).
- */
-export function scanOrphanBranches(
-  projectPath: string,
-  knownBranches: Set<string>,
-): OrphanDir[] {
-  let raw: string;
-  try {
-    raw = execFileSync("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads/agentdock/"], {
-      cwd: projectPath,
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-  } catch {
-    return [];
-  }
-
-  const result: OrphanDir[] = [];
-  for (const line of raw.split("\n")) {
-    const branch = line.trim();
-    if (!branch) continue;
-    if (knownBranches.has(branch)) continue;
-    // The sessionId is the suffix after the "agentdock/" prefix.
-    const sessionId = branch.startsWith("agentdock/") ? branch.slice("agentdock/".length) : branch;
-    result.push({ sessionId, worktreePath: "", reason: "orphan-branch", branch });
-  }
-  return result;
-}
-
-/**
  * Remove an orphan directory. Kills any processes under the path first,
  * then deletes the directory recursively. Does NOT call git commands
  * since these are not registered git worktrees.
@@ -534,15 +497,49 @@ export async function removeOrphanDir(dirPath: string): Promise<void> {
 }
 
 /**
- * Force-delete a git branch by name. Validates the name and refuses anything
- * not in the `agentdock/` namespace to keep this from being a generic
- * branch-pruning hammer.
- *
- * Async via execFile (no shell, no event-loop block) — branch deletion runs
- * on the same request path as `git worktree remove` and `fs.rm` so a sync
- * call here would freeze the Node.js event loop until git returns.
+ * List `agentdock/*` branches that no live session or on-disk worktree
+ * references — these survive a session rename or a partial cleanup.
+ * `knownBranches` is the union of DB `sessions.branch` and `agentdock/*`
+ * branches that currently back a registered git worktree (callers build
+ * it). Anything matching `refs/heads/agentdock/` outside that set counts.
  */
-export async function removeOrphanBranch(projectPath: string, branch: string): Promise<void> {
+export function scanOrphanBranches(
+  projectPath: string,
+  knownBranches: Set<string>,
+): OrphanDir[] {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "git",
+      ["for-each-ref", "--format=%(refname:short)", "refs/heads/agentdock/"],
+      { cwd: projectPath, encoding: "utf-8", stdio: "pipe" },
+    );
+  } catch {
+    return [];
+  }
+
+  const result: OrphanDir[] = [];
+  for (const line of raw.split("\n")) {
+    const branch = line.trim();
+    if (!branch) continue;
+    if (knownBranches.has(branch)) continue;
+    const sessionId = branch.startsWith("agentdock/")
+      ? branch.slice("agentdock/".length)
+      : branch;
+    result.push({ sessionId, worktreePath: "", reason: "orphan-branch", branch });
+  }
+  return result;
+}
+
+/**
+ * Delete a single `agentdock/*` branch. Refuses anything outside the
+ * agentdock prefix and validates the branch name first (block flag-style
+ * argument injection via `validateBranchName`).
+ */
+export async function removeOrphanBranch(
+  projectPath: string,
+  branch: string,
+): Promise<void> {
   validateBranchName(branch);
   if (!branch.startsWith("agentdock/")) {
     throw new Error(`Refusing to delete non-agentdock branch: ${branch}`);

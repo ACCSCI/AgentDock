@@ -223,11 +223,23 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
           }
 
           settled = true;
+          // Node's `exec` callback gives a child_process.ExecException
+          // whose `.code` carries the exit code (or signal name on a
+          // forced kill). Some Node major versions exposed `.status`
+          // instead, hence the fallback. Without this we lose the real
+          // exit code and report `1` for every non-zero failure.
+          const codeRaw =
+            error == null
+              ? 0
+              : (((error as { code?: number | string }).code ??
+                  (error as { status?: number }).status ??
+                  1) as number | string);
+          const exitCode = typeof codeRaw === "number" ? codeRaw : 1;
           resolve({
             hook,
             event: context.event,
             success: !error,
-            exitCode: error == null ? 0 : ((error as unknown as { status?: number }).status ?? 1),
+            exitCode,
             stdout: stdout ?? "",
             stderr: stderr ?? "",
             duration: Date.now() - start,

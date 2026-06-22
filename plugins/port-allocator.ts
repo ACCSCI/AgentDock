@@ -11,6 +11,10 @@ import {
 import path from "node:path";
 import os from "node:os";
 import { createServer } from "node:net";
+import {
+  BIND_PROBE_BACKOFF_MS,
+  BIND_PROBE_RETRY,
+} from "./constants.js";
 
 // ============================================================
 // Constants
@@ -286,16 +290,177 @@ export class PoolPortAllocator implements PortAllocator {
 // Utility
 // ============================================================
 
-export async function isPortAvailable(port: number): Promise<boolean> {
+/**
+ * EADDRINUSE — clear "occupied" signal. Don't retry, don't fall through
+ * to "transient" — a successful bind retry would just race with the same
+ * real occupant. (新架构 §3.3 bindProbe)
+ */
+const EADDRINUSE = "EADDRINUSE";
+
+/**
+ * tryBindOnce — single bind attempt. Resolves to one of:
+ *   - { ok: true }   — bound and immediately closed
+ *   - { ok: false, code: "EADDRINUSE" } — port is in use
+ *   - { ok: false, code: "TRANSIENT", err } — try again later
+ */
+function tryBindOnce(port: number): Promise<
+  { ok: true } | { ok: false; code: "EADDRINUSE" } | { ok: false; code: "TRANSIENT"; err: unknown }
+> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.listen(port, "127.0.0.1", () => {
-      server.close(() => resolve(true));
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      try {
+        server.close();
+      } catch {
+        /* not listening */
+      }
+      if (err.code === EADDRINUSE) {
+        resolve({ ok: false, code: "EADDRINUSE" });
+      } else {
+        resolve({ ok: false, code: "TRANSIENT", err });
+      }
     });
-    server.on("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve({ ok: true }));
+    });
   });
+}
+
+/**
+ * bindProbe — 新架构 §3.3.
+ *
+ *   bindProbe(port):
+ *     for attempt in 1..BIND_PROBE_RETRY (default 3):
+ *       r = tryBind(port)        // 普通 bind, 不带 SO_REUSEADDR
+ *       if r == OK: return FREE                 // 空闲
+ *       if r == EADDRINUSE: return OCCUPIED      // 明确占用, 立即判定, 不重试
+ *       // 其它瞬时错误 (EACCES 偶发 / 未知) → 短退避后重试
+ *       sleep(BIND_PROBE_BACKOFF_MS)             // 如 50ms
+ *     return OCCUPIED   // 重试耗尽仍失败 → 保守判定为占用
+ *
+ *   - 不带 SO_REUSEADDR 探活(带了反而会让已被别人监听的端口也 bind 成功)
+ *   - EADDRINUSE 立即判占用、不重试
+ *   - 仅对瞬时错误重试
+ *   - 重试耗尽仍失败 → 保守判占用(fail-closed)
+ */
+export async function isPortAvailable(port: number): Promise<boolean> {
+  for (let attempt = 1; attempt <= BIND_PROBE_RETRY; attempt++) {
+    const r = await tryBindOnce(port);
+    if (r.ok) return true;
+    if (r.code === "EADDRINUSE") return false; // 明确占用, 立即判定
+    // TRANSIENT: 短退避后重试
+    if (attempt < BIND_PROBE_RETRY) {
+      await sleep(BIND_PROBE_BACKOFF_MS);
+    }
+  }
+  return false; // 重试耗尽 → fail-closed
+}
+
+/**
+ * pickFreePort 结果: 端口号 + 持有该 socket 的 server 实例.
+ * 调用方负责**先**用端口号做 claimPort 登记, **后**显式 closeServer
+ * 释放端口 (§3.3 严格解读: "先在锁内把 ports[P]=RESERVED 挂到目标
+ * sessionId, 再关闭探活 socket"). 比旧实现 (close 在 pickFreePort
+ * 内同步发生) 缩小"close 后到 claimPort 之间"的抢占窗口.
+ */
+export interface PickFreePortResult {
+  port: number;
+  closeServer: () => Promise<void>;
+}
+
+/**
+ * Pick a single free port using OS port=0 to get a random one (新架构 §3.3).
+ *
+ * Tries up to `maxAttempts` times to bind a random port; returns the first
+ * one that succeeds with its **未关闭的** server. Excludes ports in
+ * `exclude`. This avoids "increment through a range" which can collide
+ * with consecutive occupied ranges.
+ *
+ * 调用模式 (与 §3.3 严格顺序一致):
+ *   const { port, closeServer } = await pickFreePort();
+ *   await mutex.runExclusive("state", async () => {
+ *     claimPort(sessionId, port, name);   // 1. 锁内登记 RESERVED
+ *   });
+ *   await closeServer();                    // 2. 锁外关 socket 释放端口
+ */
+export async function pickFreePort(
+  exclude: readonly number[] = [],
+  maxAttempts = 50,
+): Promise<PickFreePortResult> {
+  const excludeSet = new Set(exclude);
+  for (let i = 0; i < maxAttempts; i++) {
+    const server = createServer();
+    const port = await new Promise<number | null>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        resolve(typeof addr === "object" && addr ? addr.port : null);
+      });
+      server.on("error", () => resolve(null));
+    });
+    if (port !== null && !excludeSet.has(port)) {
+      return {
+        port,
+        closeServer: () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          }),
+      };
+    }
+    // 不在排除集但未拿到端口 — 关闭 server 重试
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  }
+  throw new Error(
+    `pickFreePort: failed to find a free port in ${maxAttempts} attempts`,
+  );
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * allocateNFreePorts — 新架构 §3.3 / §14.2 归位的批量 pick.
+ *
+ * All code paths now use this function. The old daemon-state.ts allocatePorts
+ * was removed in F10-2c along with the v1 surface.
+ *   - 走 pickFreePort (OS port=0 随机空闲, §3.3 抗撞号)
+ *   - 走 isPortAvailable (BIND_PROBE_RETRY + 退避, §3.3 bind 探活)
+ *   - 不依赖任何 in-memory allocatedPorts 数组 — 端口归属由 DaemonStateV2
+ *     的 ports Map 单一真相源承担
+ *
+ * P1 修: pickFreePort 返回 PickFreePortResult ({ port, closeServer }), 不是
+ * number. 这里解构 { port } 拿到端口号, 并把每个 probe socket 的 closeServer
+ * 攒到 closeAll 里, 循环结束后统一释放 — 保持 §3.3 抢占窗口语义 (all bind
+ * sockets released together once all picks done, vs 边 pick 边 close).
+ *
+ * @param count 要分配的端口数
+ * @param exclude 已 RESERVED 或外部占用的端口, 必须排除
+ */
+export async function allocateNFreePorts(
+  count: number,
+  exclude: ReadonlySet<number> = new Set(),
+  maxAttempts = 50,
+): Promise<number[]> {
+  if (count <= 0) return [];
+  const result: number[] = [];
+  const excluded = new Set(exclude);
+  const closeAll: Array<() => Promise<void>> = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const { port, closeServer } = await pickFreePort(
+        [...excluded],
+        maxAttempts,
+      );
+      result.push(port);
+      excluded.add(port);
+      closeAll.push(closeServer);
+    }
+    return result;
+  } finally {
+    // 异常路径也保证 probe sockets 不泄漏 (Node 进程退出时 net.Server GC
+    // 会自动关, 但 setImmediate 内的 close callback 可能跑不完).
+    await Promise.all(closeAll.map((fn) => fn().catch(() => {})));
+  }
 }

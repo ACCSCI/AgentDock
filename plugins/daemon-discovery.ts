@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { createConnection } from "node:net";
 import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
+import { FOLLOWER_WAIT_TIMEOUT_MS, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MS } from "./constants.js";
 
 // ============================================================
 // Constants
@@ -12,14 +13,24 @@ const AGENTDOCK_DIR = ".agentdock";
 const DAEMON_INFO_FILE = "daemon.json";
 const DAEMON_LOCK_FILE = "daemon-lock";
 
-/** Timeout for daemon health check after spawning (ms) */
+/** Timeout for daemon health check after spawning (ms) — leader's own startup. */
 export const DAEMON_STARTUP_TIMEOUT_MS = 5_000;
 /** Poll interval during startup wait (ms) */
 export const DAEMON_STARTUP_POLL_MS = 100;
 /** Max time to hold the leader lock during startup (ms) */
-export const LEADER_LOCK_TIMEOUT_MS = 10_000;
+// LEADER_LOCK_TIMEOUT_MS — re-exported from constants.ts (single source of truth).
+
 /** Random delay range before spawning to reduce thundering herd (ms) */
-export const SPAWN_JITTER_MAX_MS = 500;
+// SPAWN_JITTER_MS — re-exported from constants.ts (single source of truth).
+// Previously named SPAWN_JITTER_MAX_MS; renamed for consistency with §11.5 table.
+/**
+ * Follower's max wait for the leader to write daemon.json (ms) — 新架构 §1.1.
+ * Re-exported from constants.ts (single source of truth). Must satisfy
+ *   FOLLOWER_STARTUP_TIMEOUT_MS > LEADER_LOCK_TIMEOUT_MS
+ * so a slow leader (spawn + listen + atomic-rename daemon.json) can
+ * finish before the follower gives up and re-acquires the lock.
+ */
+export const FOLLOWER_STARTUP_TIMEOUT_MS = FOLLOWER_WAIT_TIMEOUT_MS;
 
 // ============================================================
 // Types
@@ -46,6 +57,9 @@ export interface DaemonDiscoveryResult {
 // ============================================================
 
 function getDataDir(): string {
+  // Daemon is a machine-level singleton (only manages port allocation),
+  // so daemon.json lives at a fixed global location — never configurable.
+  // All Electron instances on the same machine share this single daemon.
   return path.join(os.homedir(), AGENTDOCK_DIR);
 }
 
@@ -240,7 +254,7 @@ export async function discoverDaemon(
   }
 
   // Phase 3: We are the leader — random jitter to reduce thundering herd
-  const jitter = Math.random() * SPAWN_JITTER_MAX_MS;
+  const jitter = Math.random() * SPAWN_JITTER_MS;
   await sleep(jitter);
 
   // Re-check: the daemon might have been started by another instance

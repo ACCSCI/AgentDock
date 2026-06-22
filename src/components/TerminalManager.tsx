@@ -49,24 +49,27 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     return () => window.removeEventListener("click", close);
   }, [menu]);
 
-  // If active terminal no longer exists, clear it
+  // Single effect for terminal selection — replaces the previous 3
+  // separate useEffects which formed an infinite update loop under
+  // React 19's batching: each `setActiveTerminal` call created a new
+  // zustand Map reference → re-render → next effect re-ran → called
+  // `setActiveTerminal` again → repeat.  One unified effect avoids
+  // the cascade entirely.
   useEffect(() => {
-    const justCreated = justCreatedRef.current;
-    if (justCreated && activeTerminalId === justCreated) return;
-    if (activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
-      setActiveTerminal(sessionId, null);
-    }
-  }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
-
-  // Clear the just-created ref once the terminal appears in the query data
-  useEffect(() => {
+    // (a) Clear stale justCreated ref once the terminal appears in data.
     if (justCreatedRef.current && terminals.find((t) => t.terminalId === justCreatedRef.current)) {
       justCreatedRef.current = null;
     }
-  }, [terminals]);
 
-  // Auto-select first terminal if none selected
-  useEffect(() => {
+    // (b) If active terminal was deleted, clear selection.
+    const justCreated = justCreatedRef.current;
+    const isJustCreatedActive = justCreated && activeTerminalId === justCreated;
+    if (!isJustCreatedActive && activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
+      setActiveTerminal(sessionId, null);
+      return; // exit — next render will re-enter with activeTerminalId=null
+    }
+
+    // (c) If nothing selected but terminals exist, pick the first live one.
     if (!activeTerminalId && terminals.length > 0) {
       const first = terminals.find((t) => t.status !== "exited") ?? terminals[0];
       setActiveTerminal(sessionId, first.terminalId);
@@ -140,7 +143,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
 
   return (
-    <div className="terminal-panel">
+    <div className="terminal-panel" data-testid="terminal-panel">
       {/* Terminal tab bar */}
       <div className="terminal-tab-bar">
         {terminals.map((t) => (
@@ -153,6 +156,8 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             tabIndex={0}
             role="tab"
             aria-selected={t.terminalId === activeTerminalId}
+            data-testid="terminal-tab"
+            data-terminal-id={t.terminalId}
           >
             <span className="terminal-tab-icon">
               {t.status === "exited" ? "○" : "●"}
@@ -186,6 +191,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
           onClick={handleNewTerminal}
           disabled={loading || createTerminal.isPending}
           title="New Terminal"
+          data-testid="new-terminal"
         >
           +
         </button>

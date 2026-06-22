@@ -4,9 +4,40 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { WebSocket } from "ws";
+import type { MessagePortMain } from "electron";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Locate pty-host.cjs across the dev / prod / electron-builder layouts.
+ *
+ *   - dev (electron-vite preview / npm test):
+ *       __dirname = .../plugins  → pty-host.cjs is right here
+ *   - prod (electron-vite build):
+ *       __dirname = .../out/main → pty-host.cjs is copied here by
+ *       electron.vite.config.ts's externalization rule
+ *   - electron-builder packaged:
+ *       __dirname = .../resources/app.asar.unpacked/out/main → same
+ *
+ * Walks a small candidate list and picks the first that exists, so a
+ * missing copy step in any layout fails loudly with a useful path.
+ */
+function resolvePtyHostPath(): string {
+  const candidates = [
+    path.join(__dirname, "pty-host.cjs"),
+    // build output sometimes flattens; check ../plugins as fallback.
+    path.join(__dirname, "..", "plugins", "pty-host.cjs"),
+    path.join(__dirname, "..", "..", "plugins", "pty-host.cjs"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error(
+    `pty-host.cjs not found. Searched: ${candidates.join(", ")}. ` +
+      `Make sure electron.vite.config.ts copies plugins/pty-host.cjs into out/main/.`,
+  );
+}
 
 export type TerminalStatus = "spawning" | "running" | "exited";
 
@@ -21,7 +52,10 @@ export interface TerminalInstance {
   pid: number | null;
   status: TerminalStatus;
   createdAt: Date;
+  /** Active WebSocket subscribers (legacy daemon-WS path; unused under Electron). */
   connections: Set<WebSocket>;
+  /** Active Electron MessagePort subscribers (current Electron renderer path). */
+  ports: Set<MessagePortMain>;
   buffer: string[];
 }
 
@@ -38,9 +72,20 @@ export class TerminalManager {
     if (this.host && this.hostReady) return;
     if (this.host && !this.hostReady) return;
 
-    const hostPath = path.join(__dirname, "pty-host.cjs");
+    // pty-host.cjs lives next to this file in dev (plugins/) and in
+    // out/main/ in prod (copied by electron.vite.config.ts). __dirname
+    // resolves correctly in both cases.
+    const hostPath = resolvePtyHostPath();
+    // process.execPath is electron.exe in the Electron main process;
+    // running pty-host.cjs with it directly would have Electron try to
+    // launch `pty-host.cjs` as a new Electron app — exact symptom the
+    // user hit: "Error launching app: Unable to find Electron app at
+    // out/main/pty-host.cjs". ELECTRON_RUN_AS_NODE=1 makes the spawned
+    // electron.exe behave like plain Node, so node-pty + IPC stay
+    // inside one binary (no Node dependency on the user's machine).
     this.host = spawn(process.execPath, [hostPath], {
       stdio: ["pipe", "pipe", "inherit"],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     });
 
     const rl = createInterface({ input: this.host.stdout! });
@@ -77,6 +122,16 @@ export class TerminalManager {
           terminal.pid = msg.pid as number;
           terminal.status = "running";
           console.log(`[TerminalManager] Terminal ${terminalId} spawned (pid=${msg.pid})`);
+          // Replay the "opened" frame so any port that connects post-spawn
+          // gets the pid immediately (the renderer ignores it after the
+          // PortShim's synthetic onopen, but it costs nothing).
+          this.broadcastToPorts(terminal, {
+            type: "opened",
+            terminalId,
+            sessionId: terminal.sessionId,
+            pid: terminal.pid,
+            status: terminal.status,
+          });
           break;
 
         case "output":
@@ -86,15 +141,18 @@ export class TerminalManager {
               ws.send(JSON.stringify({ type: "output", data: msg.data }));
             }
           }
+          this.broadcastToPorts(terminal, { type: "output", data: msg.data });
           break;
 
         case "exit":
           {
             terminal.status = "exited";
-            const exitMsg = JSON.stringify({ type: "exit", code: msg.code, signal: msg.signal });
+            const exitPayload = { type: "exit", code: msg.code, signal: msg.signal };
+            const exitMsg = JSON.stringify(exitPayload);
             for (const ws of terminal.connections) {
               if (ws.readyState === ws.OPEN) ws.send(exitMsg);
             }
+            this.broadcastToPorts(terminal, exitPayload);
             console.log(`[TerminalManager] Terminal ${terminalId} exited (code=${msg.code})`);
             // Don't remove immediately — keep for status queries. Cleanup on kill().
           }
@@ -106,6 +164,7 @@ export class TerminalManager {
               ws.send(JSON.stringify({ type: "error", message: msg.message }));
             }
           }
+          this.broadcastToPorts(terminal, { type: "error", message: msg.message });
           break;
       }
     });
@@ -121,6 +180,8 @@ export class TerminalManager {
             ws.send(JSON.stringify({ type: "exit", code: null, signal: "host_died" }));
           }
         }
+        this.broadcastToPorts(terminal, { type: "exit", code: null, signal: "host_died" });
+        this.closeAllPorts(terminal);
       }
       this.terminals.clear();
       this.sessionIndex.clear();
@@ -189,6 +250,7 @@ export class TerminalManager {
       status: "spawning",
       createdAt: new Date(),
       connections: new Set(),
+      ports: new Set(),
       buffer: [],
     };
 
@@ -237,6 +299,98 @@ export class TerminalManager {
     terminal.connections.delete(ws);
   }
 
+  /**
+   * Attach an Electron MessagePort to a terminal (current Electron path).
+   *
+   * Wire format (matches `src/lib/terminal-cache.ts` PortShim):
+   *   port → main:  object `{type:"input",data}` | `{type:"resize",cols,rows}`
+   *   main → port:  JSON string of `{type:"output"|"exit"|"error"|"opened", ...}`
+   *
+   * The asymmetric encoding is required because the renderer's PortShim
+   * does `JSON.parse(JSON.stringify(data))` on send (so main sees an
+   * object) but `JSON.parse(event.data)` on receive (so it expects a
+   * string). Sending strings out is the path of least disruption.
+   *
+   * Replays the current buffer on attach so a late-joiner sees prior
+   * output without scrolling history loss.
+   */
+  attachPort(terminalId: string, port: MessagePortMain): TerminalInstance {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal) throw new Error(`Terminal not found: ${terminalId}`);
+
+    terminal.ports.add(port);
+
+    port.on("message", (e: { data: unknown }) => {
+      const msg = e.data as { type?: string; data?: string; cols?: number; rows?: number };
+      if (!msg || typeof msg.type !== "string") return;
+      switch (msg.type) {
+        case "input":
+          if (typeof msg.data === "string") this.write(terminalId, msg.data);
+          break;
+        case "resize":
+          if (typeof msg.cols === "number" && typeof msg.rows === "number") {
+            this.resize(terminalId, msg.cols, msg.rows);
+          }
+          break;
+      }
+    });
+    port.on("close", () => {
+      terminal.ports.delete(port);
+    });
+    port.start();
+
+    // Replay buffer so the renderer renders prior output. The xterm
+    // serializer wrote each PTY chunk as-is; concat is safe.
+    if (terminal.buffer.length > 0) {
+      port.postMessage(
+        JSON.stringify({ type: "output", data: terminal.buffer.join("") }),
+      );
+    }
+    // Send "opened" so the renderer learns the pid (PortShim already
+    // marked status=connected, but the master protocol emitted this).
+    port.postMessage(
+      JSON.stringify({
+        type: "opened",
+        terminalId,
+        sessionId: terminal.sessionId,
+        pid: terminal.pid,
+        status: terminal.status,
+      }),
+    );
+    // If the PTY already exited, tell the new port immediately so the
+    // renderer shows its "process exited" overlay.
+    if (terminal.status === "exited") {
+      port.postMessage(JSON.stringify({ type: "exit", code: null, signal: "already-exited" }));
+    }
+    return terminal;
+  }
+
+  /** Broadcast a structured frame as a JSON string to every attached port. */
+  private broadcastToPorts(terminal: TerminalInstance, frame: unknown): void {
+    if (terminal.ports.size === 0) return;
+    const json = JSON.stringify(frame);
+    for (const port of terminal.ports) {
+      try {
+        port.postMessage(json);
+      } catch {
+        // Port may be closed mid-iteration; drop it.
+        terminal.ports.delete(port);
+      }
+    }
+  }
+
+  /** Close every attached MessagePort (called on terminal kill / host death). */
+  private closeAllPorts(terminal: TerminalInstance): void {
+    for (const port of terminal.ports) {
+      try {
+        port.close();
+      } catch {
+        // Best-effort.
+      }
+    }
+    terminal.ports.clear();
+  }
+
   /** Write data to a terminal's PTY. */
   write(terminalId: string, data: string): void {
     const terminal = this.terminals.get(terminalId);
@@ -262,11 +416,14 @@ export class TerminalManager {
     this.sendToHost({ type: "kill", terminalId });
 
     // Notify connected clients
-    const exitMsg = JSON.stringify({ type: "exit", code: null, signal: "killed" });
+    const exitPayload = { type: "exit", code: null, signal: "killed" };
+    const exitMsg = JSON.stringify(exitPayload);
     for (const ws of terminal.connections) {
       if (ws.readyState === ws.OPEN) ws.send(exitMsg);
       ws.close();
     }
+    this.broadcastToPorts(terminal, exitPayload);
+    this.closeAllPorts(terminal);
 
     this.removeFromSessionIndex(terminal.sessionId, terminalId);
     this.terminals.delete(terminalId);
@@ -295,12 +452,15 @@ export class TerminalManager {
     this.sendToHost({ type: "killAll" });
 
     // Notify all connected clients
-    const exitMsg = JSON.stringify({ type: "exit", code: null, signal: "shutdown" });
+    const exitPayload = { type: "exit", code: null, signal: "shutdown" };
+    const exitMsg = JSON.stringify(exitPayload);
     for (const [, terminal] of this.terminals) {
       for (const ws of terminal.connections) {
         if (ws.readyState === ws.OPEN) ws.send(exitMsg);
         ws.close();
       }
+      this.broadcastToPorts(terminal, exitPayload);
+      this.closeAllPorts(terminal);
     }
 
     this.terminals.clear();

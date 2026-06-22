@@ -2,12 +2,14 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   FilePortAllocator,
   PoolPortAllocator,
+  isPortAvailable,
   type PortAllocator,
 } from "../port-allocator.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
+import { createServer, type Server } from "node:net";
 
 function tmpDir(): string {
   const dir = path.join(
@@ -359,3 +361,51 @@ function runChild(scriptPath: string, count: string): Promise<string> {
     );
   });
 }
+
+// ============================================================
+// isPortAvailable — 新架构 §3.3 bindProbe
+// (EADDRINUSE 立即判占用; 其它瞬时错误 BIND_PROBE_RETRY 次重试 + 退避;
+//  重试耗尽 → 保守判占用 fail-closed)
+// ============================================================
+
+async function grabPort(port: number): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const s = createServer();
+    s.once("error", reject);
+    s.listen(port, "127.0.0.1", () => resolve(s));
+  });
+}
+
+describe("isPortAvailable (新架构 §3.3 bindProbe)", () => {
+  let grabbed: Server | null = null;
+
+  afterEach(async () => {
+    if (grabbed) {
+      await new Promise<void>((r) => grabbed!.close(() => r()));
+      grabbed = null;
+    }
+  });
+
+  it("returns true for a free port", async () => {
+    // Use a high random port — likely free.
+    const p = 40000 + Math.floor(Math.random() * 5000);
+    expect(await isPortAvailable(p)).toBe(true);
+  });
+
+  it("returns false immediately when EADDRINUSE (no retry)", async () => {
+    // Grab a port, then verify isPortAvailable returns false in roughly
+    // 0ms (no 50ms backoff * 3 retry).
+    grabbed = await grabPort(0);
+    const addr = grabbed.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+
+    const start = Date.now();
+    const result = await isPortAvailable(port);
+    const elapsed = Date.now() - start;
+
+    expect(result).toBe(false);
+    // EADDRINUSE → single attempt, no backoff. Allow a tiny margin for
+    // OS scheduling but it must NOT be >= BIND_PROBE_BACKOFF_MS * 2.
+    expect(elapsed).toBeLessThan(80);
+  });
+});

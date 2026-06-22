@@ -1,5 +1,21 @@
-﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+/**
+ * Query / Mutation hooks — Phase 5 renderer-side update.
+ *
+ * All hooks now call `window.api.*` (the Electron IPC bridge exposed by
+ * preload.ts) instead of `fetch('/api/...')`. The original Vite-middleware
+ * flow (api.ts as a fetch proxy) is gone; everything goes through IPC.
+ *
+ * Streaming: SSE was previously `fetch + ReadableStream`. Now we use the
+ * AsyncIterable-style subscriber exposed by preload: pass a sessionId, get
+ * back `{ onStep, onComplete }` event subscribables.
+ *
+ * F11b: Added v2State integration — useV2Projects combines v2State SSE push
+ * with old polling fallback for backward compatibility.
+ */
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {} from "../electron"; // pulls in window.api type augmentation (Phase 6)
+import { useV2State, isV2StateAvailable } from "../hooks/useV2State";
 
 // Types matching the DB schema
 export interface ProjectData {
@@ -10,7 +26,14 @@ export interface ProjectData {
   sessions: SessionListItem[];
 }
 
-export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
+export type SessionRuntimeStatus =
+  | "existing"
+  | "foreign"
+  | "allocated"
+  | "reclaimed"
+  | "reallocated"
+  | "creating"
+  | "deleting";
 
 export interface SessionPorts {
   FRONTEND_PORT: number;
@@ -20,7 +43,6 @@ export interface SessionPorts {
   PREVIEW_PORT: number;
 }
 
-export type SessionRuntimeStatus = "existing" | "foreign" | "allocated" | "reclaimed";
 export type SessionViewStatus = SessionRuntimeStatus | "creating" | "deleting";
 
 export interface SessionData {
@@ -40,7 +62,6 @@ export interface SessionData {
   canRename?: boolean;
 }
 
-// --- SSE step event types ---
 export interface SessionStep {
   step: string;
   status: "running" | "done" | "error";
@@ -55,521 +76,28 @@ export interface CreatingSession extends Omit<SessionData, "status"> {
 
 export type SessionListItem = SessionData | CreatingSession | DeletingSession;
 
+export interface DeletingSession extends Omit<SessionData, "status"> {
+  status: "deleting";
+  steps: SessionStep[];
+}
+
 export function isCreatingSession(s: SessionListItem): s is CreatingSession {
   return "status" in s && (s as CreatingSession).status === "creating";
 }
 
-export interface DeletingSession extends Omit<SessionData, "status"> {
-  status: "deleting";
-  steps: SessionStep[];
+export interface TerminalData {
+  terminalId: string;
+  sessionId: string;
+  shell: string;
+  status: string;
+  pid: number | null;
+  createdAt: string;
 }
 
 export function isDeletingSession(s: SessionListItem): s is DeletingSession {
   return "status" in s && (s as DeletingSession).status === "deleting";
 }
 
-// Query keys
-export const queryKeys = {
-  projects: ["projects"] as const,
-  terminals: (sessionId: string) => ["terminals", sessionId] as const,
-};
-
-// GET /api/projects
-export function useProjects() {
-  return useQuery({
-    queryKey: queryKeys.projects,
-    queryFn: async (): Promise<ProjectData[]> => {
-      const res = await fetch("/api/projects");
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.projects;
-    },
-    refetchInterval: 30_000, // 每 30 秒轮询一次，触发 auto-sync
-    refetchIntervalInBackground: false, // 后台标签页不轮询
-  });
-}
-
-// POST /api/init
-export function useInitDb() {
-  return useMutation({
-    mutationFn: async (projectPath: string) => {
-      const res = await fetch("/api/init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data;
-    },
-  });
-}
-
-// POST /api/projects
-export function useCreateProject() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ name, path }: { name: string; path: string }) => {
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, path }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.project as ProjectData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
-}
-
-// DELETE /api/projects/:id
-export function useDeleteProject() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (projectId: string) => {
-      const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
-}
-
-// SSE-based create session with optimistic update
-export function useCreateSessionSSE() {
-  const queryClient = useQueryClient();
-  return useMutation<SessionData, Error, { projectId: string; name: string; baseBranch?: string; tempId?: string }, { prevProjects: ProjectData[] | undefined; tempId: string }>({
-    mutationFn: async ({ projectId, name, baseBranch, tempId }) => {
-      if (!tempId) throw new Error("tempId is required");
-      const res = await fetch(`/api/projects/${projectId}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
-        body: JSON.stringify({ name, baseBranch }),
-      });
-
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("text/event-stream")) {
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-        return data.session as SessionData;
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let result: SessionData | null = null;
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith("data: ")) {
-            const data = JSON.parse(line.slice(6));
-            if (currentEvent === "step") {
-              queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-                if (!old) return old;
-                return old.map((p) => {
-                  if (p.id !== projectId) return p;
-                  return {
-                    ...p,
-                    sessions: p.sessions.map((s) => {
-                      if (s.id !== tempId) return s;
-                      if (!isCreatingSession(s)) return s;
-                      const creating = s as CreatingSession;
-                      const existingIdx = creating.steps.findIndex((st) => st.step === data.step);
-                      const newSteps = [...creating.steps];
-                      if (existingIdx >= 0) {
-                        newSteps[existingIdx] = data;
-                      } else {
-                        newSteps.push(data);
-                      }
-                      return { ...creating, steps: newSteps };
-                    }),
-                  };
-                });
-              });
-            } else if (currentEvent === "complete") {
-              result = data.session;
-            } else if (currentEvent === "error") {
-              throw new Error(data.error);
-            }
-          }
-        }
-      }
-
-      if (!result) throw new Error("No complete event received");
-      return result;
-    },
-    onMutate: async ({ projectId, name, tempId: inputTempId }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
-      const prevProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
-      const tempId = inputTempId ?? `temp-${Date.now()}`;
-
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          const tempSession: CreatingSession = {
-            id: tempId, projectId, name, branch: "", worktreePath: "", ports: null,
-            createdAt: new Date().toISOString(), status: "creating", steps: [],
-          };
-          return { ...p, sessions: [...p.sessions, tempSession] };
-        });
-      });
-
-      return { prevProjects, tempId };
-    },
-    onError: (_err, _variables, context) => {
-      if (context?.prevProjects) {
-        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
-      }
-    },
-    onSuccess: (session, { projectId, tempId }) => {
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          return {
-            ...p,
-            sessions: p.sessions.map((s) =>
-              s.id === tempId ? { ...session } : s,
-            ),
-          };
-        });
-      });
-    },
-  });
-}
-
-// DELETE /api/sessions/:id
-export function useDeleteSessionSSE() {
-  const queryClient = useQueryClient();
-  return useMutation<void, Error, { sessionId: string; projectId: string }, { prevProjects: ProjectData[] | undefined }>({
-    mutationFn: async ({ sessionId, projectId }) => {
-      const res = await fetch(`/api/sessions/${sessionId}`, {
-        method: "DELETE",
-        headers: { "Accept": "text/event-stream" },
-      });
-
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("text/event-stream")) {
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-        return;
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith("data: ")) {
-            const data = JSON.parse(line.slice(6));
-            if (currentEvent === "step") {
-              queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-                if (!old) return old;
-                return old.map((p) => {
-                  if (p.id !== projectId) return p;
-                  return {
-                    ...p,
-                    sessions: p.sessions.map((s) => {
-                      if (s.id !== sessionId) return s;
-                      if (!isDeletingSession(s)) return s;
-                      const deleting = s as DeletingSession;
-                      const existingIdx = deleting.steps.findIndex((st) => st.step === data.step);
-                      const newSteps = [...deleting.steps];
-                      if (existingIdx >= 0) {
-                        newSteps[existingIdx] = data;
-                      } else {
-                        newSteps.push(data);
-                      }
-                      return { ...deleting, steps: newSteps };
-                    }),
-                  };
-                });
-              });
-            } else if (currentEvent === "complete") {
-              return;
-            } else if (currentEvent === "error") {
-              throw new Error(data.error);
-            }
-          }
-        }
-      }
-    },
-    onMutate: async ({ sessionId, projectId }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
-      const prevProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
-
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          return {
-            ...p,
-            sessions: p.sessions.map((s) => {
-              if (s.id !== sessionId) return s;
-              // Don't overwrite if already in a transitional state
-              if (isCreatingSession(s) || isDeletingSession(s)) return s;
-              const deleting: DeletingSession = { ...s, status: "deleting", steps: [] };
-              return deleting;
-            }),
-          };
-        });
-      });
-
-      return { prevProjects };
-    },
-    onError: (_err, _variables, context) => {
-      if (context?.prevProjects) {
-        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
-      }
-    },
-    onSuccess: (_data, { sessionId, projectId }) => {
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          return {
-            ...p,
-            sessions: p.sessions.filter((s) => s.id !== sessionId),
-          };
-        });
-      });
-    },
-  });
-}
-
-// PATCH /api/sessions/:id
-export function useRenameSession() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ sessionId, name }: { sessionId: string; name: string }) => {
-      const res = await fetch(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.session as SessionData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
-}
-
-// PUT /api/sessions/reorder — reorder sessions for a project
-export function useReorderSessions() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ projectId, sessionIds }: { projectId: string; sessionIds: string[] }) => {
-      const res = await fetch("/api/sessions/reorder", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, sessionIds }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
-}
-
-// POST /api/sessions/:id/reassign-ports
-export function useReassignPorts() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (sessionId: string) => {
-      const res = await fetch(`/api/sessions/${sessionId}/reassign-ports`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.session as SessionData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
-}
-
-// ---- Terminal API ----
-
-export interface TerminalData {
-  terminalId: string;
-  sessionId: string;
-  name: string;
-  shell: string;
-  status: "spawning" | "running" | "exited";
-  pid: number | null;
-  createdAt: string;
-}
-
-export async function fetchSessionTerminals(sessionId: string): Promise<TerminalData[]> {
-  const res = await fetch(`/api/sessions/${sessionId}/terminals`);
-  const data = await res.json();
-  if (!data.success) throw new Error(data.error);
-  return data.terminals;
-}
-
-// GET /api/sessions/:id/terminals
-export function useSessionTerminals(sessionId: string) {
-  return useQuery({
-    queryKey: queryKeys.terminals(sessionId),
-    queryFn: () => fetchSessionTerminals(sessionId),
-    enabled: !!sessionId,
-    refetchInterval: 3000,
-    staleTime: 5000,
-  });
-}
-
-// POST /api/sessions/:id/terminals
-export function useCreateTerminal() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ sessionId, shell }: { sessionId: string; shell?: string }) => {
-      const res = await fetch(`/api/sessions/${sessionId}/terminals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shell }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.terminal as TerminalData;
-    },
-    onSuccess: (_data, { sessionId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.terminals(sessionId) });
-    },
-  });
-}
-
-// DELETE /api/terminals/:terminalId
-export function useDeleteTerminal() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (terminalId: string) => {
-      const res = await fetch(`/api/terminals/${terminalId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["terminals"] });
-    },
-  });
-}
-
-// PATCH /api/terminals/:terminalId
-export function useRenameTerminal() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ terminalId, name }: { terminalId: string; name: string }) => {
-      const res = await fetch(`/api/terminals/${terminalId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.terminal as TerminalData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["terminals"] });
-    },
-  });
-}
-// GET /api/sessions/:id/background-hook-status
-export function useBackgroundHookStatus(sessionId: string | null, enabled = true) {
-  const queryClient = useQueryClient();
-  const query = useQuery({
-    queryKey: ["backgroundHookStatus", sessionId] as const,
-    queryFn: async (): Promise<string | null> => {
-      if (!sessionId) return null;
-      const res = await fetch(`/api/sessions/${sessionId}/background-hook-status`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.status;
-    },
-    enabled: enabled && !!sessionId,
-    refetchInterval: (query) => {
-      const status = query.state.data;
-      if (status === "completed" || status === "failed" || status === null) return false;
-      return 2000;
-    },
-  });
-
-  // When the background hook reaches a terminal state, write it back into the
-  // projects cache so the session card leaves the "环境初始化中" state. The SSE
-  // stream that created the session has already closed (it returns as soon as
-  // the async hook starts), so polling is the only signal the UI receives.
-  const status = query.data;
-  useEffect(() => {
-    if (!sessionId) return;
-    if (status !== "completed" && status !== "failed") return;
-    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-      if (!old) return old;
-      let changed = false;
-      const next = old.map((p) => ({
-        ...p,
-        sessions: p.sessions.map((s) => {
-          if (s.id !== sessionId || s.backgroundHookStatus === status) return s;
-          changed = true;
-          return { ...s, backgroundHookStatus: status };
-        }),
-      }));
-      return changed ? next : old;
-    });
-    // When the background hook completes or fails, invalidate the hook errors
-    // cache so the UI can fetch the latest details.
-    queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
-  }, [sessionId, status, queryClient]);
-
-  return query;
-}
-
-/** Check if a session has an async background hook still running */
-export function isBackgroundHookRunning(s: SessionListItem): boolean {
-  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
-}
-
-/** Check if a session's async background hook has failed */
-export function isBackgroundHookFailed(s: SessionListItem): boolean {
-  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
-}
-
-// --- Hook error detail types ---
 export interface HookError {
   run: string;
   exitCode: number | null;
@@ -579,89 +107,26 @@ export interface HookError {
   error: string | null;
 }
 
-// GET /api/sessions/:id/hook-errors
-export function useHookErrors(sessionId: string | null) {
-  return useQuery({
-    queryKey: ["hookErrors", sessionId],
-    queryFn: async (): Promise<HookError[]> => {
-      const res = await fetch(`/api/sessions/${sessionId}/hook-errors`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.errors;
-    },
-    enabled: !!sessionId,
-    staleTime: 5_000,
-  });
-}
-
-// POST /api/sessions/:id/retry-hooks
-export function useRetryHook() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (sessionId: string) => {
-      const res = await fetch(`/api/sessions/${sessionId}/retry-hooks`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to retry hooks");
-      return data;
-    },
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
-    },
-  });
-}
-
-// --- Orphan worktree types & hooks ---
-
 export interface OrphanDir {
   sessionId: string;
+  /**
+   * Filesystem path of the orphan directory. EMPTY STRING when the
+   * entry is a `reason: "orphan-branch"` (no on-disk worktree) — code
+   * that keys by this MUST treat empty as "not a path", or multiple
+   * orphan-branch entries collapse into the same key.
+   */
   worktreePath: string;
   reason: "no-git-file" | "empty-dir" | "orphan-branch";
-  /** Branch name; only set when `reason === "orphan-branch"`. */
-  branch?: string;
+  /** Populated for orphan-branch; the `agentdock/<id>` branch name. */
+  branch?: string | null;
 }
 
-// GET /api/projects/:id/orphans
-export function useOrphans(projectId: string | null) {
-  return useQuery({
-    queryKey: ["orphans", projectId],
-    queryFn: async (): Promise<OrphanDir[]> => {
-      const res = await fetch(`/api/projects/${projectId}/orphans`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch orphans");
-      return data.orphans;
-    },
-    enabled: !!projectId,
-  });
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number | null;
 }
-
-export interface DeleteOrphansInput {
-  paths?: string[];
-  branches?: string[];
-  projectId?: string;
-}
-
-// POST /api/orphans/delete
-export function useDeleteOrphans() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: DeleteOrphansInput) => {
-      const res = await fetch("/api/orphans/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to delete orphans");
-      return data as { deleted: string[]; failed: Array<{ path: string; error: string }> };
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orphans"] });
-    },
-  });
-}
-
-// ---- Config API ----
 
 export interface ProjectConfigData {
   config: {
@@ -675,34 +140,515 @@ export interface ProjectConfigData {
   envPorts?: string[];
 }
 
-// GET /api/projects/:id/config
+// Query keys
+export const queryKeys = {
+  projects: ["projects"] as const,
+  terminals: (sessionId: string) => ["terminals", sessionId] as const,
+};
+
+// Type-safe access to window.api (exposed by preload.ts via contextBridge).
+declare global {
+  interface Window {
+    api: import("../electron/preload").ApiSurface;
+  }
+}
+
+function api() {
+  if (!window.api) {
+    throw new Error(
+      "window.api is not available. Are you running outside Electron?",
+    );
+  }
+  return window.api;
+}
+
+// GET projects
+export function useProjects() {
+  return useQuery({
+    queryKey: queryKeys.projects,
+    queryFn: async (): Promise<ProjectData[]> => {
+      return api().db.projects.list();
+    },
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+// POST db:init — initialize the active project DB
+export function useInitDb() {
+  return useMutation({
+    mutationFn: async (projectPath: string) => {
+      await api().db.init(projectPath);
+      return { success: true };
+    },
+  });
+}
+
+// POST projects:create
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, path }: { name: string; path: string }) => {
+      return api().db.projects.create(name, path);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// DELETE projects:delete
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      return api().db.projects.delete(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// IPC-streamed create session with optimistic update.
+// Uses the AsyncIterable-style stream exposed by preload's
+// sessions.stream() helper — ipcRenderer.on(...) under the hood.
+export function useCreateSessionSSE() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    SessionData,
+    Error,
+    { projectId: string; name: string; baseBranch?: string; tempId: string },
+    { prevProjects: ProjectData[] | undefined; tempId: string }
+  >({
+    mutationFn: async ({ projectId, name, baseBranch, tempId }) => {
+      const { sessionId } = await api().sessions.create({
+        projectId,
+        name,
+        baseBranch,
+      });
+
+      // Optimistic insert: add a CreatingSession with the tempId.
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          const temp: CreatingSession = {
+            id: tempId,
+            projectId,
+            name,
+            branch: "",
+            worktreePath: "",
+            ports: null,
+            createdAt: new Date().toISOString(),
+            status: "creating",
+            steps: [],
+          };
+          return { ...p, sessions: [...p.sessions, temp] };
+        });
+      });
+
+      // Subscribe to step + complete events.
+      const stream = api().sessions.stream(sessionId);
+      const offStep = stream.onStep((step) => {
+        queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+          if (!old) return old;
+          return old.map((p) => {
+            if (p.id !== projectId) return p;
+            return {
+              ...p,
+              sessions: p.sessions.map((s) => {
+                if (s.id !== tempId) return s;
+                if (!isCreatingSession(s)) return s;
+                const creating = s as CreatingSession;
+                const existingIdx = creating.steps.findIndex(
+                  (st) => st.step === step.step,
+                );
+                const newSteps = [...creating.steps];
+                if (existingIdx >= 0) {
+                  newSteps[existingIdx] = step;
+                } else {
+                  newSteps.push(step);
+                }
+                return { ...creating, steps: newSteps };
+              }),
+            };
+          });
+        });
+      });
+
+      return new Promise<SessionData>((resolve, reject) => {
+        const offComplete = stream.onComplete((result) => {
+          offStep();
+          offComplete();
+          if (!result.success) {
+            reject(new Error(result.error ?? "session create failed"));
+            return;
+          }
+          // Replace the tempId placeholder with the real sessionId. We
+          // don't get the full SessionData back from the stream — fetch it
+          // from the projects list after a brief refresh.
+          queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          // For the return value, construct a minimal SessionData.
+          resolve({
+            id: sessionId,
+            projectId,
+            name,
+            branch: "",
+            worktreePath: "",
+            ports: null,
+            createdAt: new Date().toISOString(),
+            status: "existing",
+          });
+        });
+      });
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.prevProjects) {
+        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
+      }
+    },
+  });
+}
+
+// IPC-streamed delete session
+export function useDeleteSessionSSE() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { sessionId: string; projectId: string },
+    { prevProjects: ProjectData[] | undefined }
+  >({
+    mutationFn: async ({ sessionId, projectId }) => {
+      // Optimistic mark: convert to DeletingSession.
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id !== projectId) return p;
+          return {
+            ...p,
+            sessions: p.sessions.map((s) => {
+              if (s.id !== sessionId) return s;
+              if (isCreatingSession(s) || isDeletingSession(s)) return s;
+              const deleting: DeletingSession = { ...s, status: "deleting", steps: [] };
+              return deleting;
+            }),
+          };
+        });
+      });
+
+      // Subscribe to step + complete events BEFORE firing the delete
+      // IPC — otherwise main can emit `session:<id>:step` /
+      // `session:<id>:complete` before the renderer registers a
+      // listener and the events are silently dropped.
+      const stream = api().sessions.stream(sessionId);
+      const offStep = stream.onStep((step) => {
+        queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+          if (!old) return old;
+          return old.map((p) => {
+            if (p.id !== projectId) return p;
+            return {
+              ...p,
+              sessions: p.sessions.map((s) => {
+                if (s.id !== sessionId) return s;
+                if (!isDeletingSession(s)) return s;
+                const deleting = s as DeletingSession;
+                const existingIdx = deleting.steps.findIndex(
+                  (st) => st.step === step.step,
+                );
+                const newSteps = [...deleting.steps];
+                if (existingIdx >= 0) newSteps[existingIdx] = step;
+                else newSteps.push(step);
+                return { ...deleting, steps: newSteps };
+              }),
+            };
+          });
+        });
+      });
+
+      return new Promise<void>((resolve, reject) => {
+        const offComplete = stream.onComplete((result) => {
+          offStep();
+          offComplete();
+          if (!result.success) {
+            reject(new Error(result.error ?? "delete failed"));
+            return;
+          }
+          queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+            if (!old) return old;
+            return old.map((p) => {
+              if (p.id !== projectId) return p;
+              return {
+                ...p,
+                sessions: p.sessions.filter((s) => s.id !== sessionId),
+              };
+            });
+          });
+          resolve();
+        });
+
+        // Fire the IPC — main schedules the lifecycle on setImmediate
+        // so this resolves immediately with the synchronous result,
+        // while step/complete events stream in via the listeners above.
+        api()
+          .sessions.delete(sessionId)
+          .then((res) => {
+            if (!res.success) {
+              offStep();
+              offComplete();
+              reject(new Error(res.error ?? "delete failed"));
+            }
+            // Successful resolve waits for the `complete` event so the
+            // optimistic cache update happens uniformly through one
+            // code path (the onComplete handler above).
+          })
+          .catch((err) => {
+            offStep();
+            offComplete();
+            reject(err);
+          });
+      });
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.prevProjects) {
+        queryClient.setQueryData(queryKeys.projects, context.prevProjects);
+      }
+    },
+  });
+}
+
+// PATCH sessions:rename
+export function useRenameSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, name }: { sessionId: string; name: string }) => {
+      return api().sessions.rename(sessionId, name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// PUT sessions:reorder
+export function useReorderSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, sessionIds }: { projectId: string; sessionIds: string[] }) => {
+      await api().db.sessions.reorder(projectId, sessionIds);
+      return { success: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// POST sessions:reassignPorts
+export function useReassignPorts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      return api().sessions.reassignPorts(sessionId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// GET terminals
+export async function fetchSessionTerminals(sessionId: string): Promise<TerminalData[]> {
+  return api().terminals.list(sessionId);
+}
+
+export function useSessionTerminals(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.terminals(sessionId),
+    queryFn: () => fetchSessionTerminals(sessionId),
+    enabled: !!sessionId,
+    refetchInterval: 3000,
+    staleTime: 5000,
+  });
+}
+
+// POST terminals:create
+export function useCreateTerminal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, shell }: { sessionId: string; shell?: string }) => {
+      return api().terminals.create(sessionId, shell);
+    },
+    onSuccess: (_data, { sessionId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.terminals(sessionId) });
+    },
+  });
+}
+
+// DELETE terminals
+export function useDeleteTerminal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (terminalId: string) => {
+      return api().terminals.delete(terminalId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["terminals"] });
+    },
+  });
+}
+
+// PATCH terminals:rename
+export function useRenameTerminal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ terminalId, name }: { terminalId: string; name: string }) => {
+      return api().terminals.rename(terminalId, name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["terminals"] });
+    },
+  });
+}
+
+// GET bgHookStatus — polled while the session's background hooks run
+export function useBackgroundHookStatus(sessionId: string | null, enabled = true) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ["backgroundHookStatus", sessionId] as const,
+    queryFn: async (): Promise<string | null> => {
+      if (!sessionId) return null;
+      return api().sessions.bgHookStatus(sessionId);
+    },
+    enabled: enabled && !!sessionId,
+    refetchInterval: (q) => {
+      const status = q.state.data;
+      if (status === "completed" || status === "failed" || status === null) return false;
+      return 2000;
+    },
+  });
+
+  // When bg hook reaches terminal state, write to projects cache.
+  const status = query.data;
+  if (sessionId && (status === "completed" || status === "failed")) {
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      let changed = false;
+      const next = old.map((p) => ({
+        ...p,
+        sessions: p.sessions.map((s) => {
+          if (s.id !== sessionId || s.backgroundHookStatus === status) return s;
+          changed = true;
+          return { ...s, backgroundHookStatus: status };
+        }),
+      }));
+      return changed ? next : old;
+    });
+    queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
+  }
+  return query;
+}
+
+export function isBackgroundHookRunning(s: SessionListItem): boolean {
+  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "running";
+}
+
+export function isBackgroundHookFailed(s: SessionListItem): boolean {
+  return "backgroundHookStatus" in s && (s as SessionData).backgroundHookStatus === "failed";
+}
+
+// GET hookErrors
+export function useHookErrors(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["hookErrors", sessionId],
+    queryFn: async (): Promise<HookError[]> => {
+      if (!sessionId) return [];
+      return api().sessions.hookErrors(sessionId);
+    },
+    enabled: !!sessionId,
+    staleTime: 5_000,
+  });
+}
+
+// POST retryHooks
+export function useRetryHook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      return api().sessions.retryHooks(sessionId);
+    },
+    onSuccess: (_data, sessionId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
+    },
+  });
+}
+
+// GET orphans
+export function useOrphans(projectId: string | null) {
+  return useQuery({
+    queryKey: ["orphans", projectId],
+    queryFn: async (): Promise<OrphanDir[]> => {
+      if (!projectId) return [];
+      return api().worktree.orphans(projectId);
+    },
+    enabled: !!projectId,
+  });
+}
+
+// POST orphans/delete — accepts dirs (`paths`), branches, or both. The
+// renderer used to pass a flat `string[]` which silently dropped every
+// orphan-branch entry (their worktreePath is "" — useless as a path).
+export function useDeleteOrphans() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: {
+      paths?: string[];
+      branches?: string[];
+      projectId?: string;
+    }) => {
+      return api().worktree.deleteOrphans(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orphans"] });
+    },
+  });
+}
+
+// GET fs:files
+export function useProjectFiles(projectId: string, relPath: string, enabled = true) {
+  return useQuery({
+    queryKey: ["projectFiles", projectId, relPath],
+    queryFn: async (): Promise<FileEntry[]> => {
+      return api().fs.files(relPath);
+    },
+    enabled: enabled && !!projectId,
+    staleTime: 5_000,
+  });
+}
+
+// GET config — pass projectId so the handler looks up the project root
+// from DB rather than using the process-wide activeProjectPath (which
+// may point at a worktree whose .env contains allocated ports, not the
+// user's own port variable names).
 export function useProjectConfig(projectId: string) {
   return useQuery({
     queryKey: ["projectConfig", projectId],
     queryFn: async (): Promise<ProjectConfigData> => {
-      const res = await fetch(`/api/projects/${projectId}/config`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return { config: data.config, exists: data.exists, yaml: data.yaml, envPorts: data.envPorts };
+      return api().config.get(projectId);
     },
     enabled: !!projectId,
     staleTime: 10_000,
   });
 }
 
-// POST /api/projects/:id/config
+// POST config:save — pass projectId for same reason
 export function useSaveConfig(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (config: ProjectConfigData["config"]) => {
-      const res = await fetch(`/api/projects/${projectId}/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.yaml as string;
+      return api().config.save(config, projectId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projectConfig", projectId] });
@@ -710,25 +656,120 @@ export function useSaveConfig(projectId: string) {
   });
 }
 
-export interface FileEntry {
-  name: string;
-  path: string;
-  isDir: boolean;
-  status: "untracked" | "modified" | "tracked";
+/**
+ * F11b: Hook that combines v2State SSE push with old polling fallback.
+ *
+ * Priority:
+ * 1. v2State SSE push (real-time, from main process SyncApplier)
+ * 2. 30s v2 sync loop (fallback if v2State not available)
+ * 3. Old query (initial load fallback)
+ *
+ * Returns the same ProjectData[] format as useProjects() for backward
+ * compatibility with existing components.
+ */
+export function useV2Projects() {
+  const v2State = isV2StateAvailable() ? useV2State() : null;
+  const oldQuery = useProjects();
+
+  // Transform v2State data to ProjectData[] format
+  const v2Projects = useMemo(() => {
+    if (!v2State?.ready) return null;
+
+    // Group sessions by projectRoot
+    const projectMap = new Map<string, ProjectData>();
+
+    for (const [sessionId, session] of v2State.sessions) {
+      const projectRoot = session.projectRoot || "";
+
+      if (!projectMap.has(projectRoot)) {
+        projectMap.set(projectRoot, {
+          id: projectRoot, // Use projectRoot as project ID for v2State
+          name: projectRoot.split("/").pop() || projectRoot,
+          path: projectRoot,
+          createdAt: new Date(session.createdAt).toISOString(),
+          sessions: [],
+        });
+      }
+
+      const project = projectMap.get(projectRoot)!;
+      project.sessions.push({
+        id: session.sessionId,
+        projectId: projectRoot,
+        name: session.displayName,
+        branch: "", // v2State doesn't provide branch info
+        worktreePath: projectRoot,
+        ports: session.ports && Object.keys(session.ports).length > 0 ? {
+          FRONTEND_PORT: session.ports.FRONTEND_PORT || 0,
+          BACKEND_PORT: session.ports.BACKEND_PORT || 0,
+          WS_PORT: session.ports.WS_PORT || 0,
+          DEBUG_PORT: session.ports.DEBUG_PORT || 0,
+          PREVIEW_PORT: session.ports.PREVIEW_PORT || 0,
+        } : null,
+        createdAt: new Date(session.createdAt).toISOString(),
+        status: session.status === "active" ? "existing" : session.status,
+        ownerClientId: v2State.owners.get(sessionId)?.clientId,
+      });
+    }
+
+    return Array.from(projectMap.values());
+  }, [v2State]);
+
+  // Return v2State data if available, otherwise fall back to old query
+  if (v2Projects) {
+    return {
+      ...oldQuery,
+      data: v2Projects,
+      // Mark that we're using v2State data
+      isV2: true as const,
+    };
+  }
+
+  return {
+    ...oldQuery,
+    isV2: false as const,
+  };
 }
 
-// GET /api/projects/:id/files?path=...
-export function useProjectFiles(projectId: string, relPath: string, enabled = true) {
-  return useQuery({
-    queryKey: ["projectFiles", projectId, relPath],
-    queryFn: async (): Promise<FileEntry[]> => {
-      const url = `/api/projects/${projectId}/files${relPath ? `?path=${encodeURIComponent(relPath)}` : ""}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.entries;
-    },
-    enabled: enabled && !!projectId,
-    staleTime: 5_000,
-  });
+/**
+ * Hook to get sessions for a specific project, using v2State when available.
+ */
+export function useV2ProjectSessions(projectId: string | null) {
+  const v2State = isV2StateAvailable() ? useV2State() : null;
+  const oldQuery = useProjects();
+
+  const sessions = useMemo(() => {
+    if (!projectId) return [];
+
+    // Try v2State first
+    if (v2State?.ready) {
+      return Array.from(v2State.sessions.values())
+        .filter((s) => s.projectRoot === projectId)
+        .map((s) => ({
+          id: s.sessionId,
+          projectId: s.projectRoot,
+          name: s.displayName,
+          branch: "",
+          worktreePath: s.projectRoot,
+          ports: s.ports && Object.keys(s.ports).length > 0 ? {
+            FRONTEND_PORT: s.ports.FRONTEND_PORT || 0,
+            BACKEND_PORT: s.ports.BACKEND_PORT || 0,
+            WS_PORT: s.ports.WS_PORT || 0,
+            DEBUG_PORT: s.ports.DEBUG_PORT || 0,
+            PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
+          } : null,
+          createdAt: new Date(s.createdAt).toISOString(),
+          status: s.status === "active" ? "existing" : s.status,
+          ownerClientId: v2State.owners.get(s.sessionId)?.clientId,
+        })) as SessionData[];
+    }
+
+    // Fall back to old query
+    const project = oldQuery.data?.find((p) => p.id === projectId);
+    return project?.sessions ?? [];
+  }, [v2State, oldQuery.data, projectId]);
+
+  return {
+    sessions,
+    isV2: v2State?.ready ?? false,
+  };
 }
