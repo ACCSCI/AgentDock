@@ -2097,6 +2097,44 @@ body {
 }
 
 /* ============================================
+   Git Init Confirm Modal
+   ============================================ */
+
+.git-init-modal {
+  width: 480px;
+  height: auto;
+  min-height: 0;
+}
+
+.git-init-description {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.git-init-description p {
+  margin: 0 0 10px 0;
+}
+
+.git-init-description p:last-child {
+  margin-bottom: 0;
+}
+
+.git-init-description strong {
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.git-init-description code {
+  background: var(--color-bg-secondary);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+/* ============================================
    Hook Error Modal
    ============================================ */
 

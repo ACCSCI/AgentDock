@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { DirBrowserModal } from "../components/DirBrowserModal";
+import { GitInitConfirmModal } from "../components/GitInitConfirmModal";
 import { useOpenProject } from "../hooks/useOpenProject";
 
 export const Route = createFileRoute("/")({
@@ -7,7 +8,17 @@ export const Route = createFileRoute("/")({
 });
 
 function HomeComponent() {
-  const { openProject, modalOpen, onModalConfirm, onModalCancel } = useOpenProject();
+  const {
+    openProject,
+    modalOpen,
+    onModalConfirm,
+    onModalCancel,
+    gitInitModalOpen,
+    gitInitLoading,
+    selectedDirPath,
+    onGitInitConfirm,
+    onGitInitCancel,
+  } = useOpenProject();
 
   return (
     <div className="home-container" data-testid="home-page">
@@ -20,6 +31,13 @@ function HomeComponent() {
         打开项目
       </button>
       <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
+      <GitInitConfirmModal
+        open={gitInitModalOpen}
+        dirPath={selectedDirPath}
+        onConfirm={onGitInitConfirm}
+        onCancel={onGitInitCancel}
+        loading={gitInitLoading}
+      />
     </div>
   );
 }

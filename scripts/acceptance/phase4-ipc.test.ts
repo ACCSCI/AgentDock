@@ -65,7 +65,7 @@ describe("Phase 4: Full IPC surface (29 channels)", () => {
       const keys = Object.keys(mod.IPC_CHANNELS);
       const namespaces = new Set(keys.map((k) => k.split(":")[0]));
       // Expected: db, sessions, terminals, fs, config, worktree, shell, bootstrap
-      for (const ns of ["db", "sessions", "terminals", "fs", "config", "worktree", "shell", "bootstrap"]) {
+      for (const ns of ["db", "sessions", "terminals", "fs", "config", "worktree", "shell", "bootstrap", "git"]) {
         expect(namespaces.has(ns), `missing namespace ${ns}`).toBe(true);
       }
     });
@@ -90,9 +90,9 @@ describe("Phase 4: Full IPC surface (29 channels)", () => {
       expect(content).toContain('exposeInMainWorld("api"');
     });
 
-    it("exposes all 8 namespaces (bootstrap, db, sessions, terminals, fs, config, worktree, shell)", () => {
+    it("exposes all 9 namespaces (bootstrap, db, sessions, terminals, fs, config, worktree, shell, git)", () => {
       const content = readFileSync(join(ROOT, "electron/preload.ts"), "utf-8");
-      for (const ns of ["bootstrap", "db", "sessions", "terminals", "fs", "config", "worktree", "shell"]) {
+      for (const ns of ["bootstrap", "db", "sessions", "terminals", "fs", "config", "worktree", "shell", "git"]) {
         expect(content, `missing ${ns}:`).toContain(`${ns}:`);
       }
     });

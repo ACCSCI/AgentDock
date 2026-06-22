@@ -10,6 +10,7 @@ import { registerSessions, type SessionsDeps } from "./sessions.js";
 import { registerTerminals } from "./terminals.js";
 import { registerFsAndConfig } from "./fs-config.js";
 import { registerWorktreeAndShell } from "./worktree-shell.js";
+import { registerGit } from "./git.js";
 import { registerTodos } from "./todos.js";
 import { registerBootstrap, type BootstrapDeps } from "../bootstrap.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
@@ -101,6 +102,9 @@ export function registerAllIpc(deps: AllIpcDeps): void {
 
   // Worktree + Shell (4 channels)
   registerWorktreeAndShell(deps.getProjectPath);
+
+  // Git (2 channels: isRepo, init) — self-contained, no deps required.
+  registerGit();
 
   // Todos (5 channels: list, create, toggle, update, delete)
   registerTodos();

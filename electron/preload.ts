@@ -365,6 +365,17 @@ const api = {
       }>("worktree:deleteOrphans", body),
   },
 
+  // Git repo check + auto-init — used by the "open project" flow to
+  // gate non-git directories behind a user confirmation modal before
+  // creating the project. `init` returns { success: true } or
+  // { success: false, error } (never throws) so the renderer can
+  // surface the underlying message via toast.
+  git: {
+    isRepo: (dirPath: string) => invoke<boolean>("git:isRepo", dirPath),
+    init: (dirPath: string) =>
+      invoke<{ success: boolean; error?: string }>("git:init", dirPath),
+  },
+
   shell: {
     openExplorer: (targetPath: string) => invoke<{ success: true }>("shell:openExplorer", targetPath),
     openTerminal: (targetPath: string) => invoke<{ success: true }>("shell:openTerminal", targetPath),

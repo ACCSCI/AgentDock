@@ -73,6 +73,10 @@ export const IPC_CHANNELS = {
   "worktree:orphans": "worktree:orphans",
   "worktree:deleteOrphans": "worktree:deleteOrphans",
 
+  // git (check repo + init before project creation)
+  "git:isRepo": "git:isRepo",
+  "git:init": "git:init",
+
   // os (Electron dialog / shell APIs)
   "shell:openExplorer": "shell:openExplorer",
   "shell:openTerminal": "shell:openTerminal",

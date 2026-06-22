@@ -36,6 +36,24 @@ export function isGitRepo(dirPath: string): boolean {
   }
 }
 
+/**
+ * Initialize a new git repository in `dirPath` using `-b main` as the
+ * default branch (modern convention; avoids `master`). `-q` suppresses
+ * the "Initialized empty Git repository..." banner. Throws on failure
+ * (e.g. git binary missing, EACCES, read-only filesystem) — callers
+ * should catch and surface via toast/error.
+ *
+ * Async (via execFileAsync) so the Electron main process event loop is
+ * not blocked while the git binary runs — sync exec on the main process
+ * can freeze the UI on slow disks or under antivirus scans.
+ */
+export async function initGitRepo(dirPath: string): Promise<void> {
+  await execFileAsync("git", ["init", "-q", "-b", "main"], {
+    cwd: dirPath,
+    encoding: "utf-8",
+  });
+}
+
 export function getCurrentBranch(projectPath: string): string {
   return execSync("git branch --show-current", {
     cwd: projectPath,
