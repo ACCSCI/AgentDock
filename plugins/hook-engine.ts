@@ -77,7 +77,6 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
     const { opendir } = await import("node:fs/promises");
     await new Promise((r) => setTimeout(r, 300));
     for (let i = 0; i < 3; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
       try {
         const handle = await opendir(dirPath);
         await handle.close();
@@ -86,6 +85,7 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
         const code = (e as NodeJS.ErrnoException | undefined)?.code;
         if (code === "ENOENT") return;
       }
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
 }

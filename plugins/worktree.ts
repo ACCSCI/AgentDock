@@ -244,20 +244,15 @@ export async function removeWorktree(
     }
   }
 
-  // When force=true, skip the slow `git worktree remove` and
-  // `git branch -D` — on Windows these can take 20+ seconds due to
-  // antivirus scanning and file-handle contention. Instead, remove
-  // the directory directly and let git worktree prune clean up.
-  if (force && await isRegisteredWorktree(projectPath, worktreePath)) {
-    try { await execAsync(`git worktree remove --force "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
+  // Check worktree registration once — reused below and for prune.
+  const isRegistered = await isRegisteredWorktree(projectPath, worktreePath).catch(() => false);
+
+  // Non-force path: run git worktree remove + branch delete (safe but slow).
+  // Force path: skip these entirely — on Windows they take 20+ seconds due
+  // to antivirus scanning and file-handle contention.
+  if (!force && isRegistered) {
+    try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
     try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
-  } else if (!force && await isRegisteredWorktree(projectPath, worktreePath)) {
-    try {
-      await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8" });
-    } catch {}
-    try {
-      await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8" });
-    } catch {}
   }
 
   // Always ensure directory is removed (handles git failure or non-worktree directories)
@@ -282,7 +277,7 @@ export async function removeWorktree(
   }
 
   // Clean up stale git worktree registration left behind by force removal
-  if (await isRegisteredWorktree(projectPath, worktreePath).catch(() => false)) {
+  if (isRegistered) {
     try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8" }); } catch {}
   }
 
