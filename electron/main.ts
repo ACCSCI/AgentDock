@@ -37,6 +37,7 @@ import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-por
 import { SseConsumer } from "./main/v2-sse-consumer.js";
 import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2SyncSnapshot } from "./main/sync-applier.js";
 import { serializeForPush } from "./main/v2-state-bridge.js";
+import { registerE2eReset } from "./main/e2e-reset.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -506,6 +507,35 @@ async function bootstrap() {
   }
 
   registerAllIpc(ipcDeps);
+
+  // E2E reset handler — exposes __e2eResetMainState() on globalThis so
+  // Playwright tests can reset main process state between tests in REUSE
+  // mode. Only active when NODE_ENV=test. See electron/main/e2e-reset.ts.
+  registerE2eReset({
+    getProjectPath: () => activeProjectPath,
+    setProjectPath: (p) => { activeProjectPath = p; },
+    clearSessionStatuses,
+    drainReallocated: () => {
+      const list = reallocatedQueue;
+      reallocatedQueue = [];
+      return list;
+    },
+    resetV2State: process.env.AGENTDOCK_V2 === "1"
+      ? () => { v2State = emptyState(); }
+      : undefined,
+    stopSseConsumer: process.env.AGENTDOCK_V2 === "1"
+      ? () => { sseConsumer?.stop(); sseConsumer = null; }
+      : undefined,
+    stopV2PortService: process.env.AGENTDOCK_V2 === "1"
+      ? () => { v2PortService?.dispose(); v2PortService = null; }
+      : undefined,
+    clearHeartbeatTimer: () => {
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    },
+    clearV2SyncTimer: () => {
+      if (v2SyncTimer) { clearInterval(v2SyncTimer); v2SyncTimer = null; }
+    },
+  });
 
   // Auto-init the active project to the current working directory so the
   // renderer's useProjects hook (which calls db:projects:list on mount)

@@ -193,7 +193,7 @@ export function registerSessions(deps: SessionsDeps): void {
       };
 
       try {
-        await sessionLifecycle.create({
+        const result = await sessionLifecycle.create({
           projectId,
           projectPath: project.path,
           sessionId,
@@ -249,29 +249,18 @@ export function registerSessions(deps: SessionsDeps): void {
           },
         });
 
-        // After lifecycle completes, read ports from daemon and persist.
-        const daemonClient = deps.getDaemonClient();
-        if (daemonClient) {
-          const list = await daemonClient.sessions.list.$get();
-          if (list.ok) {
-            const sessions = (await list.json()) as {
-              sessions: Array<{
-                sessionId: string;
-                ports: Record<string, number>;
-                worktreePath: string;
-              }>;
-            };
-            const sess = sessions.sessions.find((s) => s.sessionId === sessionId);
-            if (sess) {
-              db.update(schema.sessions)
-                .set({ ports: JSON.stringify(sess.ports) })
-                .where(eq(schema.sessions.id, sessionId))
-                .run();
-              // Write ports to both project root .env and worktree .env
-              if (existsSync(sess.worktreePath)) {
-                writePortsToEnv(sess.worktreePath, sess.ports, project.path);
-              }
-            }
+        // Persist the ports allocated by the lifecycle to the DB.
+        // The v2 PortService already wrote the .env file; we just
+        // need the DB row updated so the sidebar shows the ports.
+        // No need to re-query the daemon — the old v1 /sessions/list
+        // endpoint was removed in F10-2a.
+        if (result.ports && Object.keys(result.ports).length > 0) {
+          db.update(schema.sessions)
+            .set({ ports: JSON.stringify(result.ports) })
+            .where(eq(schema.sessions.id, sessionId))
+            .run();
+          if (existsSync(result.worktreePath)) {
+            writePortsToEnv(result.worktreePath, result.ports, project.path);
           }
         }
         try {
@@ -357,18 +346,6 @@ export function registerSessions(deps: SessionsDeps): void {
     const sendStep = (e: StepEvent) => {
       safeSend(`session:${sessionId}:step`, e);
     };
-
-    // Release ports at the daemon
-    const daemonClient = deps.getDaemonClient();
-    if (daemonClient) {
-      try {
-        await daemonClient.sessions.release.$post({
-          json: { clientId: deps.getClientId(), sessionId },
-        });
-      } catch (err) {
-        log.warn({ err, sessionId }, "daemon release failed (non-fatal)");
-      }
-    }
 
     // Kill any PTYs for this session
     terminalManager.killBySession(sessionId);
@@ -457,12 +434,8 @@ export function registerSessions(deps: SessionsDeps): void {
       throw new Error("sessionId required");
     }
     const db = deps.getDb();
-    const daemonClient = deps.getDaemonClient();
     if (!db) {
       throw new Error("db not initialized");
-    }
-    if (!daemonClient) {
-      throw new Error("daemon not available");
     }
     const session = db
       .select()
@@ -473,52 +446,27 @@ export function registerSessions(deps: SessionsDeps): void {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    // Try daemon reassign first.
-    const res = await daemonClient.sessions.reassign.$post({
-      json: { clientId: deps.getClientId(), sessionId },
-    });
-    if (!res.ok) {
-      // Fall back to declare (which may reclaim the session)
-      const declareRes = await daemonClient.sync.declare.$post({
-        json: {
-          clientId: deps.getClientId(),
-          sessions: [
-            {
-              sessionId,
-              worktreePath: session.worktreePath,
-              projectPath: session.projectId,
-            },
-          ],
-        },
-      });
-      if (!declareRes.ok) {
-        throw new Error(`reassign-ports failed: ${res.status} then ${declareRes.status}`);
-      }
+    // v2 path: delegate to the v2 port service's /reassign endpoint.
+    // The old v1 /sessions/reassign + /sessions/list endpoints were
+    // removed in F10-2a.
+    const v2 = deps.getV2PortService();
+    if (!v2) {
+      throw new Error("reassign-ports requires AGENTDOCK_V2=1 (v1 daemon routes removed)");
     }
-
-    // Re-read ports from daemon and persist
-    const list = await daemonClient.sessions.list.$get();
-    if (list.ok) {
-      const sessions = (await list.json()) as {
-        sessions: Array<{
-          sessionId: string;
-          ports: Record<string, number>;
-          worktreePath: string;
-        }>;
-      };
-      const sess = sessions.sessions.find((s) => s.sessionId === sessionId);
-      if (sess) {
-        db.update(schema.sessions)
-          .set({ ports: JSON.stringify(sess.ports) })
-          .where(eq(schema.sessions.id, sessionId))
-          .run();
-        if (existsSync(sess.worktreePath)) {
-          writePortsToEnv(sess.worktreePath, sess.ports);
-        }
-        return { ports: sess.ports };
+    try {
+      const ports = await v2.reassign(sessionId);
+      // Persist to DB so the sidebar shows the new ports immediately.
+      db.update(schema.sessions)
+        .set({ ports: JSON.stringify(ports) })
+        .where(eq(schema.sessions.id, sessionId))
+        .run();
+      if (existsSync(session.worktreePath)) {
+        writePortsToEnv(session.worktreePath, ports);
       }
+      return { ports };
+    } catch (err) {
+      throw new Error(`reassign-ports failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    throw new Error("reassigned but ports not found");
   });
 
   ipcMain.handle(IPC_CHANNELS["sessions:retryHooks"], async (_e, sessionId: string) => {
