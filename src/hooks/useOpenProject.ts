@@ -117,9 +117,8 @@ export function useOpenProject() {
       const result = await window.api.git.init(dirPath);
       if (!result.success) {
         toast.error(`Git 初始化失败: ${result.error ?? "未知错误"}`);
-        pendingPathRef.current = null;
-        setPendingPath("");
         setGitInitModalOpen(false);
+        setPendingPath("");
         return;
       }
 
@@ -128,6 +127,11 @@ export function useOpenProject() {
       setPendingPath("");
       const name = resolveName(dirPath);
       if (name) await createAndNavigate(dirPath, name);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(`Git 初始化失败: ${message}`);
+      setGitInitModalOpen(false);
+      setPendingPath("");
     } finally {
       pendingPathRef.current = null;
       setGitInitLoading(false);

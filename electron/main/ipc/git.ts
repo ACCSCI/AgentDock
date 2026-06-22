@@ -26,12 +26,12 @@ export function registerGit(): void {
 
   // Returns { success: true } or { success: false, error } — never throws,
   // so the renderer can surface the underlying message via toast.
-  ipcMain.handle(IPC_CHANNELS["git:init"], (_e, dirPath: string) => {
+  ipcMain.handle(IPC_CHANNELS["git:init"], async (_e, dirPath: string) => {
     if (!dirPath || typeof dirPath !== "string") {
       throw new Error("dirPath is required");
     }
     try {
-      initGitRepo(dirPath);
+      await initGitRepo(dirPath);
       return { success: true as const };
     } catch (err) {
       log.error({ err, dirPath }, "git init failed");

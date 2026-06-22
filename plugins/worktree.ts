@@ -42,12 +42,15 @@ export function isGitRepo(dirPath: string): boolean {
  * the "Initialized empty Git repository..." banner. Throws on failure
  * (e.g. git binary missing, EACCES, read-only filesystem) — callers
  * should catch and surface via toast/error.
+ *
+ * Async (via execFileAsync) so the Electron main process event loop is
+ * not blocked while the git binary runs — sync exec on the main process
+ * can freeze the UI on slow disks or under antivirus scans.
  */
-export function initGitRepo(dirPath: string): void {
-  execSync("git init -q -b main", {
+export async function initGitRepo(dirPath: string): Promise<void> {
+  await execFileAsync("git", ["init", "-q", "-b", "main"], {
     cwd: dirPath,
     encoding: "utf-8",
-    stdio: "pipe",
   });
 }
 

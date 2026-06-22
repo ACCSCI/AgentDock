@@ -34,7 +34,7 @@ export function GitInitConfirmModal({
   if (!open) return null;
 
   return (
-    <div className="dir-modal-overlay" onClick={onCancel}>
+    <div className="dir-modal-overlay" onClick={loading ? undefined : onCancel}>
       <div
         className="dir-modal git-init-modal"
         onClick={(e) => e.stopPropagation()}
