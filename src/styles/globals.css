@@ -2963,9 +2963,8 @@ body {
 /* Toast */
 .todo-toast {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 40px;
+  right: 16px;
   background: #1e1e1e;
   color: #fff;
   font-size: 12px;
@@ -2978,8 +2977,8 @@ body {
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 .config-port-list {
