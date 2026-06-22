@@ -16,6 +16,7 @@
  */
 import { BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../shared/api-types.js";
+import { log } from "../../plugins/logger.js";
 import type { DaemonManager } from "../../plugins/daemon-manager.js";
 import { readDaemonInfo } from "../../plugins/daemon-discovery.js";
 import type { SseConsumer } from "./v2-sse-consumer.js";
@@ -217,6 +218,27 @@ export function registerBootstrap(deps: BootstrapDeps): void {
       // clean up. The renderer simply ignores the return value in P9;
       // a future P6 client will wire up the unsubscribe path.
       return { success: true };
+    },
+  );
+
+  // Renderer error reporting — the bridge that connects renderer-side
+  // ErrorBoundary / window.onerror to the main process pino logger.
+  // The renderer calls window.api.reportError(payload) which hits this
+  // handler; we log it as `renderer-error` at error level so it appears
+  // in the persistent log file (plugins/logger.ts → userData/logs/).
+  ipcMain.handle(
+    IPC_CHANNELS["renderer:reportError"],
+    (_evt, payload: { type: string; message: string; stack?: string | null; componentStack?: string | null }) => {
+      log.error(
+        {
+          source: "renderer",
+          errorType: payload.type,
+          message: payload.message,
+          stack: payload.stack ?? undefined,
+          componentStack: payload.componentStack ?? undefined,
+        },
+        "renderer error",
+      );
     },
   );
 }

@@ -399,6 +399,25 @@ const api = {
     reorder: (todoIds: string[]) =>
       invoke<void>("todos:reorder", { todoIds }),
   },
+
+  // Renderer error reporting. Called from ErrorBoundary and the global
+  // `window.onerror` / `unhandledrejection` handlers in the renderer.
+  // Fire-and-forget — main process logs the error and replies with void.
+  // Wrapped in try/catch so a failing main process doesn't crash the
+  // renderer in the middle of an already-broken state.
+  reportError: (payload: {
+    type: string;
+    message: string;
+    stack?: string | null;
+    componentStack?: string | null;
+  }) => {
+    try {
+      void invoke<void>("renderer:reportError", payload);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[reportError] failed:", err);
+    }
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);
