@@ -507,11 +507,14 @@ async function bootstrap() {
     isV2Enabled: () => resolveV2Enabled(),
   };
 
+  // Cache the v2 flag for this boot — env is static after process start.
+  const v2Enabled = resolveV2Enabled();
+
   // P9: when v2 is enabled (default in Stage 1), build the v2 PortService
   // and SSE consumer. v2 service handles /session/create → /claim × N →
   // /session/activate with fencingToken caching and lease renewal. SSE
   // consumer forwards /events to renderer via daemon:events:push.
-  if (resolveV2Enabled()) {
+  if (v2Enabled) {
     if (cachedDaemonPort <= 0) {
       log.warn("v2 enabled but daemon port not bound — v2 service will not start");
     } else {
@@ -520,7 +523,7 @@ async function bootstrap() {
   } else {
     log.warn("boot: AGENTDOCK_V2=0 — v1 routes removed (F10-2a), session creation will fail");
   }
-  if (resolveV2Enabled() && cachedDaemonPort > 0) {
+  if (v2Enabled && cachedDaemonPort > 0) {
     try {
       v2PortService = createV2PortService({
         baseUrl: `http://127.0.0.1:${cachedDaemonPort}`,
@@ -608,13 +611,13 @@ async function bootstrap() {
       reallocatedQueue = [];
       return list;
     },
-    resetV2State: resolveV2Enabled()
+    resetV2State: v2Enabled
       ? () => { v2State = emptyState(); }
       : undefined,
-    stopSseConsumer: resolveV2Enabled()
+    stopSseConsumer: v2Enabled
       ? () => { sseConsumer?.stop(); sseConsumer = null; }
       : undefined,
-    stopV2PortService: resolveV2Enabled()
+    stopV2PortService: v2Enabled
       ? () => { v2PortService?.dispose(); v2PortService = null; }
       : undefined,
     clearHeartbeatTimer: () => {
