@@ -1,5 +1,5 @@
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
 import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { OrphanCleanModal } from "./OrphanCleanModal";
 
@@ -19,13 +19,21 @@ export function IconSidebar() {
 
   const handleCopyPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(AGENTDOCK_COMPAT_PROMPT);
+      await navigator.clipboard?.writeText(AGENTDOCK_COMPAT_PROMPT);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     } catch {
       // Silent: mirrors SessionSidebar's clipboard fallback pattern
     }
   };
+
+  // Reset the ✅ indicator after 1.5s. Managed via useEffect so the timer
+  // is cleared on unmount and re-running the effect cancels any pending
+  // timer from a previous click — no leaked timers, no race.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   return (
     <>
