@@ -102,7 +102,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
 
   const handlePaste = useCallback(async () => {
     const entry = terminalCache.get(terminalId);
-    if (!entry) {
+    if (!entry || entry.websocket?.readyState !== 1) {
       setCtxMenu(null);
       return;
     }
