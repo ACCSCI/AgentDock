@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useV2Projects } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useV2Projects } from "../lib/queries";
+import type { SessionUserStatus } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionCard } from "./SessionCard";
@@ -21,6 +22,8 @@ export function SessionSidebar() {
   const reassignPorts = useReassignPorts();
   const retryHook = useRetryHook();
   const reorderSessions = useReorderSessions();
+  const setUserStatus = useSetSessionUserStatus();
+  const activateSession = useActivateSession();
 
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<"before" | "after">("after");
@@ -234,6 +237,19 @@ export function SessionSidebar() {
     }
   };
 
+  const handleSetUserStatus = async (sessionId: string, status: SessionUserStatus | null) => {
+    try {
+      await setUserStatus.mutateAsync({ sessionId, status });
+    } catch (err) {
+      alert(`设置状态失败: ${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  };
+
+  const handleActivate = (sessionId: string) => {
+    // Fire-and-forget — UI shows optimistic update immediately
+    activateSession.mutate(sessionId);
+  };
+
   if (!activeProject) return null;
 
   if (sidebarCollapsed) {
@@ -279,6 +295,8 @@ export function SessionSidebar() {
               onOpenInTerminal={handleOpenInTerminal}
               onReassignPorts={handleReassignPorts}
               onRetryHooks={handleRetryHooks}
+              onSetUserStatus={handleSetUserStatus}
+              onActivate={handleActivate}
               onHover={prefetchTerminals}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -305,6 +323,8 @@ export function SessionSidebar() {
                     onOpenInTerminal={handleOpenInTerminal}
                     onReassignPorts={handleReassignPorts}
                     onRetryHooks={handleRetryHooks}
+                    onSetUserStatus={handleSetUserStatus}
+                    onActivate={handleActivate}
                     onHover={prefetchTerminals}
                   />
                 ))}

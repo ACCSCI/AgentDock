@@ -50,6 +50,8 @@ export const IPC_CHANNELS = {
   "sessions:stream": "sessions:stream",
   "sessions:bgHookStatus": "sessions:bgHookStatus",
   "sessions:hookErrors": "sessions:hookErrors",
+  "sessions:setUserStatus": "sessions:setUserStatus",
+  "sessions:activate": "sessions:activate",
 
   // terminals (REST for create/list/rename/delete + IPC for streaming)
   "terminals:create": "terminals:create",

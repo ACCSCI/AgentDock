@@ -35,6 +35,8 @@ export type SessionRuntimeStatus =
   | "creating"
   | "deleting";
 
+export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "done";
+
 export interface SessionPorts {
   FRONTEND_PORT: number;
   BACKEND_PORT: number;
@@ -60,6 +62,8 @@ export interface SessionData {
   canDelete?: boolean;
   canReassign?: boolean;
   canRename?: boolean;
+  userStatus?: SessionUserStatus | null;
+  lastActivatedAt?: string | null;
 }
 
 export interface SessionStep {
@@ -582,6 +586,70 @@ export function useRetryHook() {
     onSuccess: (_data, sessionId) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       queryClient.invalidateQueries({ queryKey: ["hookErrors", sessionId] });
+    },
+  });
+}
+
+// PATCH sessions:setUserStatus
+export function useSetSessionUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, status }: { sessionId: string; status: SessionUserStatus | null }) => {
+      return api().sessions.setUserStatus(sessionId, status);
+    },
+    onMutate: async ({ sessionId, status }) => {
+      // Optimistic update
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prev = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => ({
+          ...p,
+          sessions: p.sessions.map((s) =>
+            s.id === sessionId ? { ...s, userStatus: status } : s,
+          ),
+        }));
+      });
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(queryKeys.projects, context.prev);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+// PATCH sessions:activate
+export function useActivateSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      return api().sessions.activate(sessionId);
+    },
+    onMutate: async (sessionId) => {
+      // Optimistic update: set lastActivatedAt to now
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const prev = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+      const now = new Date().toISOString();
+      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+        if (!old) return old;
+        return old.map((p) => ({
+          ...p,
+          sessions: p.sessions.map((s) =>
+            s.id === sessionId ? { ...s, lastActivatedAt: now } : s,
+          ),
+        }));
+      });
+      return { prev };
+    },
+    onError: (_err, _sessionId, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(queryKeys.projects, context.prev);
+      }
     },
   });
 }

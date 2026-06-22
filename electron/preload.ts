@@ -132,6 +132,8 @@ const api = {
               ports: Record<string, number> | null;
               backgroundHookStatus: string | null;
               createdAt: string;
+              userStatus: string | null;
+              lastActivatedAt: string | null;
             }>;
           }>
         >("db:projects:list"),
@@ -177,6 +179,10 @@ const api = {
       invoke<string | null>("sessions:bgHookStatus", sessionId),
     hookErrors: (sessionId: string) =>
       invoke<unknown[]>("sessions:hookErrors", sessionId),
+    setUserStatus: (sessionId: string, status: string | null) =>
+      invoke<{ success: true }>("sessions:setUserStatus", { sessionId, status }),
+    activate: (sessionId: string) =>
+      invoke<{ success: true }>("sessions:activate", { sessionId }),
   },
 
   // P9: v2 daemon API — direct endpoints for renderer-driven lifecycle.
