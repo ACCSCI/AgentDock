@@ -127,6 +127,11 @@ export const IPC_CHANNELS = {
   "todos:update": "todos:update",
   "todos:delete": "todos:delete",
   "todos:reorder": "todos:reorder",
+
+  // renderer error reporting — forwards React/JS errors to the main
+  // process logger so they land in the persistent log file (see
+  // plugins/logger.ts) instead of dying in the renderer's DevTools.
+  "renderer:reportError": "renderer:reportError",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;

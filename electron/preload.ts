@@ -416,6 +416,27 @@ const api = {
     reorder: (todoIds: string[]) =>
       invoke<void>("todos:reorder", { todoIds }),
   },
+
+  // Renderer error reporting. Called from ErrorBoundary and the global
+  // `window.onerror` / `unhandledrejection` handlers in the renderer.
+  // Fire-and-forget — main process logs the error and replies with void.
+  //
+  // CRITICAL: must use `.catch()` on the returned Promise, not a
+  // sync try/catch. A sync try/catch around `void invoke(...)` cannot
+  // see the rejected Promise — the rejection would bubble to the
+  // renderer's `unhandledrejection` handler, which calls back into
+  // reportError → infinite loop.
+  reportError: (payload: {
+    type: string;
+    message: string;
+    stack?: string | null;
+    componentStack?: string | null;
+  }) => {
+    invoke<void>("renderer:reportError", payload).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error("[reportError] failed:", err);
+    });
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);

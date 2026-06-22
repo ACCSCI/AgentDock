@@ -11,6 +11,27 @@ import { ToastContainer } from "./components/Toast";
 import "./styles/globals.css";
 import "./styles/toast.css";
 
+// Global error hooks — the React ErrorBoundary only catches render-phase
+// exceptions. window.onerror and unhandledrejection cover everything else
+// (event handlers, async callbacks, setTimeout). Forwarded to main via
+// window.api.reportError so they land in the persistent log file.
+window.addEventListener("error", (event) => {
+  window.api?.reportError?.({
+    type: "window.onerror",
+    message: event.message,
+    stack: event.error?.stack ?? null,
+  });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  window.api?.reportError?.({
+    type: "unhandledrejection",
+    message: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : null,
+  });
+});
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
