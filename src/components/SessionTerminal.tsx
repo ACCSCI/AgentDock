@@ -60,12 +60,12 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
-    window.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mousedown", handleMouseDown, true);
     window.addEventListener("contextmenu", close);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mousedown", handleMouseDown, true);
       window.removeEventListener("contextmenu", close);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
