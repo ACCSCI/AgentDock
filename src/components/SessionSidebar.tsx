@@ -309,7 +309,7 @@ export function SessionSidebar() {
           title="新建 Session"
           data-testid="new-session"
         >
-          <Plus size={18} />
+          {createSession.isPending ? <span className="step-spinner" /> : <Plus size={16} />}
         </button>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
       </div>
