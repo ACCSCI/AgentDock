@@ -1,9 +1,11 @@
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { OrphanCleanModal } from "./OrphanCleanModal";
 
 export function IconSidebar() {
   const [orphanModalOpen, setOrphanModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
 
   const openOrphanModal = () => {
@@ -14,6 +16,24 @@ export function IconSidebar() {
     queryClient.invalidateQueries({ queryKey: ["orphans"] });
     setOrphanModalOpen(true);
   };
+
+  const handleCopyPrompt = async () => {
+    try {
+      await navigator.clipboard?.writeText(AGENTDOCK_COMPAT_PROMPT);
+      setCopied(true);
+    } catch {
+      // Silent: mirrors SessionSidebar's clipboard fallback pattern
+    }
+  };
+
+  // Reset the ✅ indicator after 1.5s. Managed via useEffect so the timer
+  // is cleared on unmount and re-running the effect cancels any pending
+  // timer from a previous click — no leaked timers, no race.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   return (
     <>
@@ -27,6 +47,15 @@ export function IconSidebar() {
             data-testid="open-orphan-modal"
           >
             🧹
+          </button>
+          <button
+            type="button"
+            className="icon-sidebar-btn"
+            title="复制 AgentDock 兼容提示词"
+            onClick={handleCopyPrompt}
+            data-testid="copy-compat-prompt"
+          >
+            {copied ? "✅" : "📋"}
           </button>
         </div>
         <div className="icon-sidebar-bottom">

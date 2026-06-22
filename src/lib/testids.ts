@@ -37,6 +37,10 @@ export const TID = {
   terminalXterm: "terminal-xterm",
   sessionTerminal: "session-terminal",
 
+  // IconSidebar
+  iconSidebar: "icon-sidebar",
+  copyCompatPrompt: "copy-compat-prompt",
+
   // DaemonStatusBar (新架构 §2 + §11.1)
   daemonStatusBar: "daemon-status-bar",
   daemonState: "daemon-state",
