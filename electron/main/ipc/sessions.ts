@@ -620,6 +620,52 @@ export function registerSessions(deps: SessionsDeps): void {
     }
   });
 
+  // sessions:setUserStatus — set or clear a user-assigned status label.
+  ipcMain.handle(
+    IPC_CHANNELS["sessions:setUserStatus"],
+    (_e, params: { sessionId: string; status: string | null }) => {
+      if (!params?.sessionId) throw new Error("sessionId required");
+      const VALID_STATUSES = ["draft", "plan", "working", "pr", "done"];
+      if (params.status !== null && !VALID_STATUSES.includes(params.status)) {
+        throw new Error(`Invalid status: ${params.status}`);
+      }
+      const db = deps.getDb();
+      if (!db) throw new Error("db not initialized");
+      const session = db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, params.sessionId))
+        .get();
+      if (!session) throw new Error(`Session not found: ${params.sessionId}`);
+      db.update(schema.sessions)
+        .set({ userStatus: params.status })
+        .where(eq(schema.sessions.id, params.sessionId))
+        .run();
+      return { success: true as const };
+    },
+  );
+
+  // sessions:activate — record the current time as lastActivatedAt for heatmap.
+  ipcMain.handle(
+    IPC_CHANNELS["sessions:activate"],
+    (_e, params: { sessionId: string }) => {
+      if (!params?.sessionId) throw new Error("sessionId required");
+      const db = deps.getDb();
+      if (!db) throw new Error("db not initialized");
+      const session = db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, params.sessionId))
+        .get();
+      if (!session) throw new Error(`Session not found: ${params.sessionId}`);
+      db.update(schema.sessions)
+        .set({ lastActivatedAt: new Date().toISOString() })
+        .where(eq(schema.sessions.id, params.sessionId))
+        .run();
+      return { success: true as const };
+    },
+  );
+
   // ─────────────────────────────────────────────────────────────────────
   // P9: v2 daemon API — direct endpoints for renderer-driven session
   // lifecycle when AGENTDOCK_V2=1. Each handler:

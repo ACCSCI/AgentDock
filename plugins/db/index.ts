@@ -72,6 +72,11 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
       );
     `);
   },
+  // v7: add sessions.user_status + last_activated_at for session labeling.
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "sessions", "user_status", "TEXT");
+    addColumnIfMissing(sqlite, "sessions", "last_activated_at", "TEXT");
+  },
 ];
 
 /** Target schema version after all migrations are applied. */

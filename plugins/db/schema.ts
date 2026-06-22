@@ -20,6 +20,8 @@ export const sessions = sqliteTable("sessions", {
   ports: text("ports"),
   backgroundHookStatus: text("background_hook_status"),
   backgroundHookErrors: text("background_hook_errors"),
+  userStatus: text("user_status"),
+  lastActivatedAt: text("last_activated_at"),
   sortOrder: integer("sort_order").$defaultFn(() => Date.now()),
   createdAt: text("created_at")
     .notNull()

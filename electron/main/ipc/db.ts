@@ -317,6 +317,8 @@ export function registerDb(ctx: DbContext): void {
         ports: s.ports ? JSON.parse(s.ports) : null,
         backgroundHookStatus: s.backgroundHookStatus ?? null,
         createdAt: s.createdAt,
+        userStatus: s.userStatus ?? null,
+        lastActivatedAt: s.lastActivatedAt ?? null,
         runtimeStatus: ctx.getSessionStatus(s.id),
       })),
     }));
