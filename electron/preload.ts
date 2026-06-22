@@ -132,6 +132,8 @@ const api = {
               ports: Record<string, number> | null;
               backgroundHookStatus: string | null;
               createdAt: string;
+              /** §4.3.1: 客户端 syncProject() 设置的运行时状态 */
+              runtimeStatus?: string;
             }>;
           }>
         >("db:projects:list"),
@@ -188,12 +190,12 @@ const api = {
         "sessions:v2:create",
         params,
       ),
-    delete: (params: { sessionId: string; v2SessionId?: string }) =>
+    delete: (params: { sessionId: string }) =>
       invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
         "sessions:v2:delete",
         params,
       ),
-    rename: (params: { sessionId: string; v2SessionId?: string; name: string }) =>
+    rename: (params: { sessionId: string; name: string }) =>
       invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
         "sessions:v2:rename",
         params,

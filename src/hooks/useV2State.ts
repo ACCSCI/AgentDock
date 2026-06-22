@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { AppliedState } from "../lib/daemon-sync";
-import { emptyState, applySnapshot } from "../lib/daemon-sync";
+import { emptyState } from "../lib/daemon-sync";
 
 // Serialized state from main process (Map entries as tuples)
 interface SerializedV2State {
@@ -17,6 +17,7 @@ interface SerializedV2State {
   ports: Array<[number, { sessionId: string; name: string }]>;
   snapshotSeq: number | null;
   appliedSeq: number;
+  clientId?: string;
 }
 
 // Public return type
@@ -26,6 +27,7 @@ export interface V2State {
   ports: Map<number, SerializedV2State["ports"][number][1]>;
   snapshotSeq: number | null;
   ready: boolean;
+  clientId: string | null;
 }
 
 /**
@@ -37,7 +39,7 @@ function deserializeState(serialized: SerializedV2State): AppliedState {
   state.appliedSeq = serialized.appliedSeq;
 
   for (const [key, value] of serialized.sessions) {
-    state.sessions.set(key, value);
+    state.sessions.set(key, value as AppliedState["sessions"] extends Map<string, infer V> ? V : never);
   }
   for (const [key, value] of serialized.owners) {
     state.owners.set(key, value);
@@ -52,13 +54,14 @@ function deserializeState(serialized: SerializedV2State): AppliedState {
 /**
  * Convert AppliedState (Map-based) to V2State (also Map-based but ready for consumers).
  */
-function toV2State(state: AppliedState): V2State {
+function toV2State(state: AppliedState, clientId?: string): V2State {
   return {
     sessions: state.sessions,
     owners: state.owners,
     ports: state.ports,
     snapshotSeq: state.snapshotSeq,
     ready: state.snapshotSeq !== null,
+    clientId: clientId ?? null,
   };
 }
 
@@ -75,6 +78,7 @@ function toV2State(state: AppliedState): V2State {
 export function useV2State(): V2State {
   const [state, setState] = useState<AppliedState>(() => emptyState());
   const stateRef = useRef(state);
+  const clientIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     // Check if window.api is available (running in Electron)
@@ -82,9 +86,14 @@ export function useV2State(): V2State {
       return;
     }
 
-    const unsubscribe = window.api.daemon.v2State.subscribe((serialized) => {
+    const unsubscribe = window.api.daemon.v2State.subscribe((serialized: SerializedV2State) => {
       // Deserialize the tuple format back into Maps
       const newState = deserializeState(serialized);
+
+      // Track clientId from the serialized state (stable per process)
+      if (serialized.clientId !== undefined) {
+        clientIdRef.current = serialized.clientId;
+      }
 
       // Update ref for synchronous access
       stateRef.current = newState;
@@ -98,7 +107,7 @@ export function useV2State(): V2State {
     };
   }, []);
 
-  return toV2State(state);
+  return toV2State(state, clientIdRef.current);
 }
 
 /**

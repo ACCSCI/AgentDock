@@ -29,11 +29,9 @@ export interface ProjectData {
 export type SessionRuntimeStatus =
   | "existing"
   | "foreign"
-  | "allocated"
-  | "reclaimed"
-  | "reallocated"
   | "creating"
-  | "deleting";
+  | "deleting"
+  | "takeover";
 
 export interface SessionPorts {
   FRONTEND_PORT: number;
@@ -168,7 +166,24 @@ export function useProjects() {
   return useQuery({
     queryKey: queryKeys.projects,
     queryFn: async (): Promise<ProjectData[]> => {
-      return api().db.projects.list();
+      const raw = await api().db.projects.list();
+      // §4.3.1: orphan 和 takeover 不进 sidebar，由 OrphanCleanModal 处理
+      return raw.map((p: (typeof raw)[number]) => ({
+        ...p,
+        sessions: p.sessions
+          .filter(
+            (s: (typeof p.sessions)[number]) => {
+              const rt = (s as { runtimeStatus?: string }).runtimeStatus;
+              return rt !== "orphan" && rt !== "takeover";
+            },
+          )
+          .map((s: (typeof p.sessions)[number]) => ({
+            ...s,
+            status: ((s as { runtimeStatus?: string }).runtimeStatus === "active"
+              ? "existing"
+              : (s as { runtimeStatus?: string }).runtimeStatus) as SessionRuntimeStatus | undefined,
+          })),
+      }));
     },
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
@@ -678,13 +693,21 @@ export function useV2Projects() {
 
     // Group sessions by projectRoot
     const projectMap = new Map<string, ProjectData>();
+    const myClientId = v2State.clientId;
 
     for (const [sessionId, session] of v2State.sessions) {
       const projectRoot = session.projectRoot || "";
 
+      // §4.3: 判定有主/无主
+      const ownerClientId = v2State.owners.get(sessionId)?.clientId;
+      const hasOwner = ownerClientId != null && ownerClientId !== "";
+
+      // 无主 session 不进 sidebar（由 OrphanCleanModal 处理）
+      if (!hasOwner) continue;
+
       if (!projectMap.has(projectRoot)) {
         projectMap.set(projectRoot, {
-          id: projectRoot, // Use projectRoot as project ID for v2State
+          id: projectRoot,
           name: projectRoot.split("/").pop() || projectRoot,
           path: projectRoot,
           createdAt: new Date(session.createdAt).toISOString(),
@@ -692,12 +715,15 @@ export function useV2Projects() {
         });
       }
 
+      // §4.3: 有主 → 判定"我的"还是"别人的"
+      const isForeign = myClientId != null && ownerClientId !== myClientId;
+
       const project = projectMap.get(projectRoot)!;
       project.sessions.push({
         id: session.sessionId,
         projectId: projectRoot,
         name: session.displayName,
-        branch: "", // v2State doesn't provide branch info
+        branch: "",
         worktreePath: projectRoot,
         ports: session.ports && Object.keys(session.ports).length > 0 ? {
           FRONTEND_PORT: session.ports.FRONTEND_PORT || 0,
@@ -707,8 +733,8 @@ export function useV2Projects() {
           PREVIEW_PORT: session.ports.PREVIEW_PORT || 0,
         } : null,
         createdAt: new Date(session.createdAt).toISOString(),
-        status: session.status === "active" ? "existing" : session.status,
-        ownerClientId: v2State.owners.get(sessionId)?.clientId,
+        status: (isForeign ? "foreign" : session.status === "active" ? "existing" : session.status) as SessionRuntimeStatus,
+        ownerClientId,
       });
     }
 
@@ -743,25 +769,35 @@ export function useV2ProjectSessions(projectId: string | null) {
 
     // Try v2State first
     if (v2State?.ready) {
+      const myClientId = v2State.clientId;
       return Array.from(v2State.sessions.values())
         .filter((s) => s.projectRoot === projectId)
-        .map((s) => ({
-          id: s.sessionId,
-          projectId: s.projectRoot,
-          name: s.displayName,
-          branch: "",
-          worktreePath: s.projectRoot,
-          ports: s.ports && Object.keys(s.ports).length > 0 ? {
-            FRONTEND_PORT: s.ports.FRONTEND_PORT || 0,
-            BACKEND_PORT: s.ports.BACKEND_PORT || 0,
-            WS_PORT: s.ports.WS_PORT || 0,
-            DEBUG_PORT: s.ports.DEBUG_PORT || 0,
-            PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
-          } : null,
-          createdAt: new Date(s.createdAt).toISOString(),
-          status: s.status === "active" ? "existing" : s.status,
-          ownerClientId: v2State.owners.get(s.sessionId)?.clientId,
-        })) as SessionData[];
+        .filter((s) => {
+          // 无主 session 不进 sidebar
+          const ownerClientId = v2State.owners.get(s.sessionId)?.clientId;
+          return ownerClientId != null && ownerClientId !== "";
+        })
+        .map((s) => {
+          const ownerClientId = v2State.owners.get(s.sessionId)?.clientId ?? null;
+          const isForeign = myClientId != null && ownerClientId !== null && ownerClientId !== myClientId;
+          return {
+            id: s.sessionId,
+            projectId: s.projectRoot,
+            name: s.displayName,
+            branch: "",
+            worktreePath: s.projectRoot,
+            ports: s.ports && Object.keys(s.ports).length > 0 ? {
+              FRONTEND_PORT: s.ports.FRONTEND_PORT || 0,
+              BACKEND_PORT: s.ports.BACKEND_PORT || 0,
+              WS_PORT: s.ports.WS_PORT || 0,
+              DEBUG_PORT: s.ports.DEBUG_PORT || 0,
+              PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
+            } : null,
+            createdAt: new Date(s.createdAt).toISOString(),
+            status: (isForeign ? "foreign" : s.status === "active" ? "existing" : s.status) as SessionRuntimeStatus,
+            ownerClientId,
+          };
+        }) as SessionData[];
     }
 
     // Fall back to old query

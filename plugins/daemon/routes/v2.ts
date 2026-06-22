@@ -150,9 +150,17 @@ export function registerSyncV2(app: Hono, ctx: DaemonContext): void {
 // ---------------------------------------------------------------------------
 
 const SessionCreateSchema = z.object({
+  sessionId: z.string().regex(SESSION_ID_RE, "Invalid sessionId").optional(),
   clientId: z.string().min(1, "clientId required"),
   pid: z.number().int().positive(),
   projectRoot: z.string().min(1, "projectRoot required"),
+  displayName: z.string().max(128).optional(),
+});
+
+const ReclaimSchema = z.object({
+  sessionId: z.string().min(1).regex(SESSION_ID_RE, "Invalid sessionId"),
+  clientId: z.string().min(1, "clientId required"),
+  pid: z.number().int().positive(),
   displayName: z.string().max(128).optional(),
 });
 
@@ -190,7 +198,7 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
     async (c) => {
       const body = c.req.valid("json");
       const result = await ctx.mutex.runExclusive("state", () => {
-        const sessionId = crypto.randomUUID();
+        const sessionId = body.sessionId ?? crypto.randomUUID();
         // §4.1 — displayName 最小消毒 (去控制字符 + 长度上限 + trim)
         const sanitized = sanitizeDisplayName(body.displayName);
         const displayName = sanitized || sessionId.slice(0, 8);
@@ -214,6 +222,30 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
       // 注: §7.3 规定 session-created 事件在 /session/activate 成功后推
       // (不是 /session/create 时). 此时 session 仍 creating, 监听端不
       // 应当看见 session-created. 事件推送移至 /session/activate 末尾.
+      return c.json({ success: true, ...result });
+    },
+  );
+
+  app.post(
+    "/session/reclaim",
+    zValidator("json", ReclaimSchema, zodErrorHandler),
+    async (c) => {
+      const body = c.req.valid("json");
+      const result = await ctx.mutex.runExclusive("state", () => {
+        const sanitized = sanitizeDisplayName(body.displayName);
+        const displayName = sanitized || body.sessionId.slice(0, 8);
+        const { fencingToken, created } = ctx.stateV2.reclaimSession({
+          sessionId: body.sessionId,
+          projectRoot: "", // reclaimed session; projectRoot not critical here
+          displayName,
+          clientId: body.clientId,
+          pid: body.pid,
+          leaseExpiresAt: Date.now() + LEASE_TTL_MS,
+        });
+        ctx.walV2.persist(ctx.stateV2);
+        return { fencingToken, created };
+      });
+      ctx.expectedSessionIds?.add(body.sessionId);
       return c.json({ success: true, ...result });
     },
   );

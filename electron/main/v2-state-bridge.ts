@@ -14,6 +14,8 @@ export interface SerializedV2State {
   ports: Array<[number, AppliedState["ports"] extends Map<number, infer V> ? V : never]>;
   snapshotSeq: number | null;
   appliedSeq: number;
+  /** 当前 Electron 实例的 clientId，renderer 用它判断 foreign。 */
+  clientId?: string;
 }
 
 /**
@@ -23,12 +25,13 @@ export interface SerializedV2State {
  * Maps are serialized as arrays of [key, value] tuples, which JSON.stringify
  * handles correctly and the renderer can reconstruct into Maps.
  */
-export function serializeForPush(state: AppliedState): SerializedV2State {
+export function serializeForPush(state: AppliedState, clientId?: string): SerializedV2State {
   return {
     sessions: Array.from(state.sessions.entries()),
     owners: Array.from(state.owners.entries()),
     ports: Array.from(state.ports.entries()),
     snapshotSeq: state.snapshotSeq,
     appliedSeq: state.appliedSeq,
+    ...(clientId !== undefined ? { clientId } : {}),
   };
 }

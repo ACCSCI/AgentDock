@@ -673,17 +673,16 @@ export function registerSessions(deps: SessionsDeps): void {
 
   ipcMain.handle(
     IPC_CHANNELS["sessions:v2:delete"],
-    async (_e, params: { sessionId: string; v2SessionId?: string }) => {
+    async (_e, params: { sessionId: string }) => {
       const v2 = deps.getV2PortService();
       const port = deps.getDaemonPort();
       if (!v2 || !port) return v2DisabledResponse();
-      const v2Sid = params.v2SessionId ?? params.sessionId;
       const token = v2.getToken(params.sessionId);
       if (token === null) {
         return { success: false, error: "session not in v2 state" };
       }
       const del = await forwardV2(port, "/session/delete", {
-        sessionId: v2Sid,
+        sessionId: params.sessionId,
         fencingToken: token,
       });
       // Trigger phase-2 purge from the v2 service so the three-table
@@ -696,17 +695,16 @@ export function registerSessions(deps: SessionsDeps): void {
 
   ipcMain.handle(
     IPC_CHANNELS["sessions:v2:rename"],
-    async (_e, params: { sessionId: string; v2SessionId?: string; name: string }) => {
+    async (_e, params: { sessionId: string; name: string }) => {
       const v2 = deps.getV2PortService();
       const port = deps.getDaemonPort();
       if (!v2 || !port) return v2DisabledResponse();
-      const v2Sid = params.v2SessionId ?? params.sessionId;
       const token = v2.getToken(params.sessionId);
       if (token === null) {
         return { success: false, error: "session not in v2 state" };
       }
       return forwardV2(port, "/session/rename", {
-        sessionId: v2Sid,
+        sessionId: params.sessionId,
         fencingToken: token,
         displayName: params.name,
       });

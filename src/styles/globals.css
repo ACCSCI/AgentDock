@@ -580,20 +580,6 @@ body {
   white-space: nowrap;
 }
 
-.session-status-badge-allocated,
-.workspace-session-status-allocated {
-  border-color: #f59e0b;
-  color: #92400e;
-  background: #fffbeb;
-}
-
-.session-status-badge-reclaimed,
-.workspace-session-status-reclaimed {
-  border-color: #60a5fa;
-  color: #1d4ed8;
-  background: #eff6ff;
-}
-
 .session-status-badge-foreign,
 .workspace-session-status-foreign {
   border-color: #9ca3af;
