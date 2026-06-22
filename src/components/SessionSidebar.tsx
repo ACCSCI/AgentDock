@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useV2Projects } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
+import { toast } from "../lib/toast";
 import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
@@ -180,7 +181,8 @@ export function SessionSidebar() {
         tempId: `temp-${Date.now()}`,
       });
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to create session:", err);
+      toast.error(`创建失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -190,7 +192,8 @@ export function SessionSidebar() {
       await deleteSession.mutateAsync({ sessionId, projectId: activeProject.id });
       terminalCache.disposeBySession(sessionId);
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to delete session:", err);
+      toast.error(`删除失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -198,7 +201,8 @@ export function SessionSidebar() {
     try {
       await renameSession.mutateAsync({ sessionId, name: newName });
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to rename session:", err);
+      toast.error(`重命名失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -222,7 +226,8 @@ export function SessionSidebar() {
     try {
       await reassignPorts.mutateAsync(sessionId);
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("Failed to reassign ports:", err);
+      toast.error(`重新分配端口失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -230,7 +235,8 @@ export function SessionSidebar() {
     try {
       await retryHook.mutateAsync(sessionId);
     } catch (err) {
-      alert(`重试失败: ${err instanceof Error ? err.message : "未知错误"}`);
+      console.error("Failed to retry hooks:", err);
+      toast.error(`重试失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
   };
 
@@ -317,7 +323,6 @@ export function SessionSidebar() {
         type="button"
         className="session-add"
         onClick={handleNewSession}
-        disabled={createSession.isPending}
         data-testid="new-session"
       >
         +
