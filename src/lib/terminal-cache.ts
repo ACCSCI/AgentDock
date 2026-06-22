@@ -103,11 +103,11 @@ function debounce<T extends (...args: unknown[]) => void>(
 
 // ---- Terminal configuration (shared) ----
 
-const TERMINAL_CONFIG = {
+import type { TerminalPreferences } from "./store";
+
+const TERMINAL_BASE_CONFIG = {
   cursorBlink: true,
   cursorStyle: "block" as const,
-  fontSize: 14,
-  fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
   scrollback: 50000,
   allowProposedApi: true,
   theme: {
@@ -133,6 +133,14 @@ const TERMINAL_CONFIG = {
     brightWhite: "#e5e5e5",
   },
 };
+
+export function buildTerminalConfig(prefs: TerminalPreferences) {
+  return {
+    ...TERMINAL_BASE_CONFIG,
+    fontSize: prefs.fontSize,
+    fontFamily: prefs.fontFamily,
+  };
+}
 
 declare global {
   interface Window {
@@ -362,11 +370,11 @@ class TerminalCache {
 
   // -- Public API --
 
-  getOrCreate(terminalId: string, sessionId: string): CachedTerminal {
+  getOrCreate(terminalId: string, sessionId: string, prefs?: TerminalPreferences): CachedTerminal {
     const existing = this.cache.get(terminalId);
     if (existing) return existing;
 
-    const terminal = new Terminal(TERMINAL_CONFIG);
+    const terminal = new Terminal(buildTerminalConfig(prefs ?? { fontSize: 14, fontFamily: "'Cascadia Code', monospace" }));
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
@@ -496,6 +504,27 @@ class TerminalCache {
       set.delete(cb);
       if (set.size === 0) this.statusListeners.delete(terminalId);
     };
+  }
+
+  /** Send text input to a terminal via IPC (reliable, no port needed). */
+  sendText(terminalId: string, text: string, delayMs = 600): void {
+    setTimeout(() => {
+      window.api.terminals.write(terminalId, text).catch((err) => {
+        console.warn(`[TerminalCache] sendText(${terminalId}) failed:`, err);
+      });
+    }, delayMs);
+  }
+
+  /** Update font size/family on all existing terminal instances. */
+  applyPrefs(prefs: TerminalPreferences): void {
+    for (const entry of this.cache.values()) {
+      entry.terminal.options.fontSize = prefs.fontSize;
+      entry.terminal.options.fontFamily = prefs.fontFamily;
+      // Re-fit after font change since character dimensions change
+      if (entry.containerRef) {
+        requestAnimationFrame(() => this.safeFit(entry));
+      }
+    }
   }
 }
 

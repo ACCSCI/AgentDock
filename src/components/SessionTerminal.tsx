@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { terminalCache, type TerminalCacheStatus } from "../lib/terminal-cache";
+import { useStore } from "../lib/store";
 import "@xterm/xterm/css/xterm.css";
 
 interface SessionTerminalProps {
@@ -17,13 +18,14 @@ interface SessionTerminalProps {
 export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TerminalCacheStatus>("connecting");
+  const { terminalPrefs } = useStore();
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     // Get or create cached terminal (creates WS connection if new)
-    const entry = terminalCache.getOrCreate(terminalId, sessionId);
+    const entry = terminalCache.getOrCreate(terminalId, sessionId, terminalPrefs);
 
     // Attach terminal DOM to this container
     terminalCache.attach(terminalId, container);

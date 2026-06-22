@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCreateTerminal, useDeleteTerminal, useRenameTerminal, useSessionTerminals } from "../lib/queries";
 import { useStore } from "../lib/store";
+import type { TerminalDefaultAction } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
+import { TerminalSettingsBar } from "./TerminalSettingsBar";
 
 interface TerminalManagerProps {
   sessionId: string;
@@ -15,8 +17,14 @@ interface MenuState {
   terminalId: string;
 }
 
+const ACTION_ITEMS: { key: TerminalDefaultAction; label: string; icon: string; command?: string }[] = [
+  { key: "terminal", label: "Terminal", icon: ">" },
+  { key: "claude", label: "Claude", icon: "◆", command: "claude" },
+  { key: "copilot", label: "Copilot", icon: "⟡", command: "copilot" },
+];
+
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
-  const { setActiveTerminal, getActiveTerminal } = useStore();
+  const { setActiveTerminal, getActiveTerminal, terminalDefaultAction, setTerminalDefaultAction } = useStore();
   const activeTerminalId = getActiveTerminal(sessionId);
   const { data: terminals = [] } = useSessionTerminals(sessionId);
   const [loading, setLoading] = useState(false);
@@ -25,8 +33,14 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const renameTerminal = useRenameTerminal();
   const justCreatedRef = useRef<string | null>(null);
 
-  // Context menu state
+  // Context menu state (right-click on tab)
   const [menu, setMenu] = useState<MenuState | null>(null);
+
+  // Hover dropdown state for the "+" button
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const addHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Rename state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,45 +63,110 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     return () => window.removeEventListener("click", close);
   }, [menu]);
 
-  // Single effect for terminal selection — replaces the previous 3
-  // separate useEffects which formed an infinite update loop under
-  // React 19's batching: each `setActiveTerminal` call created a new
-  // zustand Map reference → re-render → next effect re-ran → called
-  // `setActiveTerminal` again → repeat.  One unified effect avoids
-  // the cascade entirely.
+  // Close add menu on outside click
   useEffect(() => {
-    // (a) Clear stale justCreated ref once the terminal appears in data.
+    if (!showAddMenu) return;
+    const close = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setShowAddMenu(false);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [showAddMenu]);
+
+  // Single effect for terminal selection
+  useEffect(() => {
     if (justCreatedRef.current && terminals.find((t) => t.terminalId === justCreatedRef.current)) {
       justCreatedRef.current = null;
     }
-
-    // (b) If active terminal was deleted, clear selection.
     const justCreated = justCreatedRef.current;
     const isJustCreatedActive = justCreated && activeTerminalId === justCreated;
     if (!isJustCreatedActive && activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
       setActiveTerminal(sessionId, null);
-      return; // exit — next render will re-enter with activeTerminalId=null
+      return;
     }
-
-    // (c) If nothing selected but terminals exist, pick the first live one.
     if (!activeTerminalId && terminals.length > 0) {
       const first = terminals.find((t) => t.status !== "exited") ?? terminals[0];
       setActiveTerminal(sessionId, first.terminalId);
     }
   }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
 
-  const handleNewTerminal = async () => {
+  // --- Add button hover handlers ---
+
+  const handleAddEnter = useCallback(() => {
+    if (addLeaveTimer.current) {
+      clearTimeout(addLeaveTimer.current);
+      addLeaveTimer.current = null;
+    }
+    addHoverTimer.current = setTimeout(() => setShowAddMenu(true), 150);
+  }, []);
+
+  const handleAddLeave = useCallback(() => {
+    if (addHoverTimer.current) {
+      clearTimeout(addHoverTimer.current);
+      addHoverTimer.current = null;
+    }
+    addLeaveTimer.current = setTimeout(() => setShowAddMenu(false), 200);
+  }, []);
+
+  const handleMenuEnter = useCallback(() => {
+    if (addLeaveTimer.current) {
+      clearTimeout(addLeaveTimer.current);
+      addLeaveTimer.current = null;
+    }
+  }, []);
+
+  const handleMenuLeave = useCallback(() => {
+    addLeaveTimer.current = setTimeout(() => setShowAddMenu(false), 200);
+  }, []);
+
+  // --- Terminal creation ---
+
+  const createTerminalWithAction = useCallback(async (action: TerminalDefaultAction) => {
     setLoading(true);
     try {
       const terminal = await createTerminal.mutateAsync({ sessionId });
       justCreatedRef.current = terminal.terminalId;
       setActiveTerminal(sessionId, terminal.terminalId);
+
+      // Auto-rename tab based on action
+      if (action !== "terminal") {
+        const label = ACTION_ITEMS.find((a) => a.key === action)?.label ?? action;
+        renameTerminal.mutateAsync({ terminalId: terminal.terminalId, name: label });
+      }
+
+      // Inject command for claude/copilot (\r = Enter key on Windows terminal)
+      const cmd = ACTION_ITEMS.find((a) => a.key === action)?.command;
+      if (cmd) {
+        terminalCache.sendText(terminal.terminalId, cmd + "\r", 1200);
+      }
     } catch (err) {
       alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
-  };
+  }, [createTerminal, sessionId, setActiveTerminal, renameTerminal]);
+
+  const handleAddClick = useCallback(() => {
+    // Clean up any pending hover timers
+    if (addHoverTimer.current) { clearTimeout(addHoverTimer.current); addHoverTimer.current = null; }
+    if (addLeaveTimer.current) { clearTimeout(addLeaveTimer.current); addLeaveTimer.current = null; }
+    setShowAddMenu(false);
+    createTerminalWithAction(terminalDefaultAction);
+  }, [createTerminalWithAction, terminalDefaultAction]);
+
+  const handleMenuItemClick = useCallback((action: TerminalDefaultAction) => {
+    setShowAddMenu(false);
+    createTerminalWithAction(action);
+  }, [createTerminalWithAction]);
+
+  const handlePin = useCallback((action: TerminalDefaultAction, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTerminalDefaultAction(action);
+  }, [setTerminalDefaultAction]);
+
+  // --- Tab actions ---
 
   const handleCloseTerminal = async (terminalId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -104,7 +183,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   };
 
   const handleTabClick = (terminalId: string) => {
-    if (editingId) return; // don't switch tab while renaming
+    if (editingId) return;
     setActiveTerminal(sessionId, terminalId);
   };
 
@@ -141,9 +220,13 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   };
 
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
+  const isDefault = (key: TerminalDefaultAction) => terminalDefaultAction === key;
 
   return (
     <div className="terminal-panel" data-testid="terminal-panel">
+      {/* Terminal font settings bar */}
+      <TerminalSettingsBar />
+
       {/* Terminal tab bar */}
       <div className="terminal-tab-bar">
         {terminals.map((t) => (
@@ -185,19 +268,55 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             </button>
           </div>
         ))}
-        <button
-          type="button"
-          className="terminal-tab-add"
-          onClick={handleNewTerminal}
-          disabled={loading || createTerminal.isPending}
-          title="New Terminal"
-          data-testid="new-terminal"
+
+        {/* "+" button with hover dropdown */}
+        <div
+          ref={addMenuRef}
+          className="terminal-add-wrapper"
+          onMouseEnter={handleAddEnter}
+          onMouseLeave={handleAddLeave}
         >
-          +
-        </button>
+          <button
+            type="button"
+            className="terminal-tab-add"
+            onClick={handleAddClick}
+            disabled={loading || createTerminal.isPending}
+            title={`New ${ACTION_ITEMS.find((a) => a.key === terminalDefaultAction)?.label ?? "Terminal"}`}
+            data-testid="new-terminal"
+          >
+            +
+          </button>
+
+          {showAddMenu && (
+            <div
+              className="terminal-add-dropdown"
+              onMouseEnter={handleMenuEnter}
+              onMouseLeave={handleMenuLeave}
+            >
+              {ACTION_ITEMS.map((item) => (
+                <div
+                  key={item.key}
+                  className={`terminal-add-dropdown-item ${isDefault(item.key) ? "terminal-add-dropdown-item-default" : ""}`}
+                  onClick={() => handleMenuItemClick(item.key)}
+                >
+                  <span className="terminal-add-dropdown-icon">{item.icon}</span>
+                  <span className="terminal-add-dropdown-label">{item.label}</span>
+                  <button
+                    type="button"
+                    className={`terminal-add-dropdown-pin ${isDefault(item.key) ? "terminal-add-dropdown-pin-active" : ""}`}
+                    onClick={(e) => handlePin(item.key, e)}
+                    title={isDefault(item.key) ? "Default action" : "Set as default"}
+                  >
+                    <span className="pin-icon" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Context menu */}
+      {/* Context menu (right-click on tab) */}
       {menu && (
         <div
           className="terminal-context-menu"

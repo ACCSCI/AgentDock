@@ -34,6 +34,12 @@ const FALLBACK_STRIP_KEYS = new Set([
   "DEBUG_PORT",
   "PREVIEW_PORT",
   "PORT",
+  // Electron sets these for its internal use; child PTY shells must not
+  // inherit them or `electron` CLI will run in Node-only mode (no GUI).
+  "ELECTRON_RUN_AS_NODE",
+  "ELECTRON_NO_ATTACH_CONSOLE",
+  "ELECTRON_ENABLE_LOGGING",
+  "ELECTRON_ENABLE_STACK_DUMPING",
 ]);
 
 function parseEnv(content) {

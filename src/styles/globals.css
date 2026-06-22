@@ -523,13 +523,14 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  gap: 14px;
+  padding: 14px 16px;
 }
 
 .workspace-header {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding: 12px 16px 0;
   flex-shrink: 0;
 }
 
@@ -547,6 +548,7 @@ body {
   flex: 1;
   overflow: hidden;
   display: flex;
+  min-height: 0;
 }
 
 .workspace-hint {
@@ -676,13 +678,18 @@ body {
 /* Workspace Session Info */
 .workspace-session-info {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
   background: var(--color-session-bg);
   border: 1px solid var(--color-session-border);
   border-radius: var(--radius-sm);
+}
+
+.workspace-session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .workspace-session-label {
@@ -706,8 +713,7 @@ body {
 .workspace-session-ports {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-left: auto;
+  gap: 8px;
 }
 
 .workspace-port-badge {
@@ -717,7 +723,7 @@ body {
   background: var(--color-bg, #fff);
   border: 1px solid var(--color-session-border);
   border-radius: var(--radius-sm);
-  padding: 1px 6px;
+  padding: 2px 8px;
   white-space: nowrap;
   user-select: all;
 }
@@ -820,6 +826,80 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
+/* ---- Terminal Settings Bar ---- */
+.terminal-settings-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.terminal-settings-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-settings-label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.terminal-settings-stepper {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1;
+  transition: background 0.1s;
+}
+
+.terminal-settings-stepper:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-primary);
+}
+
+.terminal-settings-stepper:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.terminal-settings-value {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  min-width: 24px;
+  text-align: center;
+  color: var(--color-text);
+}
+
+.terminal-settings-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  outline: none;
+}
+
+.terminal-settings-select:focus {
+  border-color: var(--color-primary);
+}
+
 /* ---- Terminal Panel ---- */
 .terminal-panel {
   flex: 1;
@@ -852,7 +932,8 @@ body {
   font-size: 12px;
   user-select: none;
   transition: background 0.15s;
-  max-width: 160px;
+  max-width: 220px;
+  min-width: 80px;
 }
 
 .terminal-tab:hover {
@@ -925,6 +1006,131 @@ body {
 .terminal-tab-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---- "+" button hover dropdown ---- */
+.terminal-add-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.terminal-add-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1000;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+  min-width: 160px;
+  animation: fade-in 0.1s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.terminal-add-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text);
+  transition: background 0.1s;
+}
+
+.terminal-add-dropdown-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.terminal-add-dropdown-item-default {
+  font-weight: 600;
+}
+
+.terminal-add-dropdown-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.terminal-add-dropdown-label {
+  flex: 1;
+}
+
+.terminal-add-dropdown-pin {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-add-dropdown-item:hover .terminal-add-dropdown-pin {
+  opacity: 1;
+}
+
+/* Pushpin icon — circle head + line stem */
+.pin-icon {
+  position: relative;
+  width: 12px;
+  height: 14px;
+}
+
+.pin-icon::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-secondary);
+  background: transparent;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pin-icon::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1.5px;
+  height: 6px;
+  background: var(--color-text-secondary);
+  transition: background 0.1s;
+}
+
+.terminal-add-dropdown-pin:hover .pin-icon::before {
+  border-color: var(--color-primary);
+}
+
+.terminal-add-dropdown-pin:hover .pin-icon::after {
+  background: var(--color-primary);
+}
+
+/* Active/pinned state — filled head */
+.terminal-add-dropdown-pin-active .pin-icon::before {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.terminal-add-dropdown-pin-active .pin-icon::after {
+  background: var(--color-primary);
 }
 
 .terminal-content {
