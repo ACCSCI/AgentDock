@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest, Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useV2Projects } from "../lib/queries";
 import type { SessionUserStatus } from "../lib/queries";
@@ -301,6 +301,16 @@ export function SessionSidebar() {
         >
           <GitPullRequest size={16} />
         </button>
+        <button
+          type="button"
+          className="session-sidebar-new-btn"
+          onClick={handleNewSession}
+          disabled={createSession.isPending}
+          title="新建 Session"
+          data-testid="new-session"
+        >
+          <Plus size={18} />
+        </button>
         <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
       </div>
       <div
@@ -370,14 +380,6 @@ export function SessionSidebar() {
           </div>
         )}
       </div>
-      <button
-        type="button"
-        className="session-add"
-        onClick={handleNewSession}
-        data-testid="new-session"
-      >
-        +
-      </button>
       <div
         ref={handleRef}
         className="session-sidebar-resize-handle"

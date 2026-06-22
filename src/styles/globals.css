@@ -629,26 +629,34 @@ body {
   background: var(--color-bg-secondary);
 }
 
-.session-add {
-  margin: 8px;
-  padding: 8px;
+.session-sidebar-new-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
   background: none;
-  border: 1px dashed var(--color-border-light);
-  color: var(--color-primary);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 16px;
   border-radius: var(--radius-sm);
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.session-add:hover {
-  background: var(--color-session-bg);
-  border-color: var(--color-primary);
+.session-sidebar-new-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
 }
 
-.session-add:disabled {
-  opacity: 0.5;
+.session-sidebar-new-btn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.session-sidebar-new-btn:disabled:hover {
+  background: none;
+  color: var(--color-text-secondary);
 }
 
 .session-card-meta {
