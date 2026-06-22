@@ -131,6 +131,7 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
       await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, {
         encoding: "utf-8",
         env: { ...process.env, AGENTDOCK_TARGET_DIR: normalized },
+        timeout: 8000,
       }).catch(() => {});
 
       // Give processes a moment to release their directory handles.
@@ -160,6 +161,7 @@ export async function isRegisteredWorktree(projectPath: string, worktreePath: st
     const { stdout } = await execAsync("git worktree list --porcelain", {
       cwd: projectPath,
       encoding: "utf-8",
+      timeout: 10_000,
     });
     const normalizedPath = worktreePath.replace(/\\/g, "/");
     for (const block of stdout.split("\n\n")) {
@@ -251,8 +253,8 @@ export async function removeWorktree(
   // Force path: skip these entirely — on Windows they take 20+ seconds due
   // to antivirus scanning and file-handle contention.
   if (!force && isRegistered) {
-    try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
-    try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8" }); } catch {}
+    try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8", timeout: 15_000 }); } catch {}
+    try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
   }
 
   // Always ensure directory is removed (handles git failure or non-worktree directories)
@@ -278,7 +280,7 @@ export async function removeWorktree(
 
   // Clean up stale git worktree registration left behind by force removal
   if (isRegistered) {
-    try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8" }); } catch {}
+    try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
   }
 
   return { removed: worktreePath };
@@ -526,6 +528,7 @@ export async function removeOrphanBranch(
     await execFileAsync("git", ["branch", "-D", branch], {
       cwd: projectPath,
       encoding: "utf-8",
+      timeout: 10_000,
     });
   } catch (err) {
     throw new Error(

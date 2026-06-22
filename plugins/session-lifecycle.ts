@@ -362,17 +362,32 @@ export function createSessionLifecycle(deps?: {
     // Step 3: RemoveWorktree (Core)
     emit(onStep, { step: "removeWorktree", status: "running" });
     const wtStepStart = Date.now();
+    let worktreeRemoved = false;
     if (existsSync(worktreePath)) {
       // Kill any lingering async hook child processes that may hold CWD handles
       // and wait for OS to release them before attempting directory removal.
       await killSessionHookProcessesAndWait(sessionId, worktreePath);
       // Forward currentBranch so a renamed session's real branch (not
       // `agentdock/<sessionId>`) is deleted alongside the worktree.
-      await removeWorktree(projectPath, sessionId, { currentBranch, force: true });
+      try {
+        await removeWorktree(projectPath, sessionId, { currentBranch, force: true });
+        worktreeRemoved = true;
+      } catch (rmErr) {
+        // On Windows, EBUSY/EPERM means a process still holds a file handle.
+        // Log and continue — the orphan cleaner will retry later. Don't let
+        // a locked directory block the rest of the deletion flow (DB + daemon
+        // cleanup would otherwise be skipped, leaving a ghost session).
+        log(sessionId, `removeWorktree ✗ ${rmErr} — continuing (orphan will retry)`);
+        emit(onStep, { step: "removeWorktree", status: "error", duration: Date.now() - wtStepStart, error: String(rmErr) });
+      }
+    } else {
+      worktreeRemoved = true;
     }
-    const wtDuration = Date.now() - wtStepStart;
-    log(sessionId, `removeWorktree ✓ ${wtDuration}ms`);
-    emit(onStep, { step: "removeWorktree", status: "done", duration: wtDuration });
+    if (worktreeRemoved) {
+      const wtDuration = Date.now() - wtStepStart;
+      log(sessionId, `removeWorktree ✓ ${wtDuration}ms`);
+      emit(onStep, { step: "removeWorktree", status: "done", duration: wtDuration });
+    }
 
     // Step 3.5: CompleteDeletion (v2-only, 新架构 §4.2).
     // v1 PortService omits this method → no-op. v2 calls /session/purge

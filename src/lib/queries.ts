@@ -277,14 +277,15 @@ export function useCreateSessionSSE() {
             if (p.id !== projectId) return p;
             return {
               ...p,
-              sessions: p.sessions.map((s) => {
+              sessions: (p.sessions ?? []).map((s) => {
                 if (s.id !== tempId) return s;
                 if (!isCreatingSession(s)) return s;
                 const creating = s as CreatingSession;
-                const existingIdx = creating.steps.findIndex(
+                const curSteps = creating.steps ?? [];
+                const existingIdx = curSteps.findIndex(
                   (st) => st.step === step.step,
                 );
-                const newSteps = [...creating.steps];
+                const newSteps = [...curSteps];
                 if (existingIdx >= 0) {
                   newSteps[existingIdx] = step;
                 } else {
@@ -348,7 +349,7 @@ export function useDeleteSessionSSE() {
           if (p.id !== projectId) return p;
           return {
             ...p,
-            sessions: p.sessions.map((s) => {
+            sessions: (p.sessions ?? []).map((s) => {
               if (s.id !== sessionId) return s;
               if (isCreatingSession(s) || isDeletingSession(s)) return s;
               const deleting: DeletingSession = { ...s, status: "deleting", steps: [] };
@@ -370,14 +371,15 @@ export function useDeleteSessionSSE() {
             if (p.id !== projectId) return p;
             return {
               ...p,
-              sessions: p.sessions.map((s) => {
+              sessions: (p.sessions ?? []).map((s) => {
                 if (s.id !== sessionId) return s;
                 if (!isDeletingSession(s)) return s;
                 const deleting = s as DeletingSession;
-                const existingIdx = deleting.steps.findIndex(
+                const curSteps = deleting.steps ?? [];
+                const existingIdx = curSteps.findIndex(
                   (st) => st.step === step.step,
                 );
-                const newSteps = [...deleting.steps];
+                const newSteps = [...curSteps];
                 if (existingIdx >= 0) newSteps[existingIdx] = step;
                 else newSteps.push(step);
                 return { ...deleting, steps: newSteps };
@@ -401,7 +403,7 @@ export function useDeleteSessionSSE() {
               if (p.id !== projectId) return p;
               return {
                 ...p,
-                sessions: p.sessions.filter((s) => s.id !== sessionId),
+                sessions: (p.sessions ?? []).filter((s) => s.id !== sessionId),
               };
             });
           });

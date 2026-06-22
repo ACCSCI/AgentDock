@@ -68,7 +68,7 @@ function LifecycleSteps({
   stepOrder,
   labels,
 }: { steps: SessionStep[]; stepOrder: string[]; labels: Record<string, string> }) {
-  const stepMap = new Map(steps.map((s) => [s.step, s]));
+  const stepMap = new Map((steps ?? []).map((s) => [s.step, s]));
   return (
     <div className="creating-steps">
       {stepOrder.map((stepName) => {

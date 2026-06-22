@@ -202,7 +202,7 @@ async function silentTakeover(
   const portKeys: string[] | undefined = Object.keys(preferredPorts).length > 0
     ? Object.keys(preferredPorts)
     : undefined;
-  const ports = await v2.service.claimOrReuse({
+  const ports = await v2.claimOrReuse({
     sessionId,
     projectPath: project.path,
     portKeys,
