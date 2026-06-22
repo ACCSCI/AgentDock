@@ -31,6 +31,20 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", "*.gen.ts"]
+    "ignore": [
+      "node_modules",
+      "dist",
+      "out",
+      "*.gen.ts",
+      "dist-electron",
+      "e2e-report",
+      "e2e-report.json",
+      "e2e-report-html",
+      "test-results",
+      "playwright-report",
+      "e2e/screenshots",
+      ".agentdock",
+      ".claude"
+    ]
   }
 }

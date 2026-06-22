@@ -20,5 +20,13 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "plugins", "scripts"]
+  "include": [
+    "src",
+    "plugins",
+    "scripts",
+    "electron",
+    "e2e",
+    "scripts/acceptance",
+    "test-utils"
+  ]
 }
