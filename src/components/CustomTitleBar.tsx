@@ -82,6 +82,7 @@ export function CustomTitleBar() {
               type="button"
               className="custom-titlebar-todo-btn"
               onClick={handleTodoToggle}
+              onMouseDown={(e) => e.stopPropagation()}
               data-testid="todo-toggle"
             >
               📝
@@ -99,6 +100,7 @@ export function CustomTitleBar() {
                 type="button"
                 className="custom-titlebar-todo-btn"
                 onClick={handleTodoToggle}
+                onMouseDown={(e) => e.stopPropagation()}
                 data-testid="todo-toggle"
               >
                 📝

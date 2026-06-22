@@ -398,6 +398,14 @@ function createWindow(): BrowserWindow {
     mainWindow?.show();
   });
 
+  // Notify renderer when maximize state changes (for toggle button icon).
+  mainWindow.on("maximize", () => {
+    mainWindow?.webContents.send("window:maximize-change", true);
+  });
+  mainWindow.on("unmaximize", () => {
+    mainWindow?.webContents.send("window:maximize-change", false);
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -558,13 +566,6 @@ async function bootstrap() {
   });
   ipcMain.handle("window:platform", () => {
     return process.platform;
-  });
-  // Notify renderer when maximize state changes (for toggle button icon).
-  mainWindow?.on("maximize", () => {
-    mainWindow?.webContents.send("window:maximize-change", true);
-  });
-  mainWindow?.on("unmaximize", () => {
-    mainWindow?.webContents.send("window:maximize-change", false);
   });
 
   // E2E reset handler — exposes __e2eResetMainState() on globalThis so

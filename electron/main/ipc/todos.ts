@@ -9,7 +9,7 @@
  *   todos:delete   — delete a todo
  */
 import { ipcMain } from "electron";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import * as schema from "../../../plugins/db/schema.js";
@@ -40,13 +40,13 @@ export function registerTodos(): void {
       const now = new Date().toISOString();
       const id = nanoid();
 
-      // Get max sortOrder for the project
-      const rows = db
-        .select({ sortOrder: schema.todos.sortOrder })
+      // Get max sortOrder via database MAX聚合
+      const [result] = db
+        .select({ maxSort: sql.raw("COALESCE(MAX(sort_order), 0)") })
         .from(schema.todos)
         .where(eq(schema.todos.projectId, projectId))
         .all();
-      const maxSort = rows.reduce((max, r) => Math.max(max, r.sortOrder), 0);
+      const maxSort = (result?.maxSort as number) ?? 0;
 
       db.insert(schema.todos)
         .values({
