@@ -479,6 +479,7 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         sessionId,
         clientId: deps.clientId,
         pid: deps.pid,
+        projectRoot: projectPath,
         displayName: displayName ?? sessionId,
       });
       if (!reclaim.ok) {

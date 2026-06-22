@@ -78,6 +78,20 @@ function getDb(ctx: DbContext) {
 }
 
 /**
+ * §4.3.1 — Check if a worktree directory is "complete" (exists, has .git, non-empty).
+ * Safe against EACCES/ENOTDIR by catching sync FS errors.
+ */
+function isDirectoryComplete(dirPath: string): boolean {
+  try {
+    return existsSync(dirPath)
+      && existsSync(join(dirPath, ".git"))
+      && readdirSync(dirPath).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch all v2 daemon sessions via /sync. Returns a map keyed by
  * worktreePath (so callers can match against DB rows).
  */
@@ -300,11 +314,9 @@ async function syncProject(
     }
 
     // daemon 不认 → 看磁盘完整性
-    const isDirComplete = existsSync(wt.worktreePath)
-      && existsSync(join(wt.worktreePath, ".git"))
-      && readdirSync(wt.worktreePath).length > 0;
+    const dirComplete = isDirectoryComplete(wt.worktreePath);
 
-    if (isDirComplete && v2) {
+    if (dirComplete && v2) {
       // §4.3.1 takeover：无主 + 完整 → 静默 claim 成自己的
       try {
         const result = await silentTakeover(v2, wt, project, db);
@@ -368,11 +380,9 @@ async function syncProject(
       continue;
     }
     // daemon 不认 → 看磁盘完整性
-    const isDirComplete = existsSync(row.worktreePath)
-      && existsSync(join(row.worktreePath, ".git"))
-      && readdirSync(row.worktreePath).length > 0;
+    const dirComplete = isDirectoryComplete(row.worktreePath);
 
-    if (!isDirComplete) {
+    if (!dirComplete) {
       ctx.setSessionStatus(row.id, "orphan");
       continue;
     }

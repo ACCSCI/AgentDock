@@ -223,8 +223,8 @@ async function reconcileAndDeclareSessions(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  // Build a worktreePath → sessionId map from the v2PortService's
-  // local cache, so we can match daemon sessions to DB rows by path.
+  // Build a set of sessionIds known to the v2PortService's local cache,
+  // so we can match daemon sessions to DB rows by unified sessionId.
   const knownBySid = new Map<string, { sessionId: string }>();
   for (const known of v2PortService.listKnownSessions()) {
     knownBySid.set(known.sessionId, { sessionId: known.sessionId });

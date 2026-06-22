@@ -161,6 +161,7 @@ const ReclaimSchema = z.object({
   sessionId: z.string().min(1).regex(SESSION_ID_RE, "Invalid sessionId"),
   clientId: z.string().min(1, "clientId required"),
   pid: z.number().int().positive(),
+  projectRoot: z.string().min(1, "projectRoot required"),
   displayName: z.string().max(128).optional(),
 });
 
@@ -236,7 +237,7 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
         const displayName = sanitized || body.sessionId.slice(0, 8);
         const { fencingToken, created } = ctx.stateV2.reclaimSession({
           sessionId: body.sessionId,
-          projectRoot: "", // reclaimed session; projectRoot not critical here
+          projectRoot: body.projectRoot,
           displayName,
           clientId: body.clientId,
           pid: body.pid,

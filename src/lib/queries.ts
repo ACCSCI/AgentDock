@@ -183,7 +183,7 @@ export function useProjects() {
           )
           .map((s: (typeof p.sessions)[number]) => ({
             ...s,
-            status: ((s as { runtimeStatus?: string }).runtimeStatus === "active"
+            status: ((s as { runtimeStatus?: string }).runtimeStatus === "active" || (s as { runtimeStatus?: string }).runtimeStatus === "owned"
               ? "existing"
               : (s as { runtimeStatus?: string }).runtimeStatus) as SessionRuntimeStatus | undefined,
           })),
