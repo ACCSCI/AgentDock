@@ -33,6 +33,9 @@ import { log } from "../../../plugins/logger.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Cache of open PR windows keyed by pulls URL. Prevents duplicate windows. */
+const prWindows = new Map<string, BrowserWindow>();
+
 /**
  * Normalize a path for prefix comparison: resolve to absolute, lower-case
  * on Windows (case-insensitive FS), forward slashes. realpathSync resolves
@@ -248,7 +251,8 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
 
   // shell:openPullRequests — open the GitHub pulls page in a persistent
   // BrowserWindow. The "persist:github" partition saves cookies to disk,
-  // so the user only needs to log in once.
+  // so the user only needs to log in once. Reuses an existing window
+  // for the same URL (focusing it instead of creating a duplicate).
   ipcMain.handle(IPC_CHANNELS["shell:openPullRequests"], async (_e, projectId?: string) => {
     const projectPath = resolveProjectPath(projectId);
 
@@ -264,16 +268,27 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
       throw new Error("未配置 GitHub remote（origin）");
     }
 
-    // Parse GitHub owner/repo from both SSH and HTTPS URLs:
+    // Parse GitHub owner/repo from both SSH and HTTPS URLs, allowing dots
+    // in repo names (e.g. "foo.github.io"). Strip trailing ".git" separately.
     //   SSH:    git@github.com:owner/repo.git
     //   HTTPS:  https://github.com/owner/repo.git
-    const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-    if (!httpsMatch) {
+    const cleanUrl = remoteUrl.replace(/\/$/, "");
+    const match = cleanUrl.match(/github\.com[/:]([^/]+)\/([^/]+)/);
+    if (!match) {
       throw new Error("Origin remote 不是 GitHub 仓库");
     }
 
-    const [, owner, repo] = httpsMatch;
+    const [, owner, rawRepo] = match;
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
     const pullsUrl = `https://github.com/${owner}/${repo}/pulls`;
+
+    // Reuse existing window if already open for this URL
+    const existing = prWindows.get(pullsUrl);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.focus();
+      return { url: pullsUrl };
+    }
 
     // Persistent partition: cookies are saved to disk under
     // <userData>/partitions/persist:github/, so login survives restarts.
@@ -285,7 +300,13 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
         partition: "persist:github",
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
       },
+    });
+
+    prWindows.set(pullsUrl, pullsWindow);
+    pullsWindow.on("closed", () => {
+      prWindows.delete(pullsUrl);
     });
 
     pullsWindow.loadURL(pullsUrl);
