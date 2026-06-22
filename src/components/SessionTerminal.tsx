@@ -39,7 +39,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
   }, [terminalId, sessionId]);
 
   return (
-    <div className="session-terminal">
+    <div className="session-terminal" data-testid="session-terminal" data-status={status}>
       {status !== "connected" && (
         <div className={`session-terminal-overlay ${status}`}>
           {status === "connecting" && "Connecting..."}
@@ -48,7 +48,11 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
           {status === "exited" && "Process exited"}
         </div>
       )}
-      <div ref={containerRef} className="session-terminal-xterm" />
+      <div
+        ref={containerRef}
+        className="session-terminal-xterm"
+        data-testid="terminal-xterm"
+      />
     </div>
   );
 }

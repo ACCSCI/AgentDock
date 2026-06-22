@@ -80,19 +80,22 @@ E2E (Playwright 真实 Electron UI): **9 passed (1.2m 总耗时)** — 含 P9 v2
 ## 下一步推荐
 
 按 ROI 排序:
-1. **P6/P7/P8 真实 E2E 闭环** — 跑 daemon crash → 全量 /sync → 快照
-   择新；lease 续约期间外部 kill 进程 → 对账器接管；C3 orphan 提示渲染。
-2. **renderer 端订阅 SSE 事件流** — 目前的 renderer 用 SQLite 本地 DB +
+1. **renderer 端订阅 SSE 事件流** — 目前的 renderer 用 SQLite 本地 DB +
    mutation invalidate, 不直接订阅 daemon 事件流。P6 SyncApplier 已就位,
    等待前端在 reconnect 时拉一次 /sync 后用 buffer 套用增量事件。
-3. **hook-engine executor 端直接接 P7 lease-renewer** — 目前 P7 抽象就位
+2. **hook-engine executor 端直接接 P7 lease-renewer** — 目前 P7 抽象就位
    (withLeaseRenewal helper), 等待 session-lifecycle.ts 显式包成
    creating/deleting 两阶段的 lease 续约。
+3. **新架构 §11.5 验收清单剩余项** — v1 surface (/ports/allocate 等)
+   下线后清理 daemon-state.ts.allocatePorts; v1 路径 E2E 全面
+   切到 v2; pre-existing 3 个测试失败修复 (config A8b / port-conflict-
+   defense T7 / sse-integration).
 
 ## 提交历史
 
 ```
-[P6/P7/P8] feat(new-arch): P6 快照择新 + P7 lease 续约 + P8 三表对账
+29fb2d6   refactor(new-arch): 修复 §3.3/§3.5/§4.3/§4.4/§5.2/§5.3/§11.3/§11.4/§11.6/§13.2/§14.2 缺口 (10 项补齐, 14 个新单测)
+6c049c2   refactor(new-arch): P6+P7+P8 — 快照择新 / lease 续约 / 三表对账
 f182193   docs(new-arch): P9 E2E 真实 UI → 三表闭环验证通过
 f1f32e5   fix(v2-port-service): use projectPath from allocateSession params
 79b9506   feat(new-arch): P9 — 客户端切到 v2 daemon API (v2PortService + SSE 消费器 + 6 个新 IPC channels)

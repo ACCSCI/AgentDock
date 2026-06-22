@@ -37,12 +37,9 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     setSelected(null);
     setSearch("");
     try {
-      const url = path ? `/api/browse-dirs?path=${encodeURIComponent(path)}` : "/api/browse-dirs";
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to list directories");
-      setEntries(data.entries);
-      setCurrentPath(data.currentPath ?? "");
+      const data = await window.api.fs.browseDirs(path ?? "");
+      setEntries(data);
+      setCurrentPath(path ?? "");
     } catch (err) {
       setEntries([]);
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -154,7 +151,11 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
   return (
     <div className="dir-modal-overlay" onClick={onCancel}>
-      <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="dir-modal"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="dir-modal"
+      >
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
             <button
@@ -204,6 +205,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
             placeholder="搜索文件夹名称..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            data-testid="dir-search-input"
           />
         </div>
 
@@ -224,6 +226,8 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
                 className={`dir-entry ${selected === entry.path ? "dir-entry-selected" : ""}`}
                 onClick={() => handleEntryClick(entry)}
                 onDoubleClick={() => handleEntryDoubleClick(entry)}
+                data-testid="dir-entry"
+                data-dir-path={entry.path}
               >
                 <span className="dir-entry-icon">
                   {entry.name === ".. (上级目录)" ? "⬆" : "📁"}
@@ -258,7 +262,12 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
         {/* Actions */}
         <div className="dir-modal-actions">
-          <button type="button" className="dir-modal-btn dir-modal-btn-cancel" onClick={onCancel}>
+          <button
+            type="button"
+            className="dir-modal-btn dir-modal-btn-cancel"
+            onClick={onCancel}
+            data-testid="dir-cancel"
+          >
             取消
           </button>
           <button
@@ -266,6 +275,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
             className="dir-modal-btn dir-modal-btn-confirm"
             disabled={!selected}
             onClick={handleConfirm}
+            data-testid="dir-confirm"
           >
             选择此目录
           </button>

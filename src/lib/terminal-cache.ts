@@ -1,3 +1,19 @@
+/**
+ * Terminal cache (renderer-side) — Phase 5 MessagePort transport.
+ *
+ * Migrated from WebSocket (`/api/terminal`) to MessageChannelMain.
+ * The main process transfers a MessagePort via the IPC stream channel
+ * `terminal:port`. We wrap it in a tiny shim that mimics the WebSocket
+ * interface we used to drive, so the rest of this file stays unchanged.
+ *
+ * Wire format (preserved from the old WS protocol):
+ *   renderer → main:  { type: "input",  data }
+ *                    { type: "resize", cols, rows }
+ *   main → renderer:  { type: "output", data }
+ *                    { type: "opened", terminalId, sessionId, pid, status }
+ *                    { type: "exit",   code, signal? }
+ *                    { type: "error",  message }
+ */
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { IDisposable } from "@xterm/xterm";
@@ -16,7 +32,8 @@ interface CachedTerminal {
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
-  websocket: WebSocket | null;
+  /** WebSocket-like shim wrapping a MessagePort (or null while connecting). */
+  websocket: PortShim | null;
   status: TerminalCacheStatus;
   onDataDisposable: IDisposable;
   resizeObserver: ResizeObserver | null;
@@ -26,15 +43,52 @@ interface CachedTerminal {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   exited: boolean;
   debouncedSendResize: ReturnType<typeof debounce> | null;
+  /** Cleanup for the port-transfer message listener. */
+  offPortListener: (() => void) | null;
 }
 
 type StatusCallback = (status: TerminalCacheStatus) => void;
+
+/**
+ * Tiny shim: expose WebSocket-like semantics over a MessagePort.
+ * The rest of this file (`send`, `onopen`, `onmessage`, `onclose`)
+ * was written for WebSocket and is preserved unchanged.
+ */
+class PortShim {
+  public onopen: (() => void) | null = null;
+  public onmessage: ((event: { data: string }) => void) | null = null;
+  public onclose: (() => void) | null = null;
+  public onerror: (() => void) | null = null;
+  public readyState: 0 | 1 | 2 | 3 = 0; // CONNECTING
+
+  constructor(private port: MessagePort) {
+    port.onmessage = (e) => {
+      if (this.onmessage) this.onmessage({ data: e.data as string });
+    };
+    port.start();
+    // MessagePorts don't have a close event the same way WebSockets do.
+    // We synthesize "open" immediately since postMessage is ready right away.
+    this.readyState = 1;
+    queueMicrotask(() => {
+      if (this.onopen) this.onopen();
+    });
+  }
+
+  send(data: string): void {
+    this.port.postMessage(JSON.parse(data) as unknown);
+  }
+
+  close(): void {
+    this.readyState = 3;
+    if (this.onclose) this.onclose();
+  }
+}
 
 // ---- Debounce utility ----
 
 function debounce<T extends (...args: unknown[]) => void>(
   fn: T,
-  ms: number
+  ms: number,
 ): T & { cancel: () => void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const debounced = (...args: unknown[]) => {
@@ -80,6 +134,12 @@ const TERMINAL_CONFIG = {
   },
 };
 
+declare global {
+  interface Window {
+    api: import("../electron/preload").ApiSurface;
+  }
+}
+
 // ---- TerminalCache singleton ----
 
 class TerminalCache {
@@ -109,24 +169,140 @@ class TerminalCache {
     }
   }
 
-  // -- WebSocket helpers --
+  // -- Port-based transport (replaces WebSocket) --
 
-  private safeCloseWs(ws: WebSocket | null): void {
-    if (!ws) return;
-    ws.onclose = null;
-    ws.onerror = null;
-    ws.onmessage = null;
-    if (ws.readyState === WebSocket.CONNECTING) {
-      ws.onopen = () => ws.close();
-    } else {
-      ws.onopen = null;
-      ws.close();
+  private async connectPort(entry: CachedTerminal): Promise<void> {
+    entry.status = "connecting";
+    this.notifyStatus(entry.terminalId, "connecting");
+
+    // Listen on window.message directly — bypass `window.api.terminals.
+    // onPort` because contextBridge wraps the MessagePort and strips
+    // its `.start()` / `.onmessage` methods. Preload's onPort
+    // implementation re-dispatches the port via `window.postMessage`
+    // for exactly this reason; we just pick it up on the receiving end
+    // here. (Calling onPort would also work, but contextBridge would
+    // hand us a stripped port via the callback path.)
+    const winHandler = (event: MessageEvent) => {
+      const data = event.data as { type?: string; terminalId?: string } | null;
+      if (!data || data.type !== "terminal:port") return;
+      if (data.terminalId !== entry.terminalId) return;
+      const port = event.ports[0];
+      if (!port) return;
+      window.removeEventListener("message", winHandler);
+      if (entry.offPortListener) {
+        entry.offPortListener();
+        entry.offPortListener = null;
+      }
+      this.attachPort(entry, port);
+    };
+    window.addEventListener("message", winHandler);
+    // Keep the contextBridge `onPort` subscription active too so the
+    // preload's ipcRenderer.on stays installed (its handler is what
+    // triggers the window.postMessage re-dispatch). The callback we
+    // pass is a no-op — `winHandler` above is the real receiver.
+    const offPort = window.api.terminals.onPort(() => {
+      /* no-op — see winHandler above */
+    });
+    entry.offPortListener = () => {
+      window.removeEventListener("message", winHandler);
+      offPort();
+    };
+
+    // Ask main to transfer a port for this terminalId.
+    try {
+      await window.api.terminals.open(entry.terminalId);
+    } catch (err) {
+      this.handleConnectionError(entry, err);
     }
+  }
+
+  private attachPort(entry: CachedTerminal, port: MessagePort): void {
+    const shim = new PortShim(port);
+    entry.websocket = shim;
+
+    shim.onopen = () => {
+      entry.reconnectAttempt = 0;
+      entry.wasConnected = true;
+      // Note: we don't get an "opened" event over the port — the
+      // PortShim synthesizes the onopen immediately. The old WS protocol's
+      // "opened" event from main is no longer needed because the port is
+      // already ready for I/O the moment we receive it.
+      entry.status = "connected";
+      this.notifyStatus(entry.terminalId, "connected");
+      this.safeFit(entry);
+      this.sendResize(entry);
+    };
+
+    shim.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as { type: string; [k: string]: unknown };
+        switch (msg.type) {
+          case "output":
+            entry.terminal.write(String(msg.data ?? ""));
+            break;
+          case "opened":
+            // Defensive: main might still send an "opened" frame; ignore
+            // (we already marked status = "connected" on onopen).
+            break;
+          case "exit":
+            entry.terminal.writeln(
+              `\r\n\x1b[33m[Process exited code=${msg.code}]\x1b[0m`,
+            );
+            entry.exited = true;
+            entry.status = "exited";
+            this.notifyStatus(entry.terminalId, "exited");
+            break;
+          case "error":
+            entry.terminal.writeln(
+              `\r\n\x1b[31m[Error] ${String(msg.message ?? "")}\x1b[0m`,
+            );
+            entry.status = "error";
+            this.notifyStatus(entry.terminalId, "error");
+            break;
+        }
+      } catch {
+        // Non-JSON message, ignore
+      }
+    };
+
+    shim.onclose = () => {
+      if (entry.exited) return;
+      if (entry.status === "connected" || entry.status === "connecting") {
+        entry.status = "disconnected";
+        this.notifyStatus(entry.terminalId, "disconnected");
+      }
+      if (entry.wasConnected) {
+        entry.wasConnected = false;
+        const attempt = entry.reconnectAttempt;
+        const delay = Math.min(1000 * 2 ** attempt, 30000);
+        entry.reconnectAttempt = attempt + 1;
+        entry.reconnectTimer = setTimeout(() => {
+          void this.connectPort(entry);
+        }, delay);
+      }
+    };
+  }
+
+  private handleConnectionError(entry: CachedTerminal, err: unknown): void {
+    if (entry.offPortListener) {
+      entry.offPortListener();
+      entry.offPortListener = null;
+    }
+    entry.status = "error";
+    this.notifyStatus(entry.terminalId, "error");
+    // Trigger a reconnect (the WS version did the same).
+    if (entry.wasConnected) {
+      entry.wasConnected = false;
+      entry.reconnectTimer = setTimeout(() => {
+        void this.connectPort(entry);
+      }, 2000);
+    }
+    console.warn(`[TerminalCache] open(${entry.terminalId}) failed:`, err);
   }
 
   private sendResize(entry: CachedTerminal): void {
     if (
-      entry.websocket?.readyState === WebSocket.OPEN &&
+      entry.websocket?.readyState === 1 && // OPEN
       entry.terminal.rows > 0 &&
       entry.terminal.cols > 0
     ) {
@@ -135,7 +311,7 @@ class TerminalCache {
           type: "resize",
           cols: entry.terminal.cols,
           rows: entry.terminal.rows,
-        })
+        }),
       );
     }
   }
@@ -154,108 +330,10 @@ class TerminalCache {
     }
   }
 
-  private connectWebSocket(entry: CachedTerminal): void {
-    if (entry.websocket) {
-      this.safeCloseWs(entry.websocket);
-    }
-
-    entry.status = "connecting";
-    this.notifyStatus(entry.terminalId, "connecting");
-
-    const protocol =
-      window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal?terminalId=${encodeURIComponent(entry.terminalId)}`;
-
-    const ws = new WebSocket(wsUrl);
-    entry.websocket = ws;
-
-    ws.onopen = () => {
-      entry.reconnectAttempt = 0;
-      entry.wasConnected = true;
-      console.log(
-        `[TerminalCache] WebSocket opened for ${entry.terminalId}`
-      );
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        switch (msg.type) {
-          case "output":
-            entry.terminal.write(msg.data);
-            break;
-          case "opened":
-            entry.status = "connected";
-            this.notifyStatus(entry.terminalId, "connected");
-            this.safeFit(entry);
-            this.sendResize(entry);
-            console.log(
-              `[TerminalCache] Terminal ${entry.terminalId} opened (pid=${msg.pid})`
-            );
-            break;
-          case "exit":
-            entry.terminal.writeln(
-              `\r\n\x1b[33m[Process exited code=${msg.code}]\x1b[0m`
-            );
-            entry.exited = true;
-            entry.status = "exited";
-            this.notifyStatus(entry.terminalId, "exited");
-            break;
-          case "error":
-            entry.terminal.writeln(
-              `\r\n\x1b[31m[Error] ${msg.message}\x1b[0m`
-            );
-            entry.status = "error";
-            this.notifyStatus(entry.terminalId, "error");
-            break;
-          case "heartbeat_ack":
-            break;
-        }
-      } catch {
-        // Non-JSON message, ignore
-      }
-    };
-
-    ws.onclose = () => {
-      console.log(
-        `[TerminalCache] WebSocket closed for ${entry.terminalId}`
-      );
-
-      // Don't reconnect if process exited
-      if (entry.exited) return;
-
-      if (entry.status === "connected" || entry.status === "connecting") {
-        entry.status = "disconnected";
-        this.notifyStatus(entry.terminalId, "disconnected");
-      }
-
-      // Auto-reconnect with exponential backoff
-      if (entry.wasConnected) {
-        entry.wasConnected = false;
-        const attempt = entry.reconnectAttempt;
-        const delay = Math.min(1000 * 2 ** attempt, 30000);
-        entry.reconnectAttempt = attempt + 1;
-        console.log(
-          `[TerminalCache] Reconnecting ${entry.terminalId} in ${delay}ms (attempt ${attempt + 1})`
-        );
-        entry.reconnectTimer = setTimeout(
-          () => this.connectWebSocket(entry),
-          delay
-        );
-      }
-    };
-
-    ws.onerror = () => {
-      // onclose handles reconnection
-    };
-  }
-
   private startResizeObserver(entry: CachedTerminal): void {
-    // Disconnect existing observer if any
     if (entry.resizeObserver) {
       entry.resizeObserver.disconnect();
     }
-
     if (!entry.containerRef) return;
 
     const sendResize = debounce(() => {
@@ -284,11 +362,6 @@ class TerminalCache {
 
   // -- Public API --
 
-  /**
-   * Get or create a cached terminal instance.
-   * If the terminal already exists in cache, returns it.
-   * Otherwise creates a new Terminal, FitAddon, and WebSocket connection.
-   */
   getOrCreate(terminalId: string, sessionId: string): CachedTerminal {
     const existing = this.cache.get(terminalId);
     if (existing) return existing;
@@ -299,7 +372,7 @@ class TerminalCache {
 
     const onDataDisposable = terminal.onData((data) => {
       const entry = this.cache.get(terminalId);
-      if (entry?.websocket?.readyState === WebSocket.OPEN) {
+      if (entry?.websocket?.readyState === 1) {
         entry.websocket.send(JSON.stringify({ type: "input", data }));
       }
     });
@@ -319,31 +392,21 @@ class TerminalCache {
       reconnectTimer: null,
       exited: false,
       debouncedSendResize: null,
+      offPortListener: null,
     };
 
     this.cache.set(terminalId, entry);
-    this.connectWebSocket(entry);
-
+    void this.connectPort(entry);
     return entry;
   }
 
-  /**
-   * Attach a cached terminal to a DOM container.
-   * First call: uses terminal.open() to initialize DOM.
-   * Subsequent calls: uses appendChild to move existing DOM element.
-   */
   attach(terminalId: string, container: HTMLElement): void {
     const entry = this.cache.get(terminalId);
     if (!entry) return;
-
-    // Already attached to this container
     if (entry.containerRef === container) return;
 
     const isFirstAttach = !entry.terminal.element;
     const term = entry.terminal;
-
-    // First attach: terminal.open() creates the DOM structure
-    // Subsequent attach: appendChild moves the existing element
     if (!isFirstAttach) {
       container.appendChild(entry.terminal.element);
     } else {
@@ -351,20 +414,13 @@ class TerminalCache {
     }
     entry.containerRef = container;
 
-    // Start ResizeObserver on new container
     this.startResizeObserver(entry);
 
-    // Fit and send resize after a frame to let browser lay out
     requestAnimationFrame(() => {
       this.safeFit(entry);
       this.sendResize(entry);
-
-      // Sync scrollTop with xterm's internal ydisp.
-      // After DOM move, xterm's _innerRefresh doesn't trigger scrollTop sync
-      // because _currentRowHeight may be stale. We compute rowHeight from
-      // scrollHeight and baseY+rows, then set scrollTop directly.
       if (!isFirstAttach) {
-        const vp = term.element?.querySelector('.xterm-viewport') as HTMLElement | null;
+        const vp = term.element?.querySelector(".xterm-viewport") as HTMLElement | null;
         if (vp && vp.scrollHeight > vp.clientHeight) {
           const rowHeight = vp.scrollHeight / (term.buffer.active.baseY + term.rows);
           const targetScrollTop = term.buffer.active.viewportY * rowHeight;
@@ -376,59 +432,43 @@ class TerminalCache {
     });
   }
 
-  /**
-   * Detach a cached terminal from its DOM container.
-   * Moves the terminal element to the graveyard (hidden off-screen).
-   * Terminal instance and WebSocket remain alive.
-   */
   detach(terminalId: string): void {
     const entry = this.cache.get(terminalId);
     if (!entry || !entry.containerRef) return;
-
-    // Stop ResizeObserver on current container
     this.stopResizeObserver(entry);
-
-    // Move to graveyard
     const graveyard = this.getGraveyard();
     graveyard.appendChild(entry.terminal.element);
     entry.containerRef = null;
   }
 
-  /**
-   * Fully dispose a cached terminal: detach from DOM, close WebSocket,
-   * dispose xterm instance, remove from cache.
-   */
   dispose(terminalId: string): void {
     const entry = this.cache.get(terminalId);
     if (!entry) return;
 
-    // Detach from DOM
     if (entry.containerRef) {
       this.stopResizeObserver(entry);
-      // Remove from current parent (don't move to graveyard, we're disposing)
       entry.terminal.element.remove();
       entry.containerRef = null;
     }
 
-    // Close WebSocket
     if (entry.reconnectTimer) {
       clearTimeout(entry.reconnectTimer);
     }
-    this.safeCloseWs(entry.websocket);
-    entry.websocket = null;
-
-    // Dispose xterm
+    if (entry.offPortListener) {
+      entry.offPortListener();
+      entry.offPortListener = null;
+    }
+    if (entry.websocket) {
+      entry.websocket.close();
+      entry.websocket = null;
+    }
     entry.onDataDisposable.dispose();
     entry.terminal.dispose();
 
-    // Remove from cache
     this.cache.delete(terminalId);
     this.statusListeners.delete(terminalId);
   }
 
-  /**
-   * Dispose all cached terminals belonging to a session.
-   */
   disposeBySession(sessionId: string): void {
     const toDispose: string[] = [];
     for (const [terminalId, entry] of this.cache) {
@@ -441,17 +481,10 @@ class TerminalCache {
     }
   }
 
-  /**
-   * Get a cached terminal entry (no side effects).
-   */
   get(terminalId: string): CachedTerminal | undefined {
     return this.cache.get(terminalId);
   }
 
-  /**
-   * Subscribe to status changes for a terminal.
-   * Returns an unsubscribe function.
-   */
   onStatusChange(terminalId: string, cb: StatusCallback): () => void {
     let set = this.statusListeners.get(terminalId);
     if (!set) {
@@ -466,5 +499,4 @@ class TerminalCache {
   }
 }
 
-// Export singleton
 export const terminalCache = new TerminalCache();

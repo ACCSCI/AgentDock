@@ -369,9 +369,11 @@ hooks:
 
 ## 开发说明
 
-- `scripts/start.ts` 和 `vite.config.ts` 会复用 `plugins/env.ts` 中的 `readEnvFile()` 读取当前项目 `.env`
-- 这样可以正确处理带引号或行尾注释的 `.env` 值，避免启动时出现端口解析错误
-- Vite watcher 默认忽略 `.agentdock/**` 和 `.claude/**`，避免 session 或 Claude 生成文件触发无关热重载
+- 开发 / 启动入口现在是 Electron + electron-vite：`bun run dev` 起 Electron 主进程 + Vite 渲染端 dev server；`bun run start` 跑构建后的 Electron 预览版本。Vite 配置走 `electron.vite.config.ts`，Node SQLite 仍需 `NODE_OPTIONS=--experimental-sqlite`（脚本已自动注入）。
+- `.env` 读取由 `plugins/env.ts` 的 `readEnvFile()` 统一处理，仍然支持带引号或行尾注释的值，避免启动时出现端口解析错误。
+- Vite watcher 默认忽略 `.agentdock/**` 和 `.claude/**`，避免 session 或 Claude 生成文件触发无关热重载（在 `electron.vite.config.ts` 的 renderer `server.watch.ignored` 中维护）。
+- E2E 框架与调试入口见 `docs/e2e-guide.md`。
+- master 分支 ↔ Electron 版功能差异比对见 `docs/main-alignment-audit.md`。
 
 ---
 
