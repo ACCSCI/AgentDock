@@ -554,6 +554,8 @@ export async function removeOrphanBranch(
 // 三向孤儿分类 (Registry / Git / Filesystem)
 // ============================================================================
 
+import { log } from "./logger.js";
+
 /**
  * 扩展的孤儿分类 — 区分真实问题来源, 决定正确的修复手段.
  *
@@ -624,12 +626,8 @@ export function classifyOrphans(
     for (const entry of readdirSync(baseDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const wtPath = path.join(baseDir, entry.name);
-      // 只算真目录 (非 symlink 悬挂)
-      try {
-        fsDirs.set(entry.name, wtPath);
-      } catch {
-        continue;
-      }
+      // readdirSync with withFileTypes already filters symlinks
+      fsDirs.set(entry.name, wtPath);
     }
   } catch {
     // 目录不存在 → 项目没建过 session, 无 orphan

@@ -208,7 +208,7 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
         if (!norm.startsWith(baseDir + "/")) continue;
         selectedPathSet.add(p);
         // extract sessionId from path: .../worktrees/<sessionId>
-        const parts = p.replace(/\\/g, "/").split("/");
+        const parts = norm.split("/");
         const last = parts[parts.length - 1];
         if (last) selectedSessionIds.add(last);
       }
