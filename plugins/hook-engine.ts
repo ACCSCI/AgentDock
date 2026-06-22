@@ -179,37 +179,26 @@ export function createHookRegistry(): HookRegistry {
 }
 
 /**
- * Per-event-type concurrency limits for hook child processes.
- *
- * Heavy hooks (create) compete for bun's global cache lock, so they need
- * a tight limit.  Light hooks (delete, rename) are fast and shouldn't be
- * blocked by slow create hooks — they get their own higher-capacity pool.
+ * Global concurrency limit for hook child processes.
+ * Prevents resource contention when many sessions run hooks simultaneously
+ * (e.g. concurrent `bun install` competing for bun's global cache lock).
  */
-const HEAVY_EVENTS = new Set<string>(["beforeCreateSession", "afterCreateSession"]);
-const MAX_HEAVY_HOOKS = 3;
-const MAX_LIGHT_HOOKS = 8;
+const MAX_CONCURRENT_HOOKS = 3;
+let _hookSlots = MAX_CONCURRENT_HOOKS;
+const _hookWaiters: (() => void)[] = [];
 
-// Two independent pools, each with its own slot counter and wait queue.
-const _heavySlots = { count: MAX_HEAVY_HOOKS, waiters: [] as (() => void)[] };
-const _lightSlots = { count: MAX_LIGHT_HOOKS, waiters: [] as (() => void)[] };
-
-function acquireSlot(pool: { count: number; waiters: (() => void)[] }, max: number): Promise<void> {
-  if (pool.count > 0) { pool.count--; return Promise.resolve(); }
-  return new Promise((resolve) => { pool.waiters.push(resolve); });
+function acquireHookSlot(): Promise<void> {
+  if (_hookSlots > 0) {
+    _hookSlots--;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => { _hookWaiters.push(resolve); });
 }
 
-function releaseSlot(pool: { count: number; waiters: (() => void)[] }, max: number): void {
-  const next = pool.waiters.shift();
+function releaseHookSlot(): void {
+  const next = _hookWaiters.shift();
   if (next) next();
-  else pool.count++;
-}
-
-function acquireHookSlot(event: string): Promise<void> {
-  return HEAVY_EVENTS.has(event) ? acquireSlot(_heavySlots, MAX_HEAVY_HOOKS) : acquireSlot(_lightSlots, MAX_LIGHT_HOOKS);
-}
-
-function releaseHookSlot(event: string): void {
-  HEAVY_EVENTS.has(event) ? releaseSlot(_heavySlots, MAX_HEAVY_HOOKS) : releaseSlot(_lightSlots, MAX_LIGHT_HOOKS);
+  else _hookSlots++;
 }
 
 /**
@@ -217,11 +206,11 @@ function releaseHookSlot(event: string): void {
  */
 export function createHookEngine(registry: HookRegistry): HookEngine {
   async function executeOne(hook: HookDefinition, context: HookContext): Promise<HookResult> {
-    await acquireHookSlot(context.event);
+    await acquireHookSlot();
     try {
       return await executeOneInner(hook, context);
     } finally {
-      releaseHookSlot(context.event);
+      releaseHookSlot();
     }
   }
 
