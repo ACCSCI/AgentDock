@@ -10,10 +10,10 @@
  * shell:openExplorer / shell:openTerminal: hand off to Electron's
  * shell APIs (file manager, terminal).
  */
-import { ipcMain, shell } from "electron";
+import { BrowserWindow, ipcMain, shell } from "electron";
 import { eq } from "drizzle-orm";
 import { existsSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
@@ -244,5 +244,52 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
       log.error({ err, targetPath }, "open terminal failed");
       throw err;
     }
+  });
+
+  // shell:openPullRequests — open the GitHub pulls page in a persistent
+  // BrowserWindow. The "persist:github" partition saves cookies to disk,
+  // so the user only needs to log in once.
+  ipcMain.handle(IPC_CHANNELS["shell:openPullRequests"], async (_e, projectId?: string) => {
+    const projectPath = resolveProjectPath(projectId);
+
+    // Get the origin remote URL
+    let remoteUrl: string;
+    try {
+      remoteUrl = (await execFileAsync("git", ["-C", projectPath, "remote", "get-url", "origin"])).stdout.trim();
+    } catch {
+      throw new Error("未配置 GitHub remote（origin）");
+    }
+
+    if (!remoteUrl) {
+      throw new Error("未配置 GitHub remote（origin）");
+    }
+
+    // Parse GitHub owner/repo from both SSH and HTTPS URLs:
+    //   SSH:    git@github.com:owner/repo.git
+    //   HTTPS:  https://github.com/owner/repo.git
+    const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+    if (!httpsMatch) {
+      throw new Error("Origin remote 不是 GitHub 仓库");
+    }
+
+    const [, owner, repo] = httpsMatch;
+    const pullsUrl = `https://github.com/${owner}/${repo}/pulls`;
+
+    // Persistent partition: cookies are saved to disk under
+    // <userData>/partitions/persist:github/, so login survives restarts.
+    const pullsWindow = new BrowserWindow({
+      width: 1000,
+      height: 700,
+      title: `Pull Requests — ${owner}/${repo}`,
+      webPreferences: {
+        partition: "persist:github",
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    pullsWindow.loadURL(pullsUrl);
+
+    return { url: pullsUrl };
   });
 }

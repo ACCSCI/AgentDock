@@ -76,6 +76,7 @@ export const IPC_CHANNELS = {
   // os (Electron dialog / shell APIs)
   "shell:openExplorer": "shell:openExplorer",
   "shell:openTerminal": "shell:openTerminal",
+  "shell:openPullRequests": "shell:openPullRequests",
 
   // bootstrap (one-shot, used by renderer on startup)
   "bootstrap:health": "bootstrap:health",
