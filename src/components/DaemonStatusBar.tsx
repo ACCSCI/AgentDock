@@ -60,12 +60,13 @@ function getStateLabel(state: string): string {
 }
 
 function buildTooltip(health: DaemonHealth): string {
-  const caps = health.capabilities.join(", ");
+  const capsList = health.capabilities || [];
+  const caps = capsList.join(", ");
   return [
     "AgentDock 守护进程",
     `进程: PID ${health.pid} · 端口 ${health.port}`,
     `协议: v${health.protocolVersion} · Schema: v${health.schemaVersion}`,
-    `功能: ${health.capabilities.length}个 (${caps})`,
+    `功能: ${capsList.length}个 (${caps})`,
   ].join("\n");
 }
 
@@ -167,13 +168,13 @@ export function DaemonStatusBar() {
 
       <span
         className="daemon-status-info"
-        title={`协议版本: v${health.protocolVersion}\n功能: ${health.capabilities.join(", ")}`}
+        title={`协议版本: v${health.protocolVersion}\n功能: ${(health.capabilities || []).join(", ")}`}
       >
         <span className="daemon-status-icon">🔧</span>
         <span data-testid={TID.daemonProtocol}>v{health.protocolVersion}</span>
         <span>·</span>
         <span data-testid={TID.daemonCapabilities}>
-          {health.capabilities.length} caps
+          {(health.capabilities || []).length} caps
         </span>
       </span>
     </div>
