@@ -340,6 +340,12 @@ function createWindow(): BrowserWindow {
   // automated Playwright session.
   const wantDevTools = process.env.AGENTDOCK_E2E_DEVTOOLS === "1";
 
+  // devTools enabled unless app is packaged (electron-builder).
+  // NODE_ENV is unreliable — electron-vite preview sets it to "production"
+  // even though the app is not packaged. app.isPackaged is false in
+  // electron-vite dev/preview and true only in a built/distributed app.
+  const devToolsEnabled = wantDevTools || !app.isPackaged;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -352,7 +358,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // preload needs node-pty access via main IPC
-      devTools: wantDevTools || process.env.NODE_ENV !== "production",
+      devTools: devToolsEnabled,
     },
   });
 
@@ -362,8 +368,8 @@ function createWindow(): BrowserWindow {
     });
   }
 
-  // Allow F12 to toggle DevTools in dev mode
-  if (wantDevTools || process.env.NODE_ENV !== "production") {
+  // Allow F12 to toggle DevTools in development
+  if (devToolsEnabled) {
     mainWindow.webContents.on("before-input-event", (_event, input) => {
       if (input.key === "F12" && input.type === "keyDown") {
         if (mainWindow?.webContents.isDevToolsOpened()) {
