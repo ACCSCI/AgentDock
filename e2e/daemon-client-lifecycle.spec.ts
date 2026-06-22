@@ -16,7 +16,7 @@ import {
 } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -64,7 +64,7 @@ test("client/register on boot, heartbeat ~30s, unregister on quit", async () => 
     );
 
     // Daemon is at ~/.agentdock/ now — read daemon.json to get the port.
-    const daemonJsonPath = join(process.env.HOME ?? process.env.USERPROFILE ?? tmpdir(), ".agentdock", "daemon.json");
+    const daemonJsonPath = join(homedir(), ".agentdock", "daemon.json");
     const daemonJson = JSON.parse(readFileSync(daemonJsonPath, "utf-8")) as { pid: number; port: number };
     const baseUrl = `http://127.0.0.1:${daemonJson.port}`;
 

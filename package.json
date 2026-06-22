@@ -6,7 +6,8 @@
   "main": "out/main/main.js",
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--experimental-sqlite electron-vite dev",
-    "build": "electron-vite build",
+    "build": "tsc -b && electron-vite build",
+    "typecheck": "tsc -b --noEmit",
     "start": "cross-env NODE_OPTIONS=--experimental-sqlite electron-vite preview",
     "dist:win": "electron-vite build && electron-builder --win --x64",
     "lint": "biome check .",

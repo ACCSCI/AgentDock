@@ -661,7 +661,6 @@ export function registerSessions(deps: SessionsDeps): void {
           // Map renderer-provided sessionId (UUID used as displayName) to
           // the daemon's sessionId. The renderer will use the daemon's
           // sessionId going forward via the v2 channel set.
-          v2.getToken; // touch (closure-noop; the v2 cache populates on first claim)
         }
       }
       return result;

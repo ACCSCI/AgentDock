@@ -22,7 +22,9 @@ import { loadDotEnvIntoProcess } from "./plugins/env.js";
 // run before `defineConfig` below, since the renderer.server.port IIFE
 // reads process.env.FRONTEND_PORT at config-eval time. Production never
 // loads .env — see 新架构 §8.
-loadDotEnvIntoProcess();
+// Gracefully skip when .env is absent (CI/CD, fresh clone) instead of
+// throwing — the build still works, just without env-var port overrides.
+try { loadDotEnvIntoProcess(); } catch { /* .env optional */ }
 
 /**
  * Copy `plugins/pty-host.cjs` next to the main bundle. The PTY host is
