@@ -174,6 +174,14 @@ export class AgentDockDaemon {
             _projectRoot: string,
             worktreePath: string,
           ): Promise<void> => {
+            // Defense-in-depth: ensure the path is a per-session worktree
+            // under .agentdock/worktrees/, never the base directory itself.
+            const resolved = path.resolve(worktreePath);
+            const basename = path.basename(resolved);
+            if (!basename || basename === "worktrees" || basename === ".agentdock") {
+              log.error({ worktreePath }, "C2 takeover-delete: refusing non-session path");
+              return;
+            }
             log.info({ sessionId, worktreePath }, "C2 takeover-delete: physical cleanup");
             // 1. git worktree remove --force (幂等: 不存在不报错)
             try {

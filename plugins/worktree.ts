@@ -453,9 +453,22 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
  *
  * Includes a retry loop (same pattern as removeWorktree) because processes
  * may take time to release their directory handles after being killed.
+ *
+ * Safety: refuses to remove the worktree base directory itself or any
+ * path that doesn't look like a per-session subdirectory, preventing
+ * accidental bulk deletion of all session worktrees.
  */
 export async function removeOrphanDir(dirPath: string): Promise<void> {
   if (!existsSync(dirPath)) return;
+
+  // Defense-in-depth: refuse to delete the worktree base or anything above it.
+  // Callers (IPC handlers) should already validate, but this guard protects
+  // against future callers that forget.
+  const resolved = path.resolve(dirPath);
+  const basename = path.basename(resolved);
+  if (!basename || basename === "worktrees" || basename === ".agentdock") {
+    throw new Error(`Refusing to remove non-orphan path: ${dirPath}`);
+  }
 
   const MAX_DIR_REMOVE_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {

@@ -178,7 +178,9 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
           continue;
         }
         const norm = normalizePath(p);
-        if (!norm.startsWith(allowedRoot + "/") && norm !== allowedRoot) {
+        // Only allow subdirectories inside the worktree base — never allow
+        // deleting the base directory itself (would wipe ALL session worktrees).
+        if (!norm.startsWith(allowedRoot + "/")) {
           failed.push({ path: p, error: "Path outside project worktree root" });
           continue;
         }
