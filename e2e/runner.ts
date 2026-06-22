@@ -114,7 +114,8 @@ interface GroupResult {
 function runGroup(
   mode: "isolate" | "reuse",
   specs: string[],
-  config: PipelineConfig
+  config: PipelineConfig,
+  tags: string[]
 ): Promise<GroupResult> {
   return new Promise((resolve) => {
     const startedAt = new Date().toISOString();
@@ -125,6 +126,12 @@ function runGroup(
 
     const args = ["playwright", "test"];
     if (specs.length > 0) args.push(...specs);
+    if (tags.length > 0) {
+      args.push(
+        "--grep",
+        tags.map((t) => (t.startsWith("@") ? t : `@${t}`)).join("|")
+      );
+    }
     args.push(`--workers=${config.pipeline.global.parallel}`);
 
     const child = spawn("npx", args, {
@@ -133,12 +140,10 @@ function runGroup(
       shell: process.platform === "win32",
     });
 
-    let stderr = "";
     child.stdout.on("data", (chunk) => {
       process.stdout.write(chunk);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
       process.stderr.write(chunk);
     });
 
@@ -189,7 +194,7 @@ async function main(): Promise<void> {
     writeRunState(runState);
 
     console.log(`\n▶ Running ${group.mode} group (${group.specs.length} specs)`);
-    const result = await runGroup(group.mode, group.specs, config);
+    const result = await runGroup(group.mode, group.specs, config, cliArgs.tags);
     results.push(result);
 
     const stateIdx = runState.groups.findIndex((g) => g.mode === group.mode);
