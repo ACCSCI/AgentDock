@@ -151,7 +151,19 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
   const mutex = new Mutex();
   const allocator = new FilePortAllocator(baseDir);
   const wal = new DaemonWAL(baseDir);
-  const state = wal.load() ?? new DaemonState();
+  // v1 WAL load: if the file has schemaVersion=2 (v2 state), refuse-overwrite
+  // throws — catch and fall back to fresh DaemonState. This is expected when
+  // a v2 daemon wrote the file and a new instance boots with v1 WAL loader.
+  let state: DaemonState;
+  try {
+    state = wal.load() ?? new DaemonState();
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("refuse-overwrite-v2-state")) {
+      state = new DaemonState();
+    } else {
+      throw err;
+    }
+  }
   // v2 state — loaded from the same daemon-state.json; if missing/empty,
   // DaemonWALV2 returns null and we start fresh. P3 routes will use this;
   // v1 routes keep using ctx.state.

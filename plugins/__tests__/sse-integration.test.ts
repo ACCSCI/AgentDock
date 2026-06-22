@@ -146,6 +146,8 @@ describe("v2 /events — SSE wire format", () => {
         displayName: "sse-test",
       });
       const sid = (c.body as { sessionId: string }).sessionId;
+      // §7.3 — session-created 事件在 /session/activate 成功后推送, 不在 create.
+      await postJson("/session/activate", { sessionId: sid, fencingToken: 1 });
 
       const created = await waitForEvent(col.frames, "session-created");
       expect(created).not.toBeNull();

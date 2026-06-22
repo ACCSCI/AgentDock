@@ -150,7 +150,7 @@ hooks:
     expect(result.async).toBe(true);
   });
 
-  it("A8b: YAML 中 async: true 被正确解析", () => {
+  it("A8b: YAML 中 async: true 强制 required=false (backward-compat)", () => {
     writeConfig(`
 version: "1"
 hooks:
@@ -162,9 +162,11 @@ hooks:
 `);
     const config = loadConfig(tmpDir);
     expect(config.hooks.afterCreateSession).toHaveLength(1);
+    // §4.2 backward-compat: async + required → required is forced to false.
+    // Async hooks run in background; requiring them to succeed is contradictory.
     expect(config.hooks.afterCreateSession[0]).toMatchObject({
       run: "bun install",
-      required: true,
+      required: false,
       timeout: 120000,
       async: true,
     });
