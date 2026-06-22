@@ -80,11 +80,17 @@ export function registerTodos(): void {
 
   ipcMain.handle(
     "todos:cycleStatus",
-    (_event, args: { id: string; currentStatus: string }) => {
-      const { id, currentStatus } = args as { id: string; currentStatus: string };
+    (_event, args: { id: string }) => {
+      const { id } = args as { id: string };
       const db = getDb();
+      const todo = db
+        .select({ status: schema.todos.status })
+        .from(schema.todos)
+        .where(eq(schema.todos.id, id))
+        .get();
+      if (!todo) return;
       db.update(schema.todos)
-        .set({ status: nextStatus(currentStatus), updatedAt: new Date().toISOString() })
+        .set({ status: nextStatus(todo.status ?? "pending"), updatedAt: new Date().toISOString() })
         .where(eq(schema.todos.id, id))
         .run();
     },

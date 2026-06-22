@@ -927,8 +927,8 @@ export function useCreateTodo() {
 export function useCycleStatusTodo() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: TodoStatus }) => {
-      await api().todos.cycleStatus(id, currentStatus);
+    mutationFn: async (id: string) => {
+      await api().todos.cycleStatus(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });

@@ -7,7 +7,6 @@ import {
   useDeleteTodo,
   useUpdateTodo,
   useReorderTodo,
-  type TodoStatus,
 } from "../lib/queries";
 
 interface TodoDropdownProps {
@@ -85,8 +84,8 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
 
   // ── Cycle status (pending → in_progress → done → pending) ──
   const handleCycleStatus = useCallback(
-    (id: string, currentStatus: TodoStatus) => {
-      cycleStatusTodo.mutate({ id, currentStatus });
+    (id: string) => {
+      cycleStatusTodo.mutate(id);
     },
     [cycleStatusTodo],
   );
@@ -274,7 +273,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
             <button
               type="button"
               className={`todo-dropdown-checkbox todo-dropdown-checkbox--${todo.status}`}
-              onClick={() => handleCycleStatus(todo.id, todo.status)}
+              onClick={() => handleCycleStatus(todo.id)}
               title={todo.status === "pending" ? "Click: start" : todo.status === "in_progress" ? "Click: mark done" : "Click: reset"}
               data-testid="todo-toggle-btn"
             >
