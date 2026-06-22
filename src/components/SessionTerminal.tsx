@@ -45,7 +45,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     };
   }, [terminalId, sessionId]);
 
-  // Close context menu on outside click / scroll / Escape
+  // Close context menu on outside click / right-click elsewhere / scroll / Escape
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -53,10 +53,12 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
       if (e.key === "Escape") close();
     };
     window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
     };
@@ -67,7 +69,16 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     e.stopPropagation();
     const entry = terminalCache.get(terminalId);
     const hasSelection = !!(entry && entry.terminal.getSelection());
-    setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection });
+    // Clamp to viewport so the menu never overflows off-screen
+    const menuWidth = 180;
+    const menuHeight = 160;
+    const x = e.clientX + menuWidth > window.innerWidth
+      ? Math.max(0, window.innerWidth - menuWidth - 10)
+      : e.clientX;
+    const y = e.clientY + menuHeight > window.innerHeight
+      ? Math.max(0, window.innerHeight - menuHeight - 10)
+      : e.clientY;
+    setCtxMenu({ x, y, hasSelection });
   }, [terminalId]);
 
   const handleCopy = useCallback(async () => {

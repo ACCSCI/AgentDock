@@ -370,12 +370,12 @@ function createWindow(): BrowserWindow {
 
   // Allow F12 to toggle DevTools in development
   if (devToolsEnabled) {
-    mainWindow.webContents.on("before-input-event", (_event, input) => {
+    mainWindow.webContents.on("before-input-event", (event, input) => {
       if (input.key === "F12" && input.type === "keyDown") {
-        if (mainWindow?.webContents.isDevToolsOpened()) {
-          mainWindow.webContents.closeDevTools();
+        if (event.sender.isDevToolsOpened()) {
+          event.sender.closeDevTools();
         } else {
-          mainWindow?.webContents.openDevTools({ mode: "detach" });
+          event.sender.openDevTools({ mode: "detach" });
         }
       }
     });
