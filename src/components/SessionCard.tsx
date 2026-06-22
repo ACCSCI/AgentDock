@@ -168,13 +168,25 @@ export function SessionCard({
     const handleClick = (e: MouseEvent) => {
       const menuEl = menuRef.current;
       const subEl = submenuRef.current;
-      if (menuEl && !menuEl.contains(e.target as Node) && subEl && !subEl.contains(e.target as Node)) {
+      const clickedInMenu = menuEl?.contains(e.target as Node) ?? false;
+      const clickedInSub = subEl?.contains(e.target as Node) ?? false;
+      if (!clickedInMenu && !clickedInSub) {
+        setMenuPos(null);
+        setSubmenuPos(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
         setMenuPos(null);
         setSubmenuPos(null);
       }
     };
     window.addEventListener("mousedown", handleClick);
-    return () => window.removeEventListener("mousedown", handleClick);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("keydown", handleKey);
+    };
   }, [menuPos]);
 
   // Cancel delete confirmation on click-outside or Escape

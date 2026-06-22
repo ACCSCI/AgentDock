@@ -84,12 +84,21 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     }
   }, [editingId]);
 
-  // Close context menu on outside click
+  // Close context menu on outside click / right-click elsewhere / Escape
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [menu]);
 
   // Close add menu on outside click
