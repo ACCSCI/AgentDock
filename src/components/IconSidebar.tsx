@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { OrphanCleanModal } from "./OrphanCleanModal";
 
 export function IconSidebar() {
   const [orphanModalOpen, setOrphanModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
 
   const openOrphanModal = () => {
@@ -13,6 +15,16 @@ export function IconSidebar() {
     // the latest disk state with an explicit loading indicator.
     queryClient.invalidateQueries({ queryKey: ["orphans"] });
     setOrphanModalOpen(true);
+  };
+
+  const handleCopyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(AGENTDOCK_COMPAT_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Silent: mirrors SessionSidebar's clipboard fallback pattern
+    }
   };
 
   return (
@@ -27,6 +39,15 @@ export function IconSidebar() {
             data-testid="open-orphan-modal"
           >
             🧹
+          </button>
+          <button
+            type="button"
+            className="icon-sidebar-btn"
+            title="复制 AgentDock 兼容提示词"
+            onClick={handleCopyPrompt}
+            data-testid="copy-compat-prompt"
+          >
+            {copied ? "✅" : "📋"}
           </button>
         </div>
         <div className="icon-sidebar-bottom">
