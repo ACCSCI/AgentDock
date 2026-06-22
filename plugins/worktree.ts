@@ -549,3 +549,331 @@ export async function removeOrphanBranch(
     );
   }
 }
+
+// ============================================================================
+// 三向孤儿分类 (Registry / Git / Filesystem)
+// ============================================================================
+
+/**
+ * 扩展的孤儿分类 — 区分真实问题来源, 决定正确的修复手段.
+ *
+ * 来源对应表:
+ *
+ * | Registry | Git Worktree | Filesystem | kind                  | 修复手段                        |
+ * |----------|--------------|------------|-----------------------|---------------------------------|
+ * | ❌       | ✅           | ✅         | orphan-session        | git worktree remove + rm -rf    |
+ * | ❌       | ✅           | ❌         | git-metadata-orphan   | git worktree prune + branch -D  |
+ * | ❌       | ❌           | ✅         | filesystem-orphan     | kill procs + rm -rf             |
+ * | ✅       | ❌           | ❌         | registry-stale        | 不自动删 (UI 提示)              |
+ * | ✅       | ❌           | ✅         | registry-stale-git    | git worktree prune (→ C3)       |
+ *
+ * 与单一扫描器 (scanOrphanWorktrees / scanOrphanBranches) 的关键区别:
+ *   - 旧 scanner 只看文件系统 + git refs 各自孤立的子集, 经常把"分支孤儿"
+ *     (git 元数据残留) 错报成"目录孤儿", 导致 rm -rf 完全跑偏方向.
+ *   - 新分类器同时拿到 Registry / Git Worktree / Filesystem 三个状态, 做
+ *     真三向比对, 派发到正确的清理手段.
+ */
+export type OrphanKind =
+  | "filesystem-orphan"      // 目录在 .agentdock/worktrees/ 但 git/registry 都不认
+  | "git-metadata-orphan"    // git worktree + branch 还有, 但目录已删
+  | "orphan-session"         // 目录+git 注册都在, registry 没有 (会话未注册)
+  | "branch-orphan"          // 纯分支残留: branch 在但既无 worktree 也无 registry
+  | "registry-stale"         // registry 有但 worktree 没了 (UI 处理, 不静默删)
+  | "registry-stale-git";    // registry 有, git 注册没了, 目录还在 (git prune → C3)
+
+export interface OrphanItem {
+  sessionId: string;
+  worktreePath: string;        // git-metadata-orphan / registry-stale 可为空字符串
+  branch: string | null;       // agentdock/* 分支名 (如有)
+  kind: OrphanKind;
+  /** 原始 git worktree 登记 (含 head commit) — 仅 orphan-session / registry-stale-git 有 */
+  gitWorktree?: { path: string; head: string };
+}
+
+export interface ClassifiedOrphans {
+  filesystemOrphans: OrphanItem[];   // → killProcessesUnderPath + rm
+  gitMetadataOrphans: OrphanItem[];  // → git worktree prune + git branch -D
+  orphanSessions: OrphanItem[];      // → git worktree remove --force + rm
+  branchOrphans: OrphanItem[];       // → git branch -D
+  registryStale: OrphanItem[];       // → 不自动删, 仅上报
+}
+
+export interface CleanupResult {
+  deleted: string[];
+  failed: Array<{ path?: string; branch?: string; kind: OrphanKind; error: string }>;
+}
+
+/**
+ * 三向分类: 比较 Registry (passed in) / Git Worktree / Filesystem, 输出
+ * 已分类的孤儿列表.
+ *
+ * @param projectPath      git repo 根目录
+ * @param knownSessionIds  registry 中已知的 session ID 集合 (DB sessions.sessionId)
+ * @param knownBranches    registry + 当前注册 worktree 的 branch 集合
+ *                         (调用方构建, 已在 worktree-shell.ts:102-124 实现)
+ */
+export function classifyOrphans(
+  projectPath: string,
+  knownSessionIds: Set<string>,
+  knownBranches: Set<string>,
+): ClassifiedOrphans {
+  // 1. Filesystem 状态: 读 .agentdock/worktrees/ 目录
+  const fsDirs = new Map<string, string>(); // sessionId -> absolutePath
+  const baseDir = getWorktreeBase(projectPath);
+  try {
+    for (const entry of readdirSync(baseDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const wtPath = path.join(baseDir, entry.name);
+      // 只算真目录 (非 symlink 悬挂)
+      try {
+        fsDirs.set(entry.name, wtPath);
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // 目录不存在 → 项目没建过 session, 无 orphan
+  }
+
+  // 2. Git Worktree 状态: git worktree list --porcelain
+  const gitWorktrees = new Map<string, { path: string; head: string }>(); // sessionId (or branch) -> entry
+  try {
+    for (const wt of listWorktrees(projectPath)) {
+      if (!wt.branch.startsWith("agentdock/")) continue;
+      const sessionId = wt.branch.slice("agentdock/".length);
+      gitWorktrees.set(sessionId, { path: wt.path, head: wt.head });
+    }
+  } catch {
+    // listWorktrees throws if not a git repo; nothing to compare
+  }
+
+  // 3. Git Branch 状态: for-each-ref refs/heads/agentdock/
+  const gitBranches = new Set<string>();
+  try {
+    const raw = execFileSync(
+      "git",
+      ["for-each-ref", "--format=%(refname:short)", "refs/heads/agentdock/"],
+      { cwd: projectPath, encoding: "utf-8", stdio: "pipe" },
+    );
+    for (const line of raw.split("\n")) {
+      const b = line.trim();
+      if (b) gitBranches.add(b);
+    }
+  } catch {
+    // no refs/heads/agentdock/ — OK
+  }
+
+  const result: ClassifiedOrphans = {
+    filesystemOrphans: [],
+    gitMetadataOrphans: [],
+    orphanSessions: [],
+    branchOrphans: [],
+    registryStale: [],
+  };
+
+  // 4. 三向比对
+  const allSessionIds = new Set<string>([
+    ...fsDirs.keys(),
+    ...gitWorktrees.keys(),
+    ...knownSessionIds,
+  ]);
+
+  for (const sessionId of allSessionIds) {
+    const inFs = fsDirs.has(sessionId);
+    const inGit = gitWorktrees.has(sessionId);
+    const inReg = knownSessionIds.has(sessionId);
+    const branch = `agentdock/${sessionId}`;
+    const inBranch = gitBranches.has(branch);
+
+    if (!inReg && !inGit && !inBranch && !inFs) continue; // 什么都没有
+
+    if (inReg && !inGit && !inFs) {
+      // ✅❌❌ — registry stale: 不自动删
+      result.registryStale.push({
+        sessionId,
+        worktreePath: "",
+        branch: null,
+        kind: "registry-stale",
+      });
+      continue;
+    }
+
+    if (inReg && !inGit && inFs) {
+      // ✅❌✅ — registry stale + git 登记丢失: prune → C3
+      // 实际上目录还在, 由 git prune 后转 C3; 但不在这次清理范围
+      result.registryStale.push({
+        sessionId,
+        worktreePath: fsDirs.get(sessionId)!,
+        branch: null,
+        kind: "registry-stale-git",
+      });
+      continue;
+    }
+
+    if (!inReg && inGit && inFs) {
+      // ❌✅✅ — orphan session: 完整 worktree 但 registry 没记录
+      result.orphanSessions.push({
+        sessionId,
+        worktreePath: gitWorktrees.get(sessionId)!.path,
+        branch,
+        kind: "orphan-session",
+        gitWorktree: gitWorktrees.get(sessionId),
+      });
+      continue;
+    }
+
+    if (!inReg && inGit && !inFs) {
+      // ❌✅❌ — git metadata orphan: 目录没了, git/branch 还在
+      result.gitMetadataOrphans.push({
+        sessionId,
+        worktreePath: "",
+        branch,
+        kind: "git-metadata-orphan",
+      });
+      continue;
+    }
+
+    if (!inReg && !inGit && inFs) {
+      // ❌❌✅ — filesystem orphan: 真物理孤儿
+      result.filesystemOrphans.push({
+        sessionId,
+        worktreePath: fsDirs.get(sessionId)!,
+        branch: null,
+        kind: "filesystem-orphan",
+      });
+      continue;
+    }
+
+    // ❌❌❌branch — 纯分支残留: branch 在但既无 worktree 也无 session
+    if (!inReg && !inGit && !inFs && inBranch) {
+      result.branchOrphans.push({
+        sessionId,
+        worktreePath: "",
+        branch,
+        kind: "branch-orphan",
+      });
+      continue;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 派发清理 — 按 kind 分桶并行执行, 每个失败独立报告.
+ *
+ * 并行策略:
+ *   - filesystemOrphans / orphanSessions / branchOrphans: 互相独立, 全并行
+ *   - gitMetadataOrphans: 先并行 rm + git branch -D, 最后统一一次 git worktree prune
+ *     (避免 N 次串行 prune, git 内部有锁)
+ *   - registryStale: 不动 (UI 处理)
+ */
+export async function dispatchOrphanCleanup(
+  projectPath: string,
+  classified: ClassifiedOrphans,
+): Promise<CleanupResult> {
+  const deleted: string[] = [];
+  const failed: Array<{ path?: string; branch?: string; kind: OrphanKind; error: string }> = [];
+
+  // ---- Filesystem orphans: killProcessesUnderPath + rm ----
+  const fsTasks = classified.filesystemOrphans.map(async (item) => {
+    try {
+      await removeOrphanDir(item.worktreePath);
+      return { ok: true as const, item };
+    } catch (err) {
+      return { ok: false as const, item, err };
+    }
+  });
+
+  // ---- Orphan sessions: git worktree remove --force + fs.rm fallback ----
+  const sessionTasks = classified.orphanSessions.map(async (item) => {
+    try {
+      // 先尝试 git 清理
+      try {
+        await execFileAsync("git", ["worktree", "remove", "--force", item.worktreePath], {
+          cwd: projectPath,
+          encoding: "utf-8",
+          timeout: 15_000,
+        });
+      } catch {
+        // git remove 失败 (Windows 上常见) — 兜底 fs.rm
+      }
+      // 不管 git 是否成功, 都强制 fs 删
+      await removeOrphanDir(item.worktreePath);
+      return { ok: true as const, item };
+    } catch (err) {
+      return { ok: false as const, item, err };
+    }
+  });
+
+  // ---- Git metadata orphans: branch -D + 统一 prune ----
+  const gitMetaTasks = classified.gitMetadataOrphans.map(async (item) => {
+    if (!item.branch) return { ok: true as const, item };
+    try {
+      await removeOrphanBranch(projectPath, item.branch);
+      return { ok: true as const, item };
+    } catch (err) {
+      return { ok: false as const, item, err };
+    }
+  });
+
+  // ---- Branch orphans: git branch -D ----
+  const branchTasks = classified.branchOrphans.map(async (item) => {
+    if (!item.branch) return { ok: true as const, item };
+    try {
+      await removeOrphanBranch(projectPath, item.branch);
+      return { ok: true as const, item };
+    } catch (err) {
+      return { ok: false as const, item, err };
+    }
+  });
+
+  // 全部并行 (git 操作互不依赖)
+  const allResults = await Promise.all([
+    ...fsTasks,
+    ...sessionTasks,
+    ...gitMetaTasks,
+    ...branchTasks,
+  ]);
+
+  for (const r of allResults) {
+    if (r.ok) {
+      if (r.item.worktreePath) deleted.push(r.item.worktreePath);
+      else if (r.item.branch) deleted.push(r.item.branch);
+    } else {
+      const errorMsg = r.err instanceof Error ? r.err.message : String(r.err);
+      failed.push({
+        path: r.item.worktreePath || undefined,
+        branch: r.item.branch || undefined,
+        kind: r.item.kind,
+        error: errorMsg,
+      });
+    }
+  }
+
+  // ---- 最后统一一次 git worktree prune (清残余 git 登记) ----
+  // 单次调用, 不在每个 git-metadata-orphan 里反复调 (git 内部锁)
+  if (classified.gitMetadataOrphans.length > 0 || classified.orphanSessions.length > 0) {
+    try {
+      await execFileAsync("git", ["worktree", "prune"], {
+        cwd: projectPath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // prune 失败不致命 — 但要显式上报
+      log.warn({ err: msg }, "git worktree prune failed after orphan cleanup");
+    }
+  }
+
+  // registryStale 不动, 但 log 一下让 daemon 知道有 stale session
+  for (const item of classified.registryStale) {
+    log.info(
+      { sessionId: item.sessionId, kind: item.kind },
+      "registry-stale orphan (not auto-deleted, surfaced to UI)",
+    );
+  }
+
+  return { deleted, failed };
+}

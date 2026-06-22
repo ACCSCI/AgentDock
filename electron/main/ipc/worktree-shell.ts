@@ -18,6 +18,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import {
+  classifyOrphans,
+  dispatchOrphanCleanup,
   getWorktreeBase,
   listWorktrees,
   removeOrphanBranch,
@@ -165,55 +167,81 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
 
       const projectPath = resolveProjectPath(projectId);
 
-      // Restrict deletions to the project's own .agentdock/worktrees/
-      // subtree — never let a caller hand us, say, "C:/Windows".
-      const allowedRoot = normalizePath(getWorktreeBase(projectPath));
+      // Build known sets for three-way classification
+      const knownBranches = new Set<string>();
+      const knownSessionIds = new Set<string>();
+      try {
+        for (const wt of listWorktrees(projectPath)) {
+          if (wt.branch.startsWith("agentdock/")) knownBranches.add(wt.branch);
+        }
+      } catch { /* not a git repo */ }
+      const db = getActiveDb();
+      if (db) {
+        try {
+          const rows = db
+            .select({ branch: schema.sessions.branch })
+            .from(schema.sessions)
+            .all();
+          for (const r of rows) {
+            if (r.branch) knownBranches.add(r.branch);
+          }
+          const idRows = db
+            .select({ id: schema.sessions.id })
+            .from(schema.sessions)
+            .all();
+          for (const r of idRows) {
+            knownSessionIds.add(r.id);
+          }
+        } catch { /* stale schema */ }
+      }
 
-      const deleted: string[] = [];
-      const failed: Array<{ path?: string; branch?: string; error: string }> = [];
+      const classified = classifyOrphans(projectPath, knownSessionIds, knownBranches);
+
+      // Map paths → sessionIds for classification-aware lookup
+      const selectedSessionIds = new Set<string>();
+      const selectedPathSet = new Set<string>();
+      const baseDir = normalizePath(getWorktreeBase(projectPath));
 
       for (const p of paths) {
-        if (typeof p !== "string" || !p) {
-          failed.push({ path: String(p), error: "Invalid path" });
-          continue;
-        }
+        if (typeof p !== "string" || !p) continue;
         const norm = normalizePath(p);
-        // Only allow subdirectories inside the worktree base — never allow
-        // deleting the base directory itself (would wipe ALL session worktrees).
-        if (!norm.startsWith(allowedRoot + "/")) {
-          failed.push({ path: p, error: "Path outside project worktree root" });
-          continue;
-        }
-        try {
-          await removeOrphanDir(p);
-          deleted.push(p);
-        } catch (err) {
-          log.error({ err, path: p }, "failed to remove orphan dir");
-          failed.push({
-            path: p,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        if (!norm.startsWith(baseDir + "/")) continue;
+        selectedPathSet.add(p);
+        // extract sessionId from path: .../worktrees/<sessionId>
+        const parts = p.replace(/\\/g, "/").split("/");
+        const last = parts[parts.length - 1];
+        if (last) selectedSessionIds.add(last);
       }
 
+      const selectedBranchSet = new Set<string>();
       for (const b of branches) {
-        if (typeof b !== "string" || !b) {
-          failed.push({ branch: String(b), error: "Invalid branch" });
-          continue;
-        }
-        try {
-          await removeOrphanBranch(projectPath, b);
-          deleted.push(b);
-        } catch (err) {
-          log.error({ err, branch: b }, "failed to remove orphan branch");
-          failed.push({
-            branch: b,
-            error: err instanceof Error ? err.message : String(err),
-          });
+        if (typeof b !== "string" || !b) continue;
+        selectedBranchSet.add(b);
+        // also extract sessionId from branch name
+        if (b.startsWith("agentdock/")) {
+          selectedSessionIds.add(b.slice("agentdock/".length));
         }
       }
 
-      return { deleted, failed };
+      // Filter classified orphans to only user-selected items
+      const filtered = {
+        filesystemOrphans: classified.filesystemOrphans.filter(
+          (i) => selectedPathSet.has(i.worktreePath) || selectedSessionIds.has(i.sessionId),
+        ),
+        gitMetadataOrphans: classified.gitMetadataOrphans.filter(
+          (i) => (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
+        ),
+        orphanSessions: classified.orphanSessions.filter(
+          (i) => selectedPathSet.has(i.worktreePath) || selectedSessionIds.has(i.sessionId),
+        ),
+        branchOrphans: classified.branchOrphans.filter(
+          (i) => (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
+        ),
+        registryStale: [], // UI 选择不应包含 registryStale
+      };
+
+      // Dispatch parallel cleanup — only user-selected items
+      return dispatchOrphanCleanup(projectPath, filtered);
     },
   );
 
