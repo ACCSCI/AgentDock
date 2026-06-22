@@ -179,42 +179,10 @@ export function createHookRegistry(): HookRegistry {
 }
 
 /**
- * Global concurrency limit for hook child processes.
- * Prevents resource contention when many sessions run hooks simultaneously
- * (e.g. concurrent `bun install` competing for bun's global cache lock).
- */
-const MAX_CONCURRENT_HOOKS = 3;
-let _hookSlots = MAX_CONCURRENT_HOOKS;
-const _hookWaiters: (() => void)[] = [];
-
-function acquireHookSlot(): Promise<void> {
-  if (_hookSlots > 0) {
-    _hookSlots--;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => { _hookWaiters.push(resolve); });
-}
-
-function releaseHookSlot(): void {
-  const next = _hookWaiters.shift();
-  if (next) next();
-  else _hookSlots++;
-}
-
-/**
  * Create a HookEngine instance.
  */
 export function createHookEngine(registry: HookRegistry): HookEngine {
   async function executeOne(hook: HookDefinition, context: HookContext): Promise<HookResult> {
-    await acquireHookSlot();
-    try {
-      return await executeOneInner(hook, context);
-    } finally {
-      releaseHookSlot();
-    }
-  }
-
-  function executeOneInner(hook: HookDefinition, context: HookContext): Promise<HookResult> {
     const cwd = hook.cwd === "project" ? context.projectPath : context.worktreePath;
     const start = Date.now();
 
