@@ -107,7 +107,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       clearTimeout(addLeaveTimer.current);
       addLeaveTimer.current = null;
     }
-    addHoverTimer.current = setTimeout(() => setShowAddMenu(true), 150);
+    addHoverTimer.current = setTimeout(() => setShowAddMenu(true), 250);
   }, []);
 
   const handleAddLeave = useCallback(() => {
