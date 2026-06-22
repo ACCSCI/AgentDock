@@ -362,6 +362,19 @@ function createWindow(): BrowserWindow {
     });
   }
 
+  // Allow F12 to toggle DevTools in dev mode
+  if (wantDevTools || process.env.NODE_ENV !== "production") {
+    mainWindow.webContents.on("before-input-event", (_event, input) => {
+      if (input.key === "F12" && input.type === "keyDown") {
+        if (mainWindow?.webContents.isDevToolsOpened()) {
+          mainWindow.webContents.closeDevTools();
+        } else {
+          mainWindow?.webContents.openDevTools({ mode: "detach" });
+        }
+      }
+    });
+  }
+
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
   });

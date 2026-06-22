@@ -659,6 +659,15 @@ body {
   background: var(--color-bg-secondary);
 }
 
+.context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.context-menu-item:disabled:hover {
+  background: none;
+}
+
 .context-menu-danger {
   color: #d43853;
 }
