@@ -105,6 +105,20 @@ export const IPC_CHANNELS = {
   "sessions:v2:reassign": "sessions:v2:reassign",
   "sessions:v2:status": "sessions:v2:status",
   "sessions:v2:takeover": "sessions:v2:takeover",
+
+  // window (custom titlebar controls — non-macOS)
+  "window:minimize": "window:minimize",
+  "window:maximize": "window:maximize",
+  "window:close": "window:close",
+  "window:isMaximized": "window:isMaximized",
+  "window:platform": "window:platform",
+
+  // todos (per-project todo list in custom titlebar)
+  "todos:list": "todos:list",
+  "todos:create": "todos:create",
+  "todos:toggle": "todos:toggle",
+  "todos:update": "todos:update",
+  "todos:delete": "todos:delete",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;

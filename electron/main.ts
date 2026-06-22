@@ -356,11 +356,14 @@ function createWindow(): BrowserWindow {
   // electron-vite dev/preview and true only in a built/distributed app.
   const devToolsEnabled = wantDevTools || !app.isPackaged;
 
+  const isMac = process.platform === "darwin";
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     title: "AgentDock",
     show: false, // Show after ready-to-show to avoid white flash
+    frame: isMac, // macOS uses native frame (traffic lights); Windows/Linux use custom titlebar
+    titleBarStyle: isMac ? "hiddenInset" : undefined, // macOS: hide title text, keep traffic lights
     webPreferences: {
       // electron-vite emits main → out/main/main.js, preload → out/preload/preload.mjs.
       // Walk up one dir to find the sibling preload bundle.
@@ -535,6 +538,34 @@ async function bootstrap() {
   }
 
   registerAllIpc(ipcDeps);
+
+  // Window controls for custom titlebar (non-macOS frameless window).
+  ipcMain.handle("window:minimize", () => {
+    mainWindow?.minimize();
+  });
+  ipcMain.handle("window:maximize", () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow?.maximize();
+    }
+  });
+  ipcMain.handle("window:close", () => {
+    mainWindow?.close();
+  });
+  ipcMain.handle("window:isMaximized", () => {
+    return mainWindow?.isMaximized() ?? false;
+  });
+  ipcMain.handle("window:platform", () => {
+    return process.platform;
+  });
+  // Notify renderer when maximize state changes (for toggle button icon).
+  mainWindow?.on("maximize", () => {
+    mainWindow?.webContents.send("window:maximize-change", true);
+  });
+  mainWindow?.on("unmaximize", () => {
+    mainWindow?.webContents.send("window:maximize-change", false);
+  });
 
   // E2E reset handler — exposes __e2eResetMainState() on globalThis so
   // Playwright tests can reset main process state between tests in REUSE
