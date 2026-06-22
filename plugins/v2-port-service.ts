@@ -5,6 +5,9 @@
  * that drives the daemon's v2 three-table API. Used by session-lifecycle.ts
  * via dependency injection — the orchestrator stays daemon-agnostic.
  *
+ * SessionId is unified: the client generates it, the daemon accepts it.
+ * No appToV2Ids mapping — the same sessionId is used everywhere.
+ *
  * Lifecycle in v2:
  *   /session/create → lease=15s, status=creating, fencingToken=1
  *   /claim × N      → ports allocated one by one
@@ -12,12 +15,12 @@
  *   /session/delete  → ports released, status=deleting, lease=15s
  *   /session/purge   → 3-table entries dropped
  *   /session/heartbeat → lease refresh (creating/deleting only)
+ *   /session/reclaim → unconditional ownership takeover
  *
  * State owned by this module (closure-scoped):
- *   appToV2Ids: Map<appSessionId, v2SessionId>
- *   tokens:     Map<appSessionId, fencingToken>
- *   statuses:   Map<appSessionId, "creating"|"active"|"deleting">
- *   renewals:   Map<appSessionId, lease-renewal-tick state>
+ *   tokens:     Map<sessionId, fencingToken>
+ *   statuses:   Map<sessionId, "creating"|"active"|"deleting">
+ *   renewals:   Map<sessionId, lease-renewal-tick state>
  *
  * The lease-renewal timer (LEASERENEWINTERVAL_MS = 5_000) keeps `creating`
  * and `deleting` sessions warm while hooks run. Active sessions are never
@@ -133,17 +136,27 @@ export interface V2PortServiceHandle {
   /** v2-only: phase 2 of delete — drop 3-table entries. */
   completeDeletion(appSessionId: string): Promise<void>;
   /**
-   * §5.3 — 列出本地已知的所有 active/creating sessions (app→v2 映射).
+   * §5.3 — 列出本地已知的所有 active/creating sessions.
    * 用于断线重连时对每个 session 主动 /claim 重注册, 走 daemon
    * RECOVERING 闸门重建 registry. 纯只读快照, 不触发任何 daemon 调用.
    */
   listKnownSessions(): Array<{
-    appSessionId: string;
-    v2SessionId: string;
+    sessionId: string;
     fencingToken: number;
     status: "creating" | "active" | "deleting";
     portKeys: string[];
   }>;
+  /**
+   * Unconditionally reclaim a session on the daemon: if it already exists,
+   * swap owner; if not, create it. Used by silentTakeover for orphaned
+   * worktrees on disk.
+   */
+  claimOrReuse(params: {
+    sessionId: string;
+    projectPath: string;
+    portKeys?: string[];
+    displayName?: string;
+  }): Promise<SessionPorts>;
   /** Stop the lease timer + abort in-flight renewals. Call on app quit. */
   dispose(): void;
 }
@@ -172,7 +185,6 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
   // Internal state — closure-scoped, not module-global, so multiple Electron
   // windows / tests can have independent services.
-  const appToV2Ids = new Map<string, string>();
   const tokens = new Map<string, number>();
   const statuses = new Map<string, Phase>();
   const renewals = new Map<string, RenewalEntry>();
@@ -210,9 +222,11 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
   async function getDebugState(): Promise<{
     v2Owners?: Record<string, { fencingToken: number }>;
+    v2Ports?: Record<number, { port: number; sessionId: string; name: string }>;
   } | null> {
     return (await getJson("/debug/state")) as {
       v2Owners?: Record<string, { fencingToken: number }>;
+      v2Ports?: Record<number, { port: number; sessionId: string; name: string }>;
     } | null;
   }
 
@@ -290,7 +304,6 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
   }
 
   function clearAll(appSid: string): void {
-    appToV2Ids.delete(appSid);
     tokens.delete(appSid);
     statuses.delete(appSid);
     sessionPortKeys.delete(appSid);
@@ -313,8 +326,9 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       // defensive default that mirrors the schema's `displayName?` field.
       const effectiveDisplayName = displayName ?? sessionId;
 
-      // 1. Create — daemon generates its own sessionId (UUID), returns fencingToken=1.
+      // 1. Create — client provides sessionId, daemon accepts it. Returns fencingToken=1.
       const create = await postJson("/session/create", {
+        sessionId,
         clientId: deps.clientId,
         pid: deps.pid,
         projectRoot,
@@ -327,12 +341,11 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         sessionId: string;
         fencingToken: number;
       };
-      appToV2Ids.set(sessionId, createBody.sessionId);
       tokens.set(sessionId, createBody.fencingToken);
       statuses.set(sessionId, "creating");
       startLeaseRenewal(
         sessionId,
-        createBody.sessionId,
+        sessionId,
         createBody.fencingToken,
         "creating",
       );
@@ -345,8 +358,8 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         const ports: SessionPorts = {};
         for (const name of keys) {
           const claim = await postJson("/claim", {
-            sessionId: createBody.sessionId,
-            fencingToken: createBody.fencingToken,
+            sessionId,
+            fencingToken: tokens.get(sessionId)!,
             name,
           });
           if (!claim.ok) {
@@ -360,9 +373,8 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
           if (claimBody.picked) {
             // Daemon moved us — refresh token.
             const state = await getDebugState();
-            const owner = state?.v2Owners?.[createBody.sessionId];
+            const owner = state?.v2Owners?.[sessionId];
             if (owner) {
-              createBody.fencingToken = owner.fencingToken;
               tokens.set(sessionId, owner.fencingToken);
             }
           }
@@ -370,7 +382,7 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
         // 3. Activate — commits the session to active.
         const activate = await postJson("/session/activate", {
-          sessionId: createBody.sessionId,
+          sessionId,
           fencingToken: tokens.get(sessionId)!,
         });
         if (!activate.ok) {
@@ -381,15 +393,14 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         return ports;
       } catch (err) {
         // Best-effort rollback so the daemon doesn't leak a `creating` row.
-        const sid = appToV2Ids.get(sessionId);
         const token = tokens.get(sessionId);
-        if (sid && token !== undefined) {
+        if (token !== undefined) {
           await postJson("/session/delete", {
-            sessionId: sid,
+            sessionId,
             fencingToken: token,
           }).catch(() => {});
           await postJson("/session/purge", {
-            sessionId: sid,
+            sessionId,
             fencingToken: token,
           }).catch(() => {});
         }
@@ -400,15 +411,14 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
 
     async releaseSession(sessionId: string): Promise<void> {
       if (disposed) return;
-      const v2Sid = appToV2Ids.get(sessionId);
       const token = tokens.get(sessionId);
-      if (!v2Sid || token === undefined) {
+      if (token === undefined) {
         // Already gone or never owned — best-effort no-op.
         return;
       }
       // Phase 1: /session/delete (releases ports, status=deleting).
       const res = await postJson("/session/delete", {
-        sessionId: v2Sid,
+        sessionId,
         fencingToken: token,
       });
       // 404 is fine — daemon may have been restarted and lost state.
@@ -417,18 +427,17 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         // to clean up the worktree.
       }
       statuses.set(sessionId, "deleting");
-      startLeaseRenewal(sessionId, v2Sid, token, "deleting");
+      startLeaseRenewal(sessionId, sessionId, token, "deleting");
       // Phase 2 (/session/purge) is deferred to completeDeletion() which
       // the orchestrator's IPC handler calls after the worktree is gone.
     },
 
     async completeDeletion(sessionId: string): Promise<void> {
-      const v2Sid = appToV2Ids.get(sessionId);
       const token = tokens.get(sessionId);
-      if (!v2Sid || token === undefined) return;
+      if (token === undefined) return;
       try {
         await postJson("/session/purge", {
-          sessionId: v2Sid,
+          sessionId,
           fencingToken: token,
         });
       } catch {
@@ -443,13 +452,12 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
     getToken: (sid) => tokens.get(sid) ?? null,
     getStatus: (sid) => statuses.get(sid) ?? null,
     async reassign(appSessionId: string): Promise<SessionPorts> {
-      const v2Sid = appToV2Ids.get(appSessionId);
       const token = tokens.get(appSessionId);
-      if (!v2Sid || token === undefined) {
+      if (token === undefined) {
         throw new Error(`v2 session not found: ${appSessionId}`);
       }
       const res = await postJson("/reassign", {
-        sessionId: v2Sid,
+        sessionId: appSessionId,
         fencingToken: token,
       });
       if (!res.ok) {
@@ -459,32 +467,103 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       return body.ports;
     },
     completeDeletion: service.completeDeletion!,
+    async claimOrReuse(params: {
+      sessionId: string;
+      projectPath: string;
+      portKeys?: string[];
+      displayName?: string;
+    }): Promise<SessionPorts> {
+      const { sessionId, projectPath, portKeys, displayName } = params;
+      // 1. Unconditionally reclaim — daemon has it → swap owner; doesn't → create.
+      const reclaim = await postJson("/session/reclaim", {
+        sessionId,
+        clientId: deps.clientId,
+        pid: deps.pid,
+        projectRoot: projectPath,
+        displayName: displayName ?? sessionId,
+      });
+      if (!reclaim.ok) {
+        throw new Error(`v2 /session/reclaim failed: ${reclaim.status}`);
+      }
+      const reclaimBody = (await reclaim.json()) as {
+        fencingToken: number;
+        created: boolean;
+      };
+      tokens.set(sessionId, reclaimBody.fencingToken);
+      statuses.set(sessionId, "active");
+
+      // 2. If daemon just created this session, claim ports + activate.
+      if (reclaimBody.created) {
+        const keys = portKeys ?? PORT_KEYS_DEFAULT;
+        sessionPortKeys.set(sessionId, [...keys]);
+        const ports: SessionPorts = {};
+        let token = reclaimBody.fencingToken;
+        for (const name of keys) {
+          const claim = await postJson("/claim", {
+            sessionId,
+            fencingToken: token,
+            name,
+          });
+          if (!claim.ok) {
+            throw new Error(`v2 /claim ${name} failed: ${claim.status}`);
+          }
+          const claimBody = (await claim.json()) as {
+            port: number;
+            picked: boolean;
+          };
+          ports[name] = claimBody.port;
+          if (claimBody.picked) {
+            const state = await getDebugState();
+            const owner = state?.v2Owners?.[sessionId];
+            if (owner) {
+              token = owner.fencingToken;
+              tokens.set(sessionId, owner.fencingToken);
+            }
+          }
+        }
+        // Activate
+        const activate = await postJson("/session/activate", {
+          sessionId,
+          fencingToken: tokens.get(sessionId)!,
+        });
+        if (!activate.ok) {
+          throw new Error(`v2 /session/activate failed: ${activate.status}`);
+        }
+        return ports;
+      }
+
+      // 3. Daemon already had this session (active, ports already claimed).
+      //    Return daemon's current port state via /debug/state.
+      const state = await getDebugState();
+      const sessionPorts = state?.v2Ports
+        ? Object.values(state.v2Ports)
+            .filter((p) => p.sessionId === sessionId)
+            .reduce((acc, p) => ({ ...acc, [p.name]: p.port }), {} as SessionPorts)
+        : {};
+      return sessionPorts;
+    },
     // §5.3 — 列出本地已知的所有 active/creating sessions, 给断线重连
     // 触发器用. 只读快照, 不调任何 daemon.
     listKnownSessions(): Array<{
-      appSessionId: string;
-      v2SessionId: string;
+      sessionId: string;
       fencingToken: number;
       status: "creating" | "active" | "deleting";
       portKeys: string[];
     }> {
       const out: Array<{
-        appSessionId: string;
-        v2SessionId: string;
+        sessionId: string;
         fencingToken: number;
         status: "creating" | "active" | "deleting";
         portKeys: string[];
       }> = [];
-      for (const [appSid, v2Sid] of appToV2Ids.entries()) {
-        const token = tokens.get(appSid);
-        const status = statuses.get(appSid);
-        const keys = sessionPortKeys.get(appSid) ?? [...PORT_KEYS_DEFAULT];
-        if (token === undefined || !status) continue;
+      for (const [sid, status] of statuses.entries()) {
+        const token = tokens.get(sid);
+        const keys = sessionPortKeys.get(sid) ?? [...PORT_KEYS_DEFAULT];
+        if (token === undefined) continue;
         // 过滤 deleting — 已在 phase 1, 不需要重 claim
         if (status === "deleting") continue;
         out.push({
-          appSessionId: appSid,
-          v2SessionId: v2Sid,
+          sessionId: sid,
           fencingToken: token,
           status,
           portKeys: keys,

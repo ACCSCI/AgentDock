@@ -17,7 +17,8 @@
 import { eq, asc } from "drizzle-orm";
 import { ipcMain } from "electron";
 import { nanoid } from "nanoid";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
 import {
@@ -33,6 +34,7 @@ import {
 import { writePortsToEnv } from "../../../plugins/port-write-env.js";
 import { log } from "../../../plugins/logger.js";
 import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
+import { PORT_KEYS_DEFAULT } from "../../../plugins/config.js";
 
 export interface DbContext {
   getProjectPath: () => string | null;
@@ -76,15 +78,28 @@ function getDb(ctx: DbContext) {
 }
 
 /**
+ * §4.3.1 — Check if a worktree directory is "complete" (exists, has .git, non-empty).
+ * Safe against EACCES/ENOTDIR by catching sync FS errors.
+ */
+function isDirectoryComplete(dirPath: string): boolean {
+  try {
+    return existsSync(dirPath)
+      && existsSync(join(dirPath, ".git"))
+      && readdirSync(dirPath).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch all v2 daemon sessions via /sync. Returns a map keyed by
- * worktreePath (so callers can match against DB rows, since v2's
- * sessionId is a daemon-assigned UUID, not the Electron short ID).
+ * worktreePath (so callers can match against DB rows).
  */
 async function fetchV2Sessions(
   daemonPort: number,
   clientId: string,
-): Promise<Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>> {
-  const out = new Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>();
+): Promise<Map<string, { sessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>> {
+  const out = new Map<string, { sessionId: string; projectRoot: string; ports: Record<string, number>; status: string }>();
   if (daemonPort <= 0) return out;
   try {
     const res = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
@@ -103,8 +118,12 @@ async function fetchV2Sessions(
       }>;
     };
     for (const s of body?.sessions ?? []) {
-      out.set(s.projectRoot, {
-        v2SessionId: s.sessionId,
+      // §4.3.1: 用 worktreePath 做 key（不是 projectRoot），
+      // 因为 auto-insert 循环用 wt.worktreePath 做 lookup。
+      // worktreePath = <projectRoot>/.agentdock/worktrees/<sessionId>
+      const worktreePath = join(s.projectRoot, ".agentdock", "worktrees", s.sessionId);
+      out.set(worktreePath, {
+        sessionId: s.sessionId,
         projectRoot: s.projectRoot,
         ports: s.ports,
         status: s.status,
@@ -124,13 +143,86 @@ async function fetchV2Sessions(
  */
 function buildWorktreePorts(
   _v2: V2PortServiceHandle | null,
-  v2Snapshot: Map<string, { v2SessionId: string; projectRoot: string; ports: Record<string, number> }>,
+  v2Snapshot: Map<string, { sessionId: string; projectRoot: string; ports: Record<string, number> }>,
 ): Map<string, Record<string, number>> {
   const out = new Map<string, Record<string, number>>();
-  for (const [, ds] of v2Snapshot) {
-    out.set(ds.projectRoot, ds.ports);
+  // v2Snapshot 的 key 已经是 worktreePath（由 fetchV2Sessions 设置），
+  // 直接用 key 做映射，与 syncProjectPortsToDb 的 row.worktreePath lookup 对齐。
+  for (const [worktreePath, ds] of v2Snapshot) {
+    out.set(worktreePath, ds.ports);
   }
   return out;
+}
+
+/**
+ * §4.3.1 — 静默 takeover：无主但磁盘完整的 worktree，自动 claim 成自己的。
+ *
+ * 流程：
+ *   1. 读 worktree/.env → 拿到 preferredPort
+ *   2. v2 service allocateSession → daemon 创建新 session + 分配端口
+ *   3. 重命名 git 分支 agentdock/<oldId> → agentdock/<newId>
+ *   4. 更新本地 DB（删旧行，插新行）
+ *   5. 写 .env（用 claim 实际返回的端口）
+ *
+ * 失败不影响 syncProject 继续执行——fallback 到标 orphan。
+ */
+async function silentTakeover(
+  v2: V2PortServiceHandle,
+  wt: { sessionId: string; worktreePath: string; branch: string },
+  project: { id: string; path: string },
+  db: ReturnType<typeof ensureActiveDb>,
+): Promise<{ ports: Record<string, number> }> {
+  const sessionId = wt.sessionId;
+  const worktreePath = wt.worktreePath;
+
+  // 1. 读 .env 获取 preferredPort（端口变量名 → 端口号）
+  let preferredPorts: Record<string, number> = {};
+  try {
+    const envPath = join(worktreePath, ".env");
+    if (existsSync(envPath)) {
+      const envContent = readFileSync(envPath, "utf-8");
+      for (const line of envContent.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        const n = Number(val);
+        if ((PORT_KEYS_DEFAULT as readonly string[]).includes(key) && Number.isFinite(n)) {
+          preferredPorts[key] = n;
+        }
+      }
+    }
+  } catch (err) {
+    log.warn({ err, sessionId }, "takeover: read .env failed");
+  }
+
+  // 2. 无条件 reclaim（daemon 有 → 换 owner；没有 → 创建新 session + claim 端口）
+  const portKeys: string[] | undefined = Object.keys(preferredPorts).length > 0
+    ? Object.keys(preferredPorts)
+    : undefined;
+  const ports = await v2.service.claimOrReuse({
+    sessionId,
+    projectPath: project.path,
+    portKeys,
+    displayName: sessionId,
+  });
+
+  log.info({ sessionId, ports }, "takeover: reclaimed in daemon");
+
+  // 3. 更新本地 DB：只更新端口（sessionId 不变，不删不插）
+  db.update(schema.sessions)
+    .set({ ports: JSON.stringify(ports) })
+    .where(eq(schema.sessions.id, sessionId))
+    .run();
+
+  // 4. 写 .env（用 claim 实际返回的端口）
+  if (existsSync(worktreePath)) {
+    writePortsToEnv(worktreePath, ports, project.path);
+  }
+
+  return { ports };
 }
 
 /**
@@ -186,56 +278,146 @@ async function syncProject(
     .where(eq(schema.sessions.projectId, project.id))
     .all();
   const existingIds = new Set(existingRows.map((r) => r.id));
+  // §4.3.1: worktreePath → sessionId 的反查集（防止 takeover 后目录名≠sessionId 导致重复 insert）
+  const existingPaths = new Set(existingRows.map((r) => r.worktreePath));
 
   for (const wt of disk) {
-    if (existingIds.has(wt.sessionId)) continue;
+    if (existingIds.has(wt.sessionId) || existingPaths.has(wt.worktreePath)) continue;
 
-    // v2 has no /sync/declare equivalent. If the daemon knows this
-    // worktree (matched by path in the /sync snapshot), use its ports.
-    // Otherwise the session is an orphan — null ports, status="orphan".
+    // §4.3.1: 判定 takeover / orphan — 看磁盘完整性，不依赖 daemon
     const daemonEntry = v2Snapshot.get(wt.worktreePath);
     const daemonPorts = daemonEntry?.ports ?? null;
-    const daemonStatus = daemonEntry ? daemonEntry.status : "orphan";
 
-    try {
-      db.insert(schema.sessions)
-        .values({
-          id: wt.sessionId,
-          projectId: project.id,
-          name: wt.sessionId,
-          branch: wt.branch,
-          worktreePath: wt.worktreePath,
-          ports: daemonPorts ? JSON.stringify(daemonPorts) : null,
-          backgroundHookStatus: null,
-        })
-        .run();
-      ctx.setSessionStatus(wt.sessionId, daemonStatus);
-      if (daemonPorts && wt.worktreePath && existsSync(wt.worktreePath)) {
-        writePortsToEnv(wt.worktreePath, daemonPorts, projectPath);
+    if (daemonEntry) {
+      // daemon 认这个 worktree → 正常 insert
+      try {
+        db.insert(schema.sessions)
+          .values({
+            id: wt.sessionId,
+            projectId: project.id,
+            name: wt.sessionId,
+            branch: wt.branch,
+            worktreePath: wt.worktreePath,
+            ports: daemonPorts ? JSON.stringify(daemonPorts) : null,
+            backgroundHookStatus: null,
+          })
+          .run();
+        ctx.setSessionStatus(wt.sessionId, daemonEntry.status);
+        log.info(
+          { sessionId: wt.sessionId, projectPath, status: daemonEntry.status },
+          "syncProject: inserted disk worktree (daemon-known)",
+        );
+      } catch (err) {
+        log.warn({ err, sessionId: wt.sessionId }, "syncProject: insert failed");
       }
-      log.info(
-        { sessionId: wt.sessionId, projectPath, status: daemonStatus },
-        "syncProject: inserted disk worktree",
-      );
-    } catch (err) {
-      log.warn({ err, sessionId: wt.sessionId }, "syncProject: insert failed");
+      continue;
     }
+
+    // daemon 不认 → 看磁盘完整性
+    const dirComplete = isDirectoryComplete(wt.worktreePath);
+
+    if (dirComplete && v2) {
+      // §4.3.1 takeover：无主 + 完整 → 静默 claim 成自己的
+      try {
+        const result = await silentTakeover(v2, wt, project, db);
+        ctx.setSessionStatus(wt.sessionId, "existing");
+        log.info(
+          { sessionId: wt.sessionId, ports: result.ports },
+          "syncProject: takeover complete",
+        );
+      } catch (err) {
+        log.warn({ err, sessionId: wt.sessionId }, "syncProject: takeover failed, fallback to orphan");
+        // takeover 失败 → fallback: insert DB row + 标 orphan
+        try {
+          db.insert(schema.sessions)
+            .values({
+              id: wt.sessionId,
+              projectId: project.id,
+              name: wt.sessionId,
+              branch: wt.branch,
+              worktreePath: wt.worktreePath,
+              ports: null,
+              backgroundHookStatus: null,
+            })
+            .run();
+          ctx.setSessionStatus(wt.sessionId, "orphan");
+        } catch (err2) {
+          log.warn({ err: err2, sessionId: wt.sessionId }, "syncProject: orphan fallback insert failed");
+        }
+      }
+    } else {
+      // §4.3.1 orphan：不完整 → 不进 sidebar，由 OrphanCleanModal 处理
+      try {
+        db.insert(schema.sessions)
+          .values({
+            id: wt.sessionId,
+            projectId: project.id,
+            name: wt.sessionId,
+            branch: wt.branch,
+            worktreePath: wt.worktreePath,
+            ports: null,
+            backgroundHookStatus: null,
+          })
+          .run();
+        ctx.setSessionStatus(wt.sessionId, "orphan");
+        log.info(
+          { sessionId: wt.sessionId, projectPath },
+          "syncProject: inserted orphan worktree",
+        );
+      } catch (err) {
+        log.warn({ err, sessionId: wt.sessionId }, "syncProject: orphan insert failed");
+      }
+    }
+  }
+
+  // (d2) §4.3.1: Update runtime status for EXISTING rows.
+  //      daemon 认 → 用 daemon 状态；daemon 不认 → 按磁盘完整性判定 takeover/orphan。
+  //      如果是 takeover 且 v2 可用，重试 silentTakeover（上一轮可能因 RECOVERING 失败）。
+  for (const row of existingRows) {
+    const daemonEntry = v2Snapshot.get(row.worktreePath);
+    if (daemonEntry) {
+      ctx.setSessionStatus(row.id, daemonEntry.status);
+      continue;
+    }
+    // daemon 不认 → 看磁盘完整性
+    const dirComplete = isDirectoryComplete(row.worktreePath);
+
+    if (!dirComplete) {
+      ctx.setSessionStatus(row.id, "orphan");
+      continue;
+    }
+
+    // 完整 + daemon 不认 → takeover。如果 v2 可用，重试 claim。
+    if (v2) {
+      const currentStatus = ctx.getSessionStatus(row.id);
+      if (currentStatus !== "existing") {
+        // 上一轮 takeover 可能因 RECOVERING 失败了，重试
+        try {
+          const wt = disk.find((d) => d.sessionId === row.id);
+          if (wt) {
+            const result = await silentTakeover(v2, wt, project, db);
+            ctx.setSessionStatus(row.id, "existing");
+            log.info(
+              { sessionId: row.id },
+              "syncProject: takeover retry succeeded",
+            );
+            continue;
+          }
+        } catch (err) {
+          log.warn({ err, sessionId: row.id }, "syncProject: takeover retry failed");
+        }
+      }
+    }
+    ctx.setSessionStatus(row.id, "takeover");
   }
 
   // (e) Reconcile ports again — catch any newly inserted rows.
   syncProjectPortsToDb(db, project.id, worktreePorts);
 
   // (f) Clean up stale DB sessions (worktree gone from disk).
+  //     §4.3.1: 只删本地 DB 行，不 release 端口（不依赖 daemon 状态）。
   for (const row of existingRows) {
     if (diskWtIds.has(row.id)) continue;
-    // v2: best-effort release via v2PortService (no-op if unknown).
-    if (v2) {
-      try {
-        await v2.service.releaseSession(row.id);
-      } catch (err) {
-        log.warn({ err, sessionId: row.id }, "syncProject: v2 release stale session failed");
-      }
-    }
     try {
       db.delete(schema.sessions).where(eq(schema.sessions.id, row.id)).run();
       log.info({ sessionId: row.id, projectPath }, "syncProject: removed stale DB session (worktree gone)");
@@ -341,7 +523,6 @@ export function registerDb(ctx: DbContext): void {
     const sessionsForProject = db
       .select().from(schema.sessions).where(eq(schema.sessions.projectId, projectId)).all();
     const v2 = ctx.getV2PortService();
-    const clientId = ctx.getClientId();
     const failed: Array<{ sessionId: string; stage: string; error: string }> = [];
     for (const s of sessionsForProject) {
       // v2: release ports via v2PortService (no-op if session is unknown).

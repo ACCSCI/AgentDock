@@ -60,12 +60,17 @@ let v2State: AppliedState = emptyState();
 // Port the daemon is listening on (set once at boot, used by reconcileAndDeclareSessions).
 let cachedDaemonPort = 0;
 
-// Foreign session tracking — mirrors master's _sessionStatuses map.
-// Tracks runtime ownership status per session across IPC calls:
-//   "owned"      — this Electron owns it (claimed via sync.declare)
-//   "foreign"    — another live Electron owns it (can't modify)
-//   "reclaimed"  — was foreign, but previous owner went stale → took ownership
-//   "allocated"  — brand new session, just created by this Electron
+// Session runtime status tracking — populated by syncProject().
+// Tracks per-session status across IPC calls:
+//   "owned"      — default (no explicit setSessionStatus call yet)
+//   "active"     — daemon recognizes this session as active
+//   "creating"   — daemon shows session in creating state
+//   "orphan"     — worktree on disk but daemon doesn't recognize it (incomplete)
+//   "takeover"   — worktree on disk, complete, but daemon doesn't recognize (future: adoptable)
+//   "foreign"    — another instance owns this session (not set in legacy path — see note)
+// Note: "foreign" detection requires owner data from daemon, which is only
+// available in the v2 path (useV2Projects). The legacy path (useProjects/db:projects:list)
+// does not have access to owner information and cannot detect foreign sessions.
 // Reset on db:init so stale entries don't leak between project switches.
 const sessionStatuses = new Map<string, string>();
 function getSessionStatus(sessionId: string): string {
@@ -218,11 +223,11 @@ async function reconcileAndDeclareSessions(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  // Build a worktreePath → v2SessionId map from the v2PortService's
-  // local cache, so we can match daemon sessions to DB rows by path.
-  const knownByV2Id = new Map<string, { appSessionId: string }>();
+  // Build a set of sessionIds known to the v2PortService's local cache,
+  // so we can match daemon sessions to DB rows by unified sessionId.
+  const knownBySid = new Map<string, { sessionId: string }>();
   for (const known of v2PortService.listKnownSessions()) {
-    knownByV2Id.set(known.v2SessionId, { appSessionId: known.appSessionId });
+    knownBySid.set(known.sessionId, { sessionId: known.sessionId });
   }
 
   // Fetch daemon state via v2 /sync (raw fetch — matches the pattern
@@ -254,12 +259,12 @@ async function reconcileAndDeclareSessions(): Promise<void> {
   }
 
   for (const ds of daemonSessions) {
-    // Match daemon session → DB row by v2PortService's app→v2 mapping.
-    // If we don't have a local mapping for this v2SessionId, skip
+    // Match daemon session → DB row by unified sessionId.
+    // If we don't have a local mapping for this sessionId, skip
     // (it belongs to another Electron instance).
-    const known = knownByV2Id.get(ds.sessionId);
+    const known = knownBySid.get(ds.sessionId);
     if (!known) continue;
-    const row = rows.find((r) => r.id === known.appSessionId);
+    const row = rows.find((r) => r.id === known.sessionId);
     if (!row) continue;
     if (ds.status !== "active") continue; // Only reconcile active sessions.
     const oldPorts = row.ports
@@ -509,7 +514,7 @@ async function bootstrap() {
           // §7.3, §11.3 #8: Apply event to SyncApplier state
           v2State = dispatchEvent(v2State, e);
           // Push serialized state to renderer
-          const serialized = serializeForPush(v2State);
+          const serialized = serializeForPush(v2State, clientId);
           if (mainWindow?.webContents) {
             mainWindow.webContents.send("daemon:v2State", serialized);
           }
@@ -767,13 +772,13 @@ async function fullResyncAfterDisconnect(
       v2State = applySnapshot(v2State, body as V2SyncSnapshot);
       log.debug({ snapshotSeq: body.snapshotSeq }, "§7.3 applied snapshot to v2State");
     }
-    // 索引: v2SessionId → (name → port). 给 /claim 携带 preferredPort 用.
-    const portsByV2Sid = new Map<string, Map<string, number>>();
+    // 索引: sessionId → (name → port). 给 /claim 携带 preferredPort 用.
+    const portsBySid = new Map<string, Map<string, number>>();
     for (const p of body.ports ?? []) {
-      let inner = portsByV2Sid.get(p.sessionId);
+      let inner = portsBySid.get(p.sessionId);
       if (!inner) {
         inner = new Map();
-        portsByV2Sid.set(p.sessionId, inner);
+        portsBySid.set(p.sessionId, inner);
       }
       inner.set(p.name, p.port);
     }
@@ -783,11 +788,10 @@ async function fullResyncAfterDisconnect(
     // (有助 §5.2 收齐 reported 集合, 缩短 RECOVERING 窗口).
     const known = v2.listKnownSessions();
     for (const ks of known) {
-      const portMap = portsByV2Sid.get(ks.v2SessionId);
+      const portMap = portsBySid.get(ks.sessionId);
       log.info(
         {
-          appSid: ks.appSessionId,
-          v2Sid: ks.v2SessionId,
+          sessionId: ks.sessionId,
           portKeys: ks.portKeys,
           preferredPorts: portMap ? Object.fromEntries(portMap) : null,
         },
@@ -800,7 +804,7 @@ async function fullResyncAfterDisconnect(
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              sessionId: ks.v2SessionId,
+              sessionId: ks.sessionId,
               fencingToken: ks.fencingToken,
               name,
               ...(requestedPort !== undefined ? { requestedPort } : {}),
@@ -808,7 +812,7 @@ async function fullResyncAfterDisconnect(
           });
           if (!res.ok) {
             log.warn(
-              { status: res.status, name, v2Sid: ks.v2SessionId },
+              { status: res.status, name, sessionId: ks.sessionId },
               "§5.3 re-claim failed (may be RECOVERING)",
             );
           }

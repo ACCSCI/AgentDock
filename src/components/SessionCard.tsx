@@ -333,13 +333,7 @@ export function SessionCard({
   );
 
   const isForeign = session.status === "foreign";
-  const statusLabel = session.status === "reclaimed"
-    ? "Recovered"
-    : session.status === "allocated"
-      ? "Ports refreshed"
-      : session.status === "foreign"
-        ? "Foreign"
-        : null;
+  const statusLabel = session.status === "foreign" ? "Foreign" : null;
   const foreignTitle = session.ownerClientId
     ? `This session is currently managed by another AgentDock instance (${session.ownerClientId}).`
     : "This session is currently managed by another AgentDock instance.";

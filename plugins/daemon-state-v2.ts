@@ -140,6 +140,34 @@ export class DaemonStateV2 {
   }
 
   /**
+   * Unconditionally reclaim a session: if the daemon already has it, swap
+   * the owner; if not, create it. Used by silentTakeover when the old daemon
+   * is dead and a new instance picks up orphaned worktrees from disk.
+   *
+   * Returns `created: true` when a new session was created (caller should
+   * claim ports + activate), `created: false` when ownership was swapped
+   * (session already active, ports already claimed).
+   */
+  reclaimSession(args: {
+    sessionId: string;
+    projectRoot: string;
+    displayName: string;
+    clientId: string;
+    pid: number;
+    leaseExpiresAt: number;
+  }): { fencingToken: number; created: boolean } {
+    const existing = this.sessions.get(args.sessionId);
+    if (existing) {
+      // Daemon already knows this session — unconditionally swap owner.
+      this.setOwner(args.sessionId, args.clientId, args.pid, 1);
+      return { fencingToken: 1, created: false };
+    }
+    // Session not in daemon — create fresh.
+    this.createSession(args);
+    return { fencingToken: 1, created: true };
+  }
+
+  /**
    * Mark session as active — ports have been claimed and .env is fully written
    * (commit point reached, §4.2). Lease cleared (no in-flight transaction).
    */
