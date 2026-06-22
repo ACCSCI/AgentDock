@@ -60,12 +60,15 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     const container = containerRef.current;
     if (!container) return;
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 2) return; // only right-click
-      const entry = terminalCache.get(terminalId);
-      selectionCacheRef.current = entry?.terminal.getSelection() ?? "";
+      if (e.button === 2) {
+        const entry = terminalCache.get(terminalId);
+        selectionCacheRef.current = entry?.terminal.getSelection() ?? "";
+      } else {
+        selectionCacheRef.current = "";
+      }
     };
-    container.addEventListener("mousedown", onMouseDown);
-    return () => container.removeEventListener("mousedown", onMouseDown);
+    container.addEventListener("mousedown", onMouseDown, true);
+    return () => container.removeEventListener("mousedown", onMouseDown, true);
   }, [terminalId]);
 
   // Close context menu on outside mousedown / right-click elsewhere / scroll / Escape
