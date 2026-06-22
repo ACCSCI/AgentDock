@@ -1,12 +1,171 @@
 # AgentDock
 
-Git Worktree + 独立运行环境的 Session 管理系统。
+> 开箱即用的 Git Worktree Session 管理系统 —— 为 AI Agent 开发量身打造。
+
+[![Electron](https://img.shields.io/badge/Electron-42.4-blue?logo=electron)](https://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-19.1-61dafb?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+---
+
+## 什么是 AgentDock？
+
+AgentDock 是一款 **Electron 桌面应用**，专为 AI Agent 开发场景设计。它允许开发者基于同一个项目创建多个**完全隔离的 Git Worktree Session**，每个 Session 拥有独立的：
+
+- **Git Worktree** — 独立的工作目录和分支
+- **端口分配** — 自动分配可用端口，避免冲突
+- **环境变量** — 独立的 `.env` 配置
+- **内置终端** — 支持 Claude Code、Copilot 等 AI 工具快速启动
+
+所有操作通过统一的 GUI 管理，无需手动切换目录或管理端口。
+
+![AgentDock Screenshot](docs/screenshot.png)
+
+---
+
+## 核心特性
+
+### 🔒 Session 隔离
+
+每个 Session 是一个完整的 Git Worktree，而非简单的分支切换。多个 Session 可以**并行运行、互不干扰**：
+
+```
+project/
+  .agentdock/
+    worktrees/
+      abc123/     ← Session A (独立 worktree + 独立 .env + 独立端口)
+      def456/     ← Session B (独立 worktree + 独立 .env + 独立端口)
+      ghi789/     ← Session C (独立 worktree + 独立 .env + 独立端口)
+```
+
+### 🖥️ Terminal 集成
+
+内置 xterm.js 终端，支持：
+
+- **快速启动预设**：Terminal、Claude Code、GitHub Copilot
+- **一键切换**：在 Session 间快速切换终端
+- **字体定制**：支持 Cascadia Code、Fira Code、JetBrains Mono 等
+- **智能缓存**：切换 Session 时终端状态保持
+
+### 🔄 自动化工作流
+
+Session 创建时自动执行：
+
+```
+1. BeforeCreateSession hooks
+2. 创建 Git Worktree
+3. 同步资源文件（.env、数据库等）
+4. 分配端口（写入 .env）
+5. AfterCreateSession hooks（bun install、db:migrate 等）
+```
+
+### 🛡️ 安全加固
+
+- **参数化 Git 命令** — 防止分支名注入
+- **路径校验** — 仅允许绝对路径且必须存在
+- **端口锁** — 原子性端口分配，防止重复占用
+- **Daemon 隔离** — 仅绑定 `127.0.0.1`，防止跨站请求
+
+---
+
+## 为什么选择 AgentDock？
+
+| 特性 | AgentDock | 手动管理 |
+|------|-----------|----------|
+| **Session 隔离** | ✅ 自动创建 Worktree | ❌ 手动 `git worktree add` |
+| **端口管理** | ✅ 自动分配 + 冲突检测 | ❌ 手动查找可用端口 |
+| **环境变量** | ✅ 自动同步 + 写入 `.env` | ❌ 手动复制粘贴 |
+| **依赖安装** | ✅ 自动执行 `bun install` | ❌ 手动在每个目录执行 |
+| **多 Session 并行** | ✅ 零配置支持 | ⚠️ 需要大量手动操作 |
+| **终端集成** | ✅ 内置 xterm.js + AI 工具预设 | ❌ 需要单独打开终端 |
+| **配置文件** | ✅ 可选，开箱即用 | ❌ 无 |
+
+---
 
 ## 快速开始
 
-### 1. 在项目根目录创建配置文件
+### 前置要求
 
-`agentdock.config.yaml`：
+- [Node.js](https://nodejs.org/) >= 18
+- [Bun](https://bun.sh/) >= 1.0（推荐）
+- [Git](https://git-scm.com/) >= 2.30
+
+### 安装
+
+```bash
+# 克隆仓库
+git clone https://github.com/ACCSCI/AgentDock.git
+cd AgentDock
+
+# 安装依赖
+bun install
+
+# 启动开发模式
+bun run dev
+```
+
+### 使用步骤
+
+1. **打开项目** — 点击首页的 "Open Project" 按钮，选择你的项目目录
+2. **创建 Session** — 在左侧边栏点击 "+" 创建新的 Session
+3. **开始开发** — 在内置终端中运行你的开发命令
+
+AgentDock 会自动完成：
+- 创建 Git Worktree
+- 同步 `.env` 到 Worktree
+- 分配可用端口
+- 执行依赖安装（如果配置了 hook）
+
+---
+
+## 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Electron Main Process                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   Daemon    │  │    IPC      │  │   Terminal Manager  │ │
+│  │  (Hono)     │  │  Handlers   │  │   (node-pty)        │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Preload (contextBridge)                   │
+│                    window.api (29+ channels)                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Renderer (React 19)                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │    TabBar   │  │   Session   │  │   Terminal Panel    │ │
+│  │             │  │   Sidebar   │  │   (xterm.js)        │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心组件
+
+| 组件 | 职责 |
+|------|------|
+| **Daemon** | 机器级单例 HTTP 服务器，管理端口分配和 Session 状态 |
+| **Session Lifecycle** | 编排 Session 创建/删除的 5 步流程 |
+| **Terminal Manager** | 管理终端生命周期，支持 PTY 和 MessagePort 传输 |
+| **Port Allocator** | 原子性端口分配，支持文件锁和过期检测 |
+| **Hook Engine** | 执行 Session 生命周期钩子（before/after create/delete） |
+| **Resource Sync** | 同步资源文件到 Worktree（支持 overwrite/skip/merge 策略） |
+
+---
+
+## 配置文件（可选）
+
+配置文件位于**目标项目根目录**（不是 AgentDock 本身），文件名：`agentdock.config.yaml`。
+
+> 💡 **提示**：无配置文件时 AgentDock 即可正常运行，配置仅用于自定义资源同步和 Hook。
+
+### 最小配置
 
 ```yaml
 version: "1"
@@ -24,46 +183,29 @@ hooks:
       timeout: 60000
 ```
 
-### 2. 启动 AgentDock
-
-```bash
-bun run dev
-```
-
-### 3. 创建 Session
-
-通过 UI 创建 Session 时，AgentDock 会自动：
-
-1. 创建 Git Worktree
-2. 同步 `.env` 到 Worktree
-3. 分配端口（写入 `.env`）
-4. 执行 `bun install`
-
----
-
-## 配置文件
-
-配置文件位于**目标项目根目录**（不是 AgentDock 本身），文件名：`agentdock.config.yaml`。
-
-### 完整示例
+### 完整配置示例
 
 ```yaml
 version: "1"
 
 resources:
   sync:
+    # 覆盖 .env 文件
     - source: .env
       strategy: overwrite
       skipIfMissing: true
 
+    # 覆盖数据库文件
     - source: dev.db
       strategy: overwrite
       skipIfMissing: true
 
+    # 合并上传目录
     - source: uploads/
       strategy: merge
       skipIfMissing: true
 
+    # 跳过本地配置
     - source: .env.local
       strategy: skip
       skipIfMissing: true
@@ -76,11 +218,13 @@ hooks:
       cwd: worktree
 
   afterCreateSession:
+    # 安装依赖
     - run: "bun install"
       required: true
       timeout: 60000
       cwd: worktree
 
+    # 数据库迁移
     - run: "bun run db:migrate"
       required: true
       timeout: 30000
@@ -95,76 +239,15 @@ hooks:
       required: false
 ```
 
-### 无配置文件时
-
-如果没有 `agentdock.config.yaml`，AgentDock 使用默认配置（空资源同步、空 hooks），行为与重构前完全一致。
-
----
-
-## Resource Sync（资源同步）
-
-资源同步在 Worktree 创建后、端口分配前执行。
-
-### 字段说明
-
-```yaml
-resources:
-  sync:
-    - source: .env          # 相对项目根目录的路径
-      strategy: overwrite   # 同步策略
-      skipIfMissing: true   # 源文件不存在时是否跳过
-```
-
-### 同步策略
+### 资源同步策略
 
 | 策略 | 目标不存在时 | 目标已存在时 |
 |------|------------|------------|
 | `overwrite` | 复制 | 覆盖（幂等） |
 | `skip` | 复制 | 跳过 |
-| `merge` | 复制 | 合并（见下方说明） |
+| `merge` | 复制 | 合并（.env 逐 key，目录递归） |
 
-### merge 策略详情
-
-- **`.env` 类文件**：逐 key 合并，source 的同名 key 覆盖 target，target 独有的 key 保留
-  - 例：source `A=1, B=2` + target `B=old, C=3` → 结果 `A=1, B=2, C=3`
-- **目录**：递归复制，source 中的文件覆盖同名文件，target 中已有的文件保留
-
-### 路径规则
-
-- 文件路径：`source: .env` → 同步 `<project>/.env` → `<worktree>/.env`
-- 目录路径：`source: uploads/` → 同步整个目录（以 `/` 结尾识别为目录）
-- 子目录：`source: config/local.json` → 保留目录结构
-
-### skipIfMissing
-
-- `true`（默认）：源文件/目录不存在时静默跳过，记录为 `missing-skipped`
-- `false`：源文件不存在时抛出错误，触发 rollback（清理 worktree + 释放端口）
-
----
-
-## Hook System（钩子系统）
-
-Hook 在 Session 生命周期的特定阶段执行 shell 命令。
-
-### 生命周期事件
-
-| 事件 | 触发时机 | 失败影响 |
-|------|---------|---------|
-| `beforeCreateSession` | Worktree 创建前 | `required: true` → 中断创建 |
-| `afterCreateSession` | 端口分配 + .env 写入后 | `required: true` → rollback（清理 worktree + 释放端口） |
-| `beforeDeleteSession` | Worktree 删除前 | `required: true` → 中断删除 |
-| `afterDeleteSession` | Worktree 删除后 | 失败不影响结果（仅记录） |
-
-### Hook 字段
-
-```yaml
-hooks:
-  afterCreateSession:
-    - run: "bun install"        # shell 命令
-      required: true             # 失败是否中断 pipeline
-      timeout: 60000             # 超时毫秒数（默认 30000）
-      cwd: worktree              # 执行目录：worktree（默认）| project
-```
+### Hook 字段说明
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
@@ -175,27 +258,13 @@ hooks:
 
 ### 环境变量
 
-Hook 执行时自动注入以下环境变量：
+Hook 执行时自动注入：
 
 | 变量 | 说明 |
 |------|------|
 | `AGENTDOCK_SESSION_ID` | 当前 Session ID |
 | `AGENTDOCK_PROJECT_ID` | 当前项目 ID |
 | `AGENTDOCK_EVENT` | 当前生命周期事件名 |
-
-### Worktree 环境变量隔离
-
-AgentDock 会在启动 Worktree 子进程（例如 terminal shell、lifecycle hooks）前，先读取当前 Worktree 的 `.env`，并按以下优先级构造最终环境变量：
-
-1. 继承父进程环境（先做冲突 key 消毒）
-2. 当前 Worktree `.env`
-3. `AGENTDOCK_*` 运行时变量
-
-这可以避免父项目或 AgentDock 自身进程中的环境变量污染子项目。例如：
-
-- 子项目自定义变量（如 `API_URL`）优先使用当前 Worktree `.env`
-- 端口变量（如 `FRONTEND_PORT`）优先使用当前 Session 写入 Worktree `.env` 的值
-- Hook 中注入的 `AGENTDOCK_SESSION_ID` / `AGENTDOCK_PROJECT_ID` / `AGENTDOCK_EVENT` 始终覆盖同名 `.env` 值
 
 ---
 
@@ -204,21 +273,33 @@ AgentDock 会在启动 Worktree 子进程（例如 terminal shell、lifecycle ho
 ### 创建流程
 
 ```
-1. BeforeCreateSession hooks
-2. CreateWorktree              ← Core
-3. SyncResources               ← Core（读取 agentdock.config.yaml）
-4. AllocatePorts               ← Core（写入 .env）
-5. AfterCreateSession hooks
-6. Insert DB + Return
+┌─────────────────────────────────────────────────────────────┐
+│ 1. BeforeCreateSession hooks                               │
+│    └─ 执行用户定义的预处理命令（可选）                        │
+├─────────────────────────────────────────────────────────────┤
+│ 2. CreateWorktree                                          │
+│    └─ git worktree add <worktree-path> -b <branch>         │
+├─────────────────────────────────────────────────────────────┤
+│ 3. SyncResources                                           │
+│    └─ 根据配置同步 .env、数据库等文件到 Worktree              │
+├─────────────────────────────────────────────────────────────┤
+│ 4. AllocatePorts                                           │
+│    └─ 分配可用端口，写入 Worktree/.env                       │
+├─────────────────────────────────────────────────────────────┤
+│ 5. AfterCreateSession hooks                                │
+│    └─ 执行用户定义的后处理命令（bun install 等）              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### 删除流程
 
 ```
-1. BeforeDeleteSession hooks
-2. ReleasePorts                ← Core
-3. RemoveWorktree              ← Core
-4. AfterDeleteSession hooks
+┌─────────────────────────────────────────────────────────────┐
+│ 1. BeforeDeleteSession hooks                               │
+│ 2. ReleasePorts                                            │
+│ 3. RemoveWorktree                                          │
+│ 4. AfterDeleteSession hooks                                │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Rollback 触发条件
@@ -231,60 +312,168 @@ AgentDock 会在启动 Worktree 子进程（例如 terminal shell、lifecycle ho
 
 ---
 
-## API 变更
+## 端口管理
 
-### POST /api/projects/:id/sessions
+### 分配流程
 
-响应新增 `syncReport` 和 `hookReports` 字段：
+1. **端口范围**：30000-65535
+2. **分配算法**：`pickFreePort()` 绑定 port=0 获取 OS 随机端口
+3. **可用性验证**：TCP 连接探测（300ms 超时）
+4. **原子性保证**：文件锁 + O_EXCL 创建，防止并发冲突
 
-```json
-{
-  "success": true,
-  "session": {
-    "id": "abc123",
-    "projectId": "proj1",
-    "name": "My Session",
-    "branch": "agentdock/abc123",
-    "worktreePath": "/path/to/.agentdock/worktrees/abc123",
-    "ports": {
-      "FRONTEND_PORT": 20000,
-      "BACKEND_PORT": 20001,
-      "WS_PORT": 20002,
-      "DEBUG_PORT": 20003,
-      "PREVIEW_PORT": 20004
-    }
-  },
-  "syncReport": {
-    "results": [
-      {
-        "source": ".env",
-        "target": ".env",
-        "action": "copied",
-        "success": true
-      }
-    ],
-    "success": true,
-    "duration": 5
-  },
-  "hookReports": [
-    {
-      "event": "afterCreateSession",
-      "results": [
-        {
-          "success": true,
-          "exitCode": 0,
-          "stdout": "...",
-          "stderr": "",
-          "duration": 3200,
-          "timedOut": false
-        }
-      ],
-      "success": true,
-      "duration": 3200
-    }
-  ]
-}
+### 默认端口变量
+
+| 变量名 | 用途 |
+|--------|------|
+| `FRONTEND_PORT` | Vite 开发服务器 |
+| `BACKEND_PORT` | 后端服务 |
+| `WS_PORT` | WebSocket 服务 |
+| `DEBUG_PORT` | 调试端口 |
+| `PREVIEW_PORT` | 预览服务 |
+
+可通过 `agentdock.config.yaml` 自定义：
+
+```yaml
+version: "1"
+env:
+  ports:
+    - MY_PORT
+    - API_PORT
 ```
+
+---
+
+## 多实例支持
+
+AgentDock 支持在同一台机器上运行多个 Electron 实例，共享状态：
+
+- **机器级 Daemon**：单例 Hono HTTP 服务器，管理所有端口和 Session 状态
+- **Session 所有权**：每个 Session 归属于特定的 Electron 实例
+- **心跳检测**：30 秒间隔，90 秒超时
+- **自动恢复**：Daemon 重启后自动恢复 Session 状态
+- **冲突处理**：检测并处理孤儿 Session、过期锁等异常情况
+
+---
+
+## 技术栈
+
+### 运行时依赖
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| [Electron](https://www.electronjs.org/) | 42.4 | 桌面应用框架 |
+| [React](https://react.dev/) | 19.1 | UI 框架 |
+| [TanStack Router](https://tanstack.com/router) | 1.120 | 文件路由（memory history） |
+| [TanStack Query](https://tanstack.com/query) | 5.101 | 服务端状态管理 |
+| [xterm.js](https://xtermjs.org/) | 5.5 | 终端模拟器 |
+| [node-pty](https://github.com/nickel-org/node-pty) | 1.1 | 原生 PTY 支持 |
+| [Hono](https://hono.dev/) | 4.12 | HTTP 服务器（Daemon） |
+| [Drizzle ORM](https://orm.drizzle.team/) | 1.0-rc.3 | SQLite ORM |
+| [Zod](https://zod.dev/) | 4.4 | Schema 验证 |
+
+### 开发依赖
+
+| 技术 | 用途 |
+|------|------|
+| [electron-vite](https://electron-vite.org/) | 构建工具链 |
+| [Vitest](https://vitest.dev/) | 单元/集成测试 |
+| [Playwright](https://playwright.dev/) | E2E 测试（真实 Electron） |
+| [Biome](https://biomejs.dev/) | Linter + Formatter |
+
+---
+
+## 开发
+
+### 常用命令
+
+```bash
+# 开发模式（Electron + Vite dev server）
+bun run dev
+
+# 构建生产版本
+bun run build
+
+# 运行构建后的 Electron 预览
+bun run start
+
+# 运行测试
+bun run test
+
+# 运行 E2E 测试
+bun run test:e2e
+
+# Lint + Format
+bun run check
+```
+
+### 项目结构
+
+```
+agent-dock/
+├── electron/              # Electron 主进程 + preload
+│   ├── main.ts            # 主进程入口
+│   ├── preload.ts         # Context Bridge
+│   └── main/ipc/          # IPC 处理器（29+ channels）
+├── plugins/               # 核心业务逻辑（主进程 + Daemon 共享）
+│   ├── daemon/            # Hono HTTP 服务器
+│   ├── terminal-manager.ts
+│   ├── session-lifecycle.ts
+│   ├── hook-engine.ts
+│   └── ...
+├── src/                   # React 渲染进程
+│   ├── components/        # UI 组件
+│   ├── lib/               # 工具函数、状态管理
+│   └── routes/            # 文件路由
+├── e2e/                   # Playwright E2E 测试
+├── scripts/               # 构建脚本
+└── docs/                  # 内部文档
+```
+
+### E2E 测试
+
+```bash
+# 运行所有 E2E 测试
+bun run test:e2e
+
+# 运行特定测试
+bunx playwright test e2e/session-create.spec.ts
+
+# 调试模式
+bunx playwright test --headed
+```
+
+E2E 测试使用真实 Electron 应用，详见 `docs/e2e-guide.md`。
+
+---
+
+## 测试覆盖
+
+```bash
+bun run test
+```
+
+覆盖范围：
+- ✅ 配置解析（Zod schema + YAML loader）
+- ✅ 资源同步（文件/目录、三种策略、skipIfMissing）
+- ✅ Hook 引擎（注册、执行、超时、required 中断）
+- ✅ Session 生命周期（编排器、rollback、执行顺序）
+- ✅ API 集成（HTTP 端到端）
+- ✅ 安全加固（命令注入、git 注入、路径校验、Daemon Origin、端口锁存活检测、DB 版本化迁移）
+
+---
+
+## 安全
+
+AgentDock 在执行外部命令、git 操作、文件访问与本地服务通信时遵循以下加固措施：
+
+| 领域 | 加固措施 |
+|------|---------|
+| **文件浏览器** | 参数化调用，不经 shell 拼接，避免命令注入 |
+| **Git Worktree** | 分支名经 `validateBranchName` 校验（拒绝 `--`、控制字符、`..` 等） |
+| **项目路径** | `validateProjectPath` 要求绝对路径且为已存在目录 |
+| **Daemon HTTP** | 仅绑定 `127.0.0.1`；非 GET 且携带 `Origin` 头的请求返回 403 |
+| **端口锁** | 锁文件记录 `{pid, ts}`；仅当持有进程已退出、锁超过 30s 或内容损坏时才破锁 |
+| **数据库** | 每项目 SQLite 通过 `PRAGMA user_version` 进行版本化迁移 |
 
 ---
 
@@ -367,41 +556,48 @@ hooks:
       timeout: 30000
 ```
 
-## 开发说明
-
-- 开发 / 启动入口现在是 Electron + electron-vite：`bun run dev` 起 Electron 主进程 + Vite 渲染端 dev server；`bun run start` 跑构建后的 Electron 预览版本。Vite 配置走 `electron.vite.config.ts`，Node SQLite 仍需 `NODE_OPTIONS=--experimental-sqlite`（脚本已自动注入）。
-- `.env` 读取由 `plugins/env.ts` 的 `readEnvFile()` 统一处理，仍然支持带引号或行尾注释的值，避免启动时出现端口解析错误。
-- Vite watcher 默认忽略 `.agentdock/**` 和 `.claude/**`，避免 session 或 Claude 生成文件触发无关热重载（在 `electron.vite.config.ts` 的 renderer `server.watch.ignored` 中维护）。
-- E2E 框架与调试入口见 `docs/e2e-guide.md`。
-- master 分支 ↔ Electron 版功能差异比对见 `docs/main-alignment-audit.md`。
-
 ---
 
-## 安全
+## 相关文档
 
-AgentDock 在执行外部命令、git 操作、文件访问与本地服务通信时遵循以下加固措施：
-
-| 领域 | 加固 |
+| 文档 | 说明 |
 |------|------|
-| 文件浏览器 | 打开目录使用参数化调用，不经 shell 拼接，避免命令注入 |
-| Git Worktree | 分支名经 `validateBranchName` 校验（拒绝 `--`、控制字符、`..` 等），防止 git 参数注入 |
-| 项目路径 | `validateProjectPath` 要求绝对路径且为已存在目录，拒绝非法/不存在路径 |
-| Daemon HTTP | 仅绑定 `127.0.0.1`；移除通配 CORS，非 GET 且携带 `Origin` 头的请求返回 403，防止跨站请求伪造（CSRF/DNS rebinding） |
-| 端口锁 | 锁文件记录 `{pid, ts}`；仅当持有进程已退出、锁超过 30s 或内容损坏时才破锁，避免误删存活进程的锁导致端口重复分配 |
-| 数据库 | 每项目 SQLite 通过 `PRAGMA user_version` 进行版本化迁移，迁移幂等且包裹在事务中，兼容旧库且不丢数据 |
+| [E2E 测试指南](docs/e2e-guide.md) | Playwright 测试框架使用说明 |
+| [AgentDock 规范 v0.2](docs/ads-v0.2.md) | 项目兼容性规范 |
+| [故障模式分析](docs/failure-modes.md) | 常见故障及处理方案 |
+| [v1 API 弃用说明](docs/v1-deprecation.md) | v1 → v2 迁移指南 |
 
 ---
 
-## 测试
+## 贡献
 
-```bash
-bun run test
-```
+欢迎贡献！请遵循以下步骤：
 
-覆盖：
-- 配置解析（Zod schema + YAML loader）
-- 资源同步（文件/目录、三种策略、skipIfMissing）
-- Hook 引擎（注册、执行、超时、required 中断）
-- Session 生命周期（编排器、rollback、执行顺序）
-- API 集成（HTTP 端到端）
-- 安全加固（命令注入、git 注入、路径校验、Daemon Origin、端口锁存活检测、DB 版本化迁移）
+1. Fork 本仓库
+2. 创建特性分支（`git checkout -b feature/amazing-feature`）
+3. 提交更改（`git commit -m 'feat: add amazing feature'`）
+4. 推送到分支（`git push origin feature/amazing-feature`）
+5. 创建 Pull Request
+
+### 开发规范
+
+- 使用 [Biome](https://biomejs.dev/) 进行代码格式化
+- 提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)
+- 新功能需要添加相应的测试
+- E2E 测试使用 Playwright，详见 `docs/e2e-guide.md`
+
+---
+
+## 许可证
+
+[MIT License](LICENSE)
+
+---
+
+## 致谢
+
+- [Electron](https://www.electronjs.org/) - 桌面应用框架
+- [React](https://react.dev/) - UI 框架
+- [xterm.js](https://xtermjs.org/) - 终端模拟器
+- [Hono](https://hono.dev/) - 轻量级 HTTP 框架
+- [Drizzle ORM](https://orm.drizzle.team/) - 类型安全的 ORM
