@@ -712,6 +712,7 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  padding: 4px;
 }
 
 .session-terminal-xterm {
