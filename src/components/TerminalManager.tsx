@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useCreateTerminal, useDeleteTerminal, useRenameTerminal, useSessionTerminals } from "../lib/queries";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys, useCreateTerminal, useDeleteTerminal, useRenameTerminal, useSessionTerminals } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { TerminalDefaultAction } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
@@ -46,6 +47,39 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Drag-and-drop reorder state
+  const queryClient = useQueryClient();
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [dragOverTerminalId, setDragOverTerminalId] = useState<string | null>(null);
+  const [dragPosition, setDragPosition] = useState<"left" | "right">("right");
+  const draggedIdRef = useRef<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+
+  // Keep localOrder in sync with server data
+  useEffect(() => {
+    setLocalOrder((prev) => {
+      const serverIds = terminals.map((t) => t.terminalId);
+      if (!prev) return serverIds;
+      const existingSet = new Set(prev);
+      const currentSet = new Set(serverIds);
+      const pruned = prev.filter((id) => currentSet.has(id));
+      const added = serverIds.filter((id) => !existingSet.has(id));
+      if (pruned.length !== prev.length || added.length > 0) {
+        return [...pruned, ...added];
+      }
+      return prev;
+    });
+  }, [terminals]);
+
+  // Derived ordered list of terminals for rendering
+  const displayTerminals = useMemo(() => {
+    const order = localOrder ?? terminals.map((t) => t.terminalId);
+    const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
+    return order
+      .map((id) => terminalMap.get(id))
+      .filter((t): t is NonNullable<typeof t> => t != null);
+  }, [terminals, localOrder]);
 
   // Auto-focus rename input
   useEffect(() => {
@@ -216,6 +250,68 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     }
   };
 
+  // --- Drag-and-drop reorder handlers ---
+
+  const handleDragStart = useCallback((terminalId: string) => {
+    draggedIdRef.current = terminalId;
+    setDragActive(true);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    draggedIdRef.current = null;
+    setDragOverTerminalId(null);
+    setDragActive(false);
+  }, []);
+
+  const handleTabDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, terminalId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (terminalId === draggedIdRef.current) return;
+    const target = e.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const midX = rect.left + rect.width / 2;
+    setDragOverTerminalId(terminalId);
+    setDragPosition(e.clientX < midX ? "left" : "right");
+  }, []);
+
+  const handleTabDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Only clear if actually leaving the tab (not entering a child)
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragOverTerminalId(null);
+    }
+  }, []);
+
+  const handleTabDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, targetId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const draggedId = draggedIdRef.current;
+      if (!draggedId || draggedId === targetId) {
+        setDragOverTerminalId(null);
+        return;
+      }
+
+      setLocalOrder((prevOrder) => {
+        const order = prevOrder ?? terminals.map((t) => t.terminalId);
+        if (!order.includes(draggedId) || !order.includes(targetId)) return order;
+        const next = order.filter((id) => id !== draggedId);
+        let insertAt = next.indexOf(targetId);
+        if (dragPosition === "right") insertAt += 1;
+        next.splice(insertAt, 0, draggedId);
+        // Update React Query cache so the new order persists across polls
+        const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
+        const reordered = next.map((id) => terminalMap.get(id)).filter(Boolean);
+        queryClient.setQueryData(queryKeys.terminals(sessionId), reordered);
+        return next;
+      });
+
+      setDragOverTerminalId(null);
+      setDragActive(false);
+      draggedIdRef.current = null;
+    },
+    [terminals, sessionId, dragPosition, queryClient],
+  );
+
   const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
   const isDefault = (key: TerminalDefaultAction) => terminalDefaultAction === key;
 
@@ -225,14 +321,31 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       <TerminalSettingsBar />
 
       {/* Terminal tab bar */}
-      <div className="terminal-tab-bar">
-        {terminals.map((t) => (
+      <div
+        className={`terminal-tab-bar ${dragActive ? "drag-active" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+        onDrop={() => { setDragOverTerminalId(null); setDragActive(false); draggedIdRef.current = null; }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverTerminalId(null); }}
+      >
+        {displayTerminals.map((t) => (
           <div
             key={t.terminalId}
-            className={`terminal-tab ${t.terminalId === activeTerminalId ? "terminal-tab-active" : ""} ${t.status === "exited" ? "terminal-tab-exited" : ""}`}
+            className={[
+              "terminal-tab",
+              t.terminalId === activeTerminalId ? "terminal-tab-active" : "",
+              t.status === "exited" ? "terminal-tab-exited" : "",
+              draggedIdRef.current === t.terminalId ? "dragging" : "",
+              dragOverTerminalId === t.terminalId ? (dragPosition === "left" ? "drag-over-left" : "drag-over-right") : "",
+            ].filter(Boolean).join(" ")}
+            draggable={true}
             onClick={() => handleTabClick(t.terminalId)}
             onContextMenu={(e) => handleContextMenu(e, t.terminalId)}
             onKeyDown={(e) => { if (e.key === "Enter") handleTabClick(t.terminalId); }}
+            onDragStart={() => handleDragStart(t.terminalId)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleTabDragOver(e, t.terminalId)}
+            onDragLeave={handleTabDragLeave}
+            onDrop={(e) => handleTabDrop(e, t.terminalId)}
             tabIndex={0}
             role="tab"
             aria-selected={t.terminalId === activeTerminalId}

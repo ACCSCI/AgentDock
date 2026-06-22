@@ -1098,6 +1098,33 @@ body {
   opacity: 0.5;
 }
 
+/* Terminal tab drag-and-drop reordering */
+.terminal-tab-bar.drag-active {
+  background: var(--color-bg-tertiary);
+}
+
+.terminal-tab[draggable="true"] {
+  cursor: grab;
+}
+
+.terminal-tab[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.terminal-tab.dragging {
+  opacity: 0.4;
+}
+
+.terminal-tab.drag-over-left {
+  border-left: 2px solid var(--color-primary, #e11931);
+  padding-left: 8px;
+}
+
+.terminal-tab.drag-over-right {
+  border-right: 2px solid var(--color-primary, #e11931);
+  padding-right: 8px;
+}
+
 .terminal-tab-icon {
   font-size: 8px;
   color: #22c55e;
