@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
 
+# 同一 tag 重复触发时只保留最新一次
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release-windows:
     runs-on: windows-latest
