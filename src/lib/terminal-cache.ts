@@ -103,7 +103,7 @@ function debounce<T extends (...args: unknown[]) => void>(
 
 // ---- Terminal configuration (shared) ----
 
-import type { TerminalPreferences } from "./store";
+import { DEFAULT_TERMINAL_PREFS, type TerminalPreferences } from "./store";
 
 const TERMINAL_BASE_CONFIG = {
   cursorBlink: true,
@@ -374,7 +374,7 @@ class TerminalCache {
     const existing = this.cache.get(terminalId);
     if (existing) return existing;
 
-    const terminal = new Terminal(buildTerminalConfig(prefs ?? { fontSize: 14, fontFamily: "'Cascadia Code', monospace" }));
+    const terminal = new Terminal(buildTerminalConfig(prefs ?? DEFAULT_TERMINAL_PREFS));
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
