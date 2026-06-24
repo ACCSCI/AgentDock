@@ -31,6 +31,13 @@ export default defineConfig({
             "e2e/**",
           ],
           environment: "node",
+          // 5000ms (vitest default) is too tight for spawn-heavy tests
+          // (real daemon HTTP server + git worktree) under full-suite load.
+          // 30s matches what these tests need; faster tests still complete
+          // in <1s anyway. Resolves the 1-4 flaky unit timeouts seen across
+          // rounds 1-11 when the full vitest suite runs in sequence.
+          testTimeout: 30_000,
+          hookTimeout: 30_000,
         },
       },
       {

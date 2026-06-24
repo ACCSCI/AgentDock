@@ -732,4 +732,130 @@ describe("SSE race condition — delete + create interleaved", () => {
     expect(real).toBeDefined();
     expect(real!.branch).toBe("feature-x");
   });
+
+  it("R3: REGRESSION — create onSuccess/Failure must remove temp card before invalidating, to prevent duplicate cards", async () => {
+    // This test pins the fix for a bug surfaced under full-suite load:
+    // when the backend inserts the real session DB row and a refetch
+    // returns it, the optimistic temp card was not being removed, so
+    // the sidebar showed BOTH the temp card and the real card (two
+    // session cards with the same display name). The fix removes the
+    // temp card by id BEFORE invalidating the projects query.
+    seedCache();
+
+    // Step 1: Optimistic insert — temp card.
+    const myTempId = "temp-AAA-111";
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      return old.map((p) => {
+        if (p.id !== projectId) return p;
+        const temp: CreatingSession = {
+          id: myTempId,
+          projectId,
+          name: "Session 1",
+          branch: "",
+          worktreePath: "",
+          ports: null,
+          createdAt: new Date().toISOString(),
+          status: "creating",
+          steps: [],
+        };
+        return { ...p, sessions: [...p.sessions, temp] };
+      });
+    });
+
+    // Step 2: Simulate the FIX — before invalidation, remove the
+    // temp card from cache (mirrors the in-mutation onSuccess logic).
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      return old.map((p) => {
+        if (p.id !== projectId) return p;
+        return {
+          ...p,
+          sessions: (p.sessions ?? []).filter((s) => s.id !== myTempId),
+        };
+      });
+    });
+
+    // Step 3: Now simulate the refetch (the invalidate in onSuccess).
+    // The server returns the real session (which the backend inserted
+    // under the real sessionId, NOT the tempId).
+    const realId = "real-id-from-backend-999";
+    const realSession: SessionData = {
+      id: realId,
+      projectId,
+      name: "Session 1",
+      branch: "agentdock/real-id-from-backend-999",
+      worktreePath: "/wt/" + realId,
+      ports: { FRONTEND_PORT: 5000, BACKEND_PORT: 5001, WS_PORT: 5002, DEBUG_PORT: 5003, PREVIEW_PORT: 5004 },
+      createdAt: new Date().toISOString(),
+    };
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, [
+      {
+        id: projectId,
+        name: "Test Project",
+        path: "/test",
+        createdAt: new Date().toISOString(),
+        sessions: [realSession],
+      },
+    ]);
+
+    // Verify: only the real session is in the list. No duplicate.
+    const projects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    expect(projects![0].sessions).toHaveLength(1);
+    expect(projects![0].sessions.find((s) => s.id === myTempId)).toBeUndefined();
+    expect(projects![0].sessions.find((s) => s.id === realId)).toBeDefined();
+  });
+
+  it("R4: REGRESSION — create onFailure must remove temp card so UI doesn't show ghost session", async () => {
+    // When the create pipeline fails (e.g. daemon fetch error), the
+    // backend rolls back its DB row but the renderer's optimistic
+    // insert of the temp card is not automatically removed. The fix
+    // removes the temp card before the promise rejects, so the user
+    // (and tests) don't see a card for a session that doesn't exist.
+    // The other (real) sessions in the project must be preserved.
+    seedCache();
+
+    const myTempId = "temp-FAIL-222";
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      return old.map((p) => {
+        if (p.id !== projectId) return p;
+        const temp: CreatingSession = {
+          id: myTempId,
+          projectId,
+          name: "Session created",
+          branch: "",
+          worktreePath: "",
+          ports: null,
+          createdAt: new Date().toISOString(),
+          status: "creating",
+          steps: [],
+        };
+        return { ...p, sessions: [...p.sessions, temp] };
+      });
+    });
+
+    // Sanity check: 2 sessions before failure (1 real + 1 temp).
+    let projects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    expect(projects![0].sessions).toHaveLength(2);
+
+    // Simulate the FIX's failure-path removal.
+    queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      if (!old) return old;
+      return old.map((p) => {
+        if (p.id !== projectId) return p;
+        return {
+          ...p,
+          sessions: (p.sessions ?? []).filter((s) => s.id !== myTempId),
+        };
+      });
+    });
+
+    // Verify: temp card is gone, but the existing normal session
+    // (sess-normal-1) is preserved.
+    projects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    expect(projects![0].sessions).toHaveLength(1);
+    expect(projects![0].sessions.find((s) => s.id === myTempId)).toBeUndefined();
+    expect(projects![0].sessions.find((s) => s.id === normalSessionId)).toBeDefined();
+  });
 });

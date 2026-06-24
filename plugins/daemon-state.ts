@@ -21,9 +21,6 @@ export type SessionPorts = Record<string, number>;
 /** @deprecated Import from "./config.js" — single source of truth. */
 export const PORT_KEYS = PORT_KEYS_DEFAULT;
 
-export const PORT_RANGE_START = 30000;
-export const PORT_RANGE_END = 65535;
-
 export interface SessionEntry {
   sessionId: string;
   worktreePath: string;

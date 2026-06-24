@@ -101,6 +101,18 @@ export function readDaemonInfo(): DaemonInfo | null {
 
 /**
  * Write daemon info to the info file (atomic: write then rename).
+ *
+ * The contract between the daemon and the DaemonManager: the file MUST
+ * exist on disk by the time /health becomes responsive, otherwise the
+ * manager's `waitForReady` returns early on the health check, then
+ * `readDaemonInfo()` returns null, and the manager raises
+ * "Daemon started but did not write daemon.json" → app.exit(1).
+ *
+ * On Windows under heavy load, the initial write+rename can fail with
+ * EBUSY/EPERM if an antivirus scanner or another process is holding the
+ * tmp file. We retry the write+rename a few times before falling through
+ * to the direct-write fallback (which itself is wrapped in another retry
+ * loop below).
  */
 export function writeDaemonInfo(pid: number, port: number): void {
   const infoPath = getDaemonInfoPath();
@@ -118,17 +130,44 @@ export function writeDaemonInfo(pid: number, port: number): void {
   }
 
   const tmpPath = `${infoPath}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(info, null, 2), "utf-8");
+  const payload = JSON.stringify(info, null, 2);
 
-  try {
-    if (existsSync(infoPath)) {
-      unlinkSync(infoPath);
+  // Retry loop: Windows file locking (antivirus, indexer) can cause
+  // transient failures on the first try. 3 attempts × 50ms backoff is
+  // plenty for the AV scanner to release the handle.
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      writeFileSync(tmpPath, payload, "utf-8");
+      try {
+        if (existsSync(infoPath)) {
+          unlinkSync(infoPath);
+        }
+        atomicRename(tmpPath, infoPath);
+      } catch {
+        // Fallback: direct write. This is fine because we're the only
+        // writer (the manager has already acquired the leader lock).
+        writeFileSync(infoPath, payload, "utf-8");
+        try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      }
+      // Verify the write actually landed before declaring success —
+      // catches the rare case where writeFileSync silently no-ops due
+      // to a process-level filesystem filter.
+      const verify = readFileSync(infoPath, "utf-8");
+      const parsed = JSON.parse(verify);
+      if (parsed.pid === pid && parsed.port === port) return;
+      throw new Error(
+        `daemon.json verification mismatch: expected pid=${pid} port=${port}, got ${verify}`,
+      );
+    } catch (err) {
+      if (attempt < MAX_ATTEMPTS) {
+        // Brief sleep via sync busy-wait (we're in a sync context).
+        const wait = Date.now() + 50;
+        while (Date.now() < wait) { /* spin */ }
+        continue;
+      }
+      throw err;
     }
-    atomicRename(tmpPath, infoPath);
-  } catch {
-    // Fallback: direct write
-    writeFileSync(infoPath, JSON.stringify(info, null, 2), "utf-8");
-    try { unlinkSync(tmpPath); } catch { /* ignore */ }
   }
 }
 

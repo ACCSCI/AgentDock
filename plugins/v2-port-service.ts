@@ -213,13 +213,6 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
     }
   }
 
-  function readTokenFromDebugState(v2Sid: string): number | null {
-    // Sync accessor — used inside the lease-renewal tick. Hits /debug/state
-    // (single GET, ~1KB response) and fishes out the fencingToken. Cache
-    // the result via the post-await caller.
-    return null; // actual implementation uses async getDebugState
-  }
-
   async function getDebugState(): Promise<{
     v2Owners?: Record<string, { fencingToken: number }>;
     v2Ports?: Record<number, { port: number; sessionId: string; name: string }>;

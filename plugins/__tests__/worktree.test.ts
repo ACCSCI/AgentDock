@@ -366,24 +366,21 @@ describe("removeWorktree currentBranch", () => {
     });
   }
 
-  it("WRM1: rename 后 remove 必须删掉 renamed branch（不传 currentBranch 会遗留 dangling）", async () => {
+  it("WRM1: §4.1 rename only changes displayName — branch stays agentdock/<id>, remove deletes it", async () => {
     const created = createWorktree(projectDir, "rmcb1");
     expect(created.branch).toBe("agentdock/rmcb1");
 
+    // §4.1 — renameWorktree never changes the git branch (branch is derived
+    // from sessionId, not from displayName). The returned newBranch equals
+    // the original branch.
     const renamed = renameWorktree(projectDir, "rmcb1", "清理孤儿目录");
-    expect(renamed.newBranch).toBe("agentdock/清理孤儿目录");
-    expect(listBranches()).toContain("agentdock/清理孤儿目录");
+    expect(renamed.newBranch).toBe("agentdock/rmcb1");
+    expect(listBranches()).toContain("agentdock/rmcb1");
 
-    // Simulate the API path: pass the stored branch so the right one is deleted.
-    await removeWorktree(projectDir, "rmcb1", {
-      currentBranch: renamed.newBranch,
-      force: true,
-    });
+    await removeWorktree(projectDir, "rmcb1", { force: true });
 
     expect(existsSync(created.worktreePath)).toBe(false);
-    const branches = listBranches();
-    expect(branches).not.toContain("agentdock/rmcb1");
-    expect(branches).not.toContain("agentdock/清理孤儿目录");
+    expect(listBranches()).not.toContain("agentdock/rmcb1");
   });
 
   it("WRM2: 不传 currentBranch 时回退到 agentdock/<id>（向后兼容）", async () => {
@@ -394,18 +391,15 @@ describe("removeWorktree currentBranch", () => {
     expect(listBranches()).not.toContain("agentdock/rmcb2");
   });
 
-  it("WRM3: 中文 session 名 rename → remove 链不残留任何分支", async () => {
+  it("WRM3: §4.1 中文 displayName rename 不改 branch — remove 清理干净", async () => {
     const created = createWorktree(projectDir, "rmcb3");
     const renamed = renameWorktree(projectDir, "rmcb3", "中文名");
-    await removeWorktree(projectDir, "rmcb3", {
-      currentBranch: renamed.newBranch,
-      force: true,
-    });
+    // §4.1 — branch 派生自 sessionId, 不受 rename 影响
+    expect(renamed.newBranch).toBe("agentdock/rmcb3");
+    await removeWorktree(projectDir, "rmcb3", { force: true });
 
     expect(existsSync(created.worktreePath)).toBe(false);
-    const branches = listBranches();
-    expect(branches).not.toContain("agentdock/rmcb3");
-    expect(branches).not.toContain("agentdock/中文名");
+    expect(listBranches()).not.toContain("agentdock/rmcb3");
   });
 });
 

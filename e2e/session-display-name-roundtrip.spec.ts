@@ -13,6 +13,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect } from "./fixtures/electron-fixture";
+import {
+  awaitSessionComplete,
+  createProject,
+  createSession,
+  initDb,
+  listProjects,
+} from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
@@ -32,118 +39,61 @@ function writeEmptyConfig(dir: string): void {
   );
 }
 
-async function waitForDaemonReady(
-  window: import("@playwright/test").Page,
-  timeoutMs = 20_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const health = await window.evaluate(async () => {
-      return (await window.api.daemon.health()) as {
-        state?: string;
-        lifecycleState?: string;
-      };
-    });
-    const state = health.lifecycleState ?? health.state;
-    if (state === "ready" || state === "READY") return;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(`waitForDaemonReady: daemon not READY after ${timeoutMs}ms`);
-}
-
-async function callV2(
-  window: import("@playwright/test").Page,
-  path: string,
-  body: unknown = {},
-): Promise<{ success: boolean; status?: number; body?: unknown }> {
-  return window.evaluate(
-    async ({ p, b }) => {
-      const res = await window.api.daemon.faultInject(p, b);
-      return res as { success: boolean; status?: number; body?: unknown };
-    },
-    { p: path, b: body },
-  );
-}
-
 test.describe("displayName isolation (§11.4 #7)", () => {
   test("Unicode displayName round-trips correctly without affecting branch name", async ({
     window,
     dataDir,
   }) => {
-    await waitForDaemonReady(window);
-
-    // Set up a real project so the renderer has an activeProjectPath.
+    // Set up a real git repo + empty config (so loadConfig() has no hooks).
     const projectPath = join(dataDir, "display-name-project");
     prepareGitRepo(projectPath);
     writeEmptyConfig(projectPath);
-    const { HomePage } = await import("./pages/home");
-    await new HomePage(window).openProject(projectPath);
+
+    // Init DB and create the project row so the renderer's createSession
+    // can find the project. We deliberately avoid HomePage.openProject
+    // here — that flow uses db:projects:create internally and asserts on
+    // the post-navigation state, which adds a flaky dependency on the
+    // SessionSidebar being expanded. The displayName-isolation concern
+    // is purely about the daemon + git round-trip, not the UI.
+    await initDb(window, projectPath);
+    const project = await createProject(window, {
+      name: "display-name-project",
+      path: projectPath,
+    });
 
     const displayName = "我的中文名";
 
-    // 1. Create a session via the v2 API with a Unicode displayName.
-    const createRes = await callV2(window, "/session/create", {
-      clientId: "e2e-display-name",
-      pid: 11111,
-      projectRoot: projectPath,
-      displayName,
+    // 1. Create a session via the renderer's full UI flow (which keeps
+    //    React Query cache in sync, so listProjects shows the session).
+    const handle = await createSession(window, {
+      projectId: project.id,
+      name: displayName,
     });
-    expect(createRes.success).toBe(true);
-    const sessionId = (createRes.body as { sessionId: string }).sessionId;
+    const sessionId = handle.sessionId;
     expect(sessionId).toMatch(/^[a-zA-Z0-9-]+$/);
 
-    const initialToken = (createRes.body as { fencingToken: number }).fencingToken;
-    expect(initialToken).toBe(1);
+    const { result } = await awaitSessionComplete(window, sessionId);
+    expect(result.success, JSON.stringify(result)).toBe(true);
 
-    // 2. Activate the session.
-    const actRes = await callV2(window, "/session/activate", {
-      sessionId,
-      fencingToken: initialToken,
-    });
-    expect(actRes.success).toBe(true);
+    // 2. Assert the session is visible to the renderer with the correct
+    //    displayName. The renderer's projects query must surface the
+    //    session — its `name` is the displayName we set.
+    const projects = await listProjects(window);
+    expect(projects).toHaveLength(1);
+    expect(projects[0]!.sessions).toHaveLength(1);
+    expect(projects[0]!.sessions[0]!.name).toBe(displayName);
 
-    // 3. Verify daemon v2 state has the correct displayName.
-    const dbg = await window.evaluate(async () => {
-      return (await window.api.daemon.debugState()) as {
-        v2Sessions: Record<string, { status: string; displayName: string }>;
-      };
-    });
-    expect(dbg.v2Sessions[sessionId]).toBeDefined();
-    expect(dbg.v2Sessions[sessionId].displayName).toBe(displayName);
-
-    // 4. Verify the branch is "agentdock/<sessionId>" — NOT derived from
+    // 3. Verify the branch is "agentdock/<sessionId>" — NOT derived from
     //    the displayName. This is the critical isolation assertion: no
     //    matter how exotic the displayName is, the branch stays ASCII-safe.
     const expectedBranch = `agentdock/${sessionId}`;
-    // Use the full UI create-session flow via renderer IPC to also get a
-    // DB row with the branch field. The v2 API doesn't persist a DB row
-    // directly — the renderer does. Instead, verify via git branch listing.
     const gitBranches = execFileSync(
       "git",
       ["branch", "--list", "agentdock/*"],
       { cwd: projectPath, encoding: "utf-8" },
     );
-    // The session may or may not have a git branch yet depending on
-    // whether the renderer lifecycle ran — if it does exist, verify it.
-    if (gitBranches.trim().length > 0) {
-      expect(gitBranches).toContain(expectedBranch);
-      // Must NOT contain the displayName as a branch segment.
-      expect(gitBranches).not.toContain("我的中文名");
-    }
-
-    // 5. Verify the sidebar shows the display name. The session card
-    //    renders session.name which is the displayName.
-    //    The sidebar may take a moment to update after the v2 create.
-    const sessionNameLocator = window.locator(".session-name", {
-      hasText: displayName,
-    });
-    await expect(sessionNameLocator).toBeVisible({ timeout: 10_000 });
-
-    // Cleanup: delete the session via v2 API.
-    const delRes = await callV2(window, "/session/delete", {
-      sessionId,
-      fencingToken: initialToken,
-    });
-    expect(delRes.success).toBe(true);
+    expect(gitBranches).toContain(expectedBranch);
+    // Must NOT contain the displayName as a branch segment.
+    expect(gitBranches).not.toContain("我的中文名");
   });
 });

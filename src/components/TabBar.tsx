@@ -25,7 +25,16 @@ export function TabBar() {
 
   const handleRemoveProject = (projectId: string) => {
     closeProject(projectId);
-    try { navigate({ to: "/" }); } catch {}
+    // After closing a tab, switch to the next available tab if any remain.
+    // Only navigate to home ("/") when the closed tab was the last one.
+    const remaining = openProjects.filter((p) => p.id !== projectId);
+    if (remaining.length > 0) {
+      const next = remaining[0]!;
+      setActiveProject(next.id);
+      try { navigate({ to: "/app/$projectId", params: { projectId: next.id } }); } catch {}
+    } else {
+      try { navigate({ to: "/" }); } catch {}
+    }
   };
 
   const handleTabClick = (projectId: string) => {
