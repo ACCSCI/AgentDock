@@ -1,0 +1,481 @@
+/* ---- Workspace Hook Errors Button ---- */
+
+.workspace-hook-errors-btn {
+  height: 28px;
+  padding: 0 10px;
+  background: #fef2c0;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.workspace-hook-errors-btn:hover {
+  background: #fde68a;
+}
+
+/* ============================================
+   Config Editor
+   ============================================ */
+
+.config-editor {
+  padding: 24px;
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.config-editor-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.config-editor-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.config-file-status {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.config-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+/* Config sections */
+.config-section {
+  margin-bottom: 24px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.config-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--color-bg-secondary);
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+  transition: background 0.15s;
+}
+
+.config-section-header:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.config-section-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.config-section-arrow {
+  font-size: 10px;
+  transition: transform 0.2s;
+  color: var(--color-text-secondary);
+}
+
+.config-section-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.config-section-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.config-section-desc {
+  padding: 0 16px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  padding-bottom: 12px;
+}
+
+.config-section-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Config entries (resource / hook cards) */
+.config-entry {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--color-bg-primary);
+}
+
+.config-entry-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.config-entry-row-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* Config fields */
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-field label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.config-field-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  cursor: help;
+  font-weight: 700;
+}
+
+.config-field input[type="text"],
+.config-field input[type="number"],
+.config-field select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.config-field input[type="text"]:focus,
+.config-field input[type="number"]:focus,
+.config-field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.config-field-source {
+  flex: 1;
+}
+
+.config-field-run {
+  flex: 1;
+}
+
+.config-field-input-group {
+  display: flex;
+  gap: 4px;
+}
+
+.config-field-input-group input {
+  flex: 1;
+}
+
+.config-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-direction: row;
+  font-weight: 400;
+  color: var(--color-text);
+}
+
+.config-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Buttons */
+.config-btn-browse {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.config-btn-browse:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.config-btn-delete {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.config-btn-delete:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.config-btn-add {
+  height: 36px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.config-btn-add:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
+/* Hook tabs */
+.config-hook-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 12px;
+}
+
+.config-hook-tab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.config-hook-tab:hover {
+  color: var(--color-text);
+}
+
+.config-hook-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.config-hook-tab-count {
+  font-size: 11px;
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.config-hook-tab.active .config-hook-tab-count {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.config-hook-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Per-hook async/sync mode tabs */
+.config-hook-mode-tabs {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.config-hook-mode-tab {
+  padding: 4px 12px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.config-hook-mode-tab:first-child {
+  border-right: 1px solid var(--color-border-light);
+}
+.config-hook-mode-tab:hover {
+  background: var(--color-bg-tertiary);
+}
+.config-hook-mode-tab.active {
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 500;
+}
+.config-field-async-mode {
+  min-width: 160px;
+}
+
+/* YAML preview */
+.config-yaml-preview {
+  margin-bottom: 24px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.config-yaml-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--color-bg-secondary);
+}
+
+.config-yaml-preview-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.config-yaml-preview-header button {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.config-yaml-preview pre {
+  margin: 0;
+  padding: 16px;
+  background: var(--color-bg-primary);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+/* Action bar */
+.config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 8px;
+}
+
+.config-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.config-btn {
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.config-btn-preview {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.config-btn-preview:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.config-btn-save {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.config-btn-save:hover {
+  background: var(--color-primary-hover);
+}
+
+.config-btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.config-save-status {
+  font-size: 13px;
+}
+
+.config-save-success {
+  color: #16a34a;
+}
+
+.config-save-error {
+  color: #dc2626;
+}
+
+/* ============================================
+   Config Editor — Port Configuration (env.ports)
+   ============================================ */
+

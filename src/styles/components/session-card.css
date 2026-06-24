@@ -1,0 +1,235 @@
+/* Drag-and-drop reordering styles */
+.session-card-wrapper {
+  position: relative;
+}
+
+.session-card[draggable="true"] {
+  cursor: grab;
+}
+
+.session-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.session-card.dragging {
+  opacity: 0.4;
+}
+
+.session-list.drag-active .session-card-wrapper .session-card:hover {
+  cursor: default;
+}
+
+.session-drop-indicator {
+  height: 3px;
+  background: var(--color-primary, #e11931);
+  border-radius: 2px;
+  margin: -1px 0;
+  position: relative;
+  z-index: 1;
+  transition: opacity 0.1s;
+}
+
+.session-drop-indicator::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: var(--color-primary, #e11931);
+  border-radius: 50%;
+}
+
+.session-card-wrapper.drop-before > .session-drop-indicator {
+  margin-bottom: 2px;
+}
+
+.session-card-wrapper.drop-after > .session-drop-indicator {
+  margin-top: 2px;
+}
+
+.session-rename-input {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-primary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  padding: 2px 4px;
+  outline: none;
+}
+
+.session-name {
+  font-size: 13px;
+  color: var(--color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-ports {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.session-close {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.session-close:hover {
+  background: var(--color-bg-secondary);
+}
+
+/* Session Card — Delete Confirmation */
+.session-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.session-delete-confirm-text {
+  font-size: 11px;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.session-delete-confirm-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.session-delete-confirm-yes {
+  color: #22c55e;
+}
+
+.session-delete-confirm-yes:hover {
+  background: #f0fdf4;
+}
+
+.session-delete-confirm-no {
+  color: var(--color-text-secondary);
+}
+
+.session-delete-confirm-no:hover {
+  background: var(--color-bg-secondary);
+}
+
+.session-sidebar-new-btn {
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.session-sidebar-new-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.session-sidebar-new-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.session-sidebar-new-btn:disabled:hover {
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+.session-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.session-status-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-session-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  white-space: nowrap;
+}
+
+.session-status-badge-foreign,
+.workspace-session-status-foreign {
+  border-color: #9ca3af;
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.session-card-foreign {
+  cursor: default;
+  opacity: 0.72;
+  background: #f8fafc;
+  color: var(--color-text-secondary);
+}
+
+.session-card-foreign:hover {
+  background: #f8fafc;
+}
+
+.session-foreign-group {
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 8px;
+}
+
+.session-foreign-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  padding: 6px 4px;
+  cursor: pointer;
+}
+
+.session-foreign-toggle:hover {
+  color: var(--color-primary);
+}
+
+.session-foreign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.workspace-session-status {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-session-border);
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+}

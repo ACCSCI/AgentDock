@@ -1,0 +1,131 @@
+.config-port-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-height: 32px;
+}
+
+.config-port-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-tertiary, #1e293b);
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: monospace;
+  color: var(--color-text-primary, #e2e8f0);
+}
+
+.config-port-tag-label {
+  color: var(--color-accent, #60a5fa);
+}
+
+.config-port-tag-remove {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary, #94a3b8);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.config-port-tag-remove:hover {
+  color: #ef4444;
+}
+
+.config-port-empty {
+  color: var(--color-text-secondary, #94a3b8);
+  font-size: 13px;
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.config-port-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.config-port-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 6px;
+  background: var(--color-bg-primary, #0f172a);
+  color: var(--color-text-primary, #e2e8f0);
+  font-size: 13px;
+  font-family: monospace;
+  outline: none;
+}
+
+.config-port-input:focus {
+  border-color: var(--color-accent, #60a5fa);
+}
+
+.config-port-input::placeholder {
+  color: var(--color-text-secondary, #94a3b8);
+  font-family: inherit;
+}
+
+.config-btn-add-port:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.config-port-hints {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary, #1e293b);
+  border: 1px dashed var(--color-border, #334155);
+  border-radius: 6px;
+}
+
+.config-port-hints-label {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-secondary, #94a3b8);
+  margin-bottom: 6px;
+}
+
+.config-port-hint-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.config-port-hint-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  padding: 2px 8px;
+  background: var(--color-bg-tertiary, #0f172a);
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 4px;
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.config-port-hint-tag.added {
+  border-color: var(--color-accent, #60a5fa);
+  color: var(--color-accent, #60a5fa);
+  opacity: 0.6;
+}
+
+.config-port-hint-add {
+  background: none;
+  border: none;
+  color: #22c55e;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.config-port-hint-add:hover {
+  color: #16a34a;
+}

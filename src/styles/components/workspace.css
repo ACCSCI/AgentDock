@@ -1,0 +1,121 @@
+/* Workspace */
+.app-workspace {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.workspace-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.workspace-path {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.workspace-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  min-height: 0;
+}
+
+.workspace-hint {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  padding: 16px;
+}
+
+.workspace-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+}
+
+/* Session Terminal */
+.session-terminal {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.session-terminal-xterm {
+  flex: 1;
+  overflow: hidden;
+}
+
+.session-terminal-xterm .xterm {
+  height: 100%;
+}
+
+.session-terminal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.session-terminal-overlay.connecting {
+  color: var(--color-text-secondary);
+  background: rgba(30, 30, 30, 0.7);
+}
+
+.session-terminal-overlay.disconnected {
+  color: #e5e510;
+  background: rgba(30, 30, 30, 0.85);
+}
+
+.session-terminal-overlay.error {
+  color: #f14c4c;
+  background: rgba(30, 30, 30, 0.85);
+}
+
+/* Home Page */
+.home-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.home-open-btn {
+  padding: 16px 40px;
+  font-size: 18px;
+  color: var(--color-primary);
+  background: transparent;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.home-open-btn:hover {
+  background: var(--color-bg-secondary);
+}
