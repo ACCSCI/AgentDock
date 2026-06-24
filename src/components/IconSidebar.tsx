@@ -3,8 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { OrphanCleanModal } from "./OrphanCleanModal";
+import { useTranslation } from "../i18n/react";
 
 export function IconSidebar() {
+  const { t } = useTranslation("sidebar");
   const navigate = useNavigate();
   const [orphanModalOpen, setOrphanModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -44,7 +46,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title="清理孤儿目录"
+            title={t("expandSidebar")}
             onClick={openOrphanModal}
             data-testid="open-orphan-modal"
           >
@@ -53,7 +55,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title="复制 AgentDock 兼容提示词"
+            title={t("viewPullRequests")}
             onClick={handleCopyPrompt}
             data-testid="copy-compat-prompt"
           >
@@ -64,7 +66,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title="设置"
+            title={t("newSession")}
             onClick={() => navigate({ to: "/settings" })}
             data-testid="open-settings"
           >

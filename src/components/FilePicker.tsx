@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useProjectFiles, type FileEntry } from "../lib/queries";
+import { useTranslation } from "../i18n/react";
 
 interface FilePickerProps {
   open: boolean;
@@ -9,6 +10,7 @@ interface FilePickerProps {
 }
 
 export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerProps) {
+  const { t } = useTranslation("modals");
   const [currentPath, setCurrentPath] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -96,7 +98,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
     <div className="file-picker-overlay" onClick={onCancel}>
       <div className="file-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="file-picker-header">
-          <h3>选择文件</h3>
+          <h3>{t("filePicker.title")}</h3>
           <button type="button" className="file-picker-close" onClick={onCancel}>×</button>
         </div>
 
@@ -130,7 +132,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         <div className="file-picker-search">
           <input
             type="text"
-            placeholder="搜索文件..."
+            placeholder={t("filePicker.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -139,9 +141,9 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         {/* File list */}
         <div className="file-picker-list" ref={listRef} onScroll={handleScroll}>
           {isLoading ? (
-            <div className="file-picker-loading">加载中...</div>
+            <div className="file-picker-loading">{t("loading", { ns: "common" })}</div>
           ) : displayEntries.length === 0 ? (
-            <div className="file-picker-empty">此目录为空</div>
+            <div className="file-picker-empty">{t("noMatch", { ns: "common" })}</div>
           ) : (
             displayEntries.map((entry) => (
               <div
@@ -182,7 +184,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
           )}
           <div className="file-picker-footer-right">
             <button type="button" className="file-picker-btn file-picker-btn-cancel" onClick={onCancel}>
-              取消
+              {t("filePicker.cancel")}
             </button>
             <button
               type="button"
@@ -190,7 +192,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
               disabled={!selected}
               onClick={handleConfirm}
             >
-              选择
+              {t("filePicker.select")}
             </button>
           </div>
         </div>

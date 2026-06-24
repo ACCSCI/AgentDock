@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { type OrphanDir, useDeleteOrphans, useOrphans } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { useTranslation } from "../i18n/react";
 
 interface OrphanCleanModalProps {
   open: boolean;
@@ -31,6 +32,7 @@ function orphanKey(o: OrphanDir): string {
 }
 
 export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
+  const { t } = useTranslation("modals");
   const { activeProjectId } = useStore();
   const { data: orphans, isLoading, error, refetch } = useOrphans(open ? activeProjectId : null);
   const deleteOrphans = useDeleteOrphans();
@@ -128,7 +130,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
       >
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
-            <h3>🧹 清理孤儿目录</h3>
+            <h3>🧹 {t("orphanClean.title")}</h3>
           </div>
           <button type="button" className="dir-modal-close" onClick={onClose}>
             ✕
@@ -136,7 +138,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
         </div>
 
         <div className="orphan-description">
-          以下条目存在于磁盘 / git 中但不属于任何活跃 session，可以安全删除。
+          {t("orphanClean.description")}
         </div>
 
         {/* Select all — above the list */}
@@ -199,7 +201,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
         {/* Actions */}
         <div className="dir-modal-actions">
           <button type="button" className="dir-modal-btn dir-modal-btn-cancel" onClick={onClose}>
-            关闭
+            {t("orphanClean.cancel")}
           </button>
           <button
             type="button"
@@ -208,7 +210,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
             onClick={handleDelete}
             data-testid="orphan-delete-selected"
           >
-            {deleteOrphans.isPending ? "删除中..." : `删除选中 (${selected.size})`}
+            {deleteOrphans.isPending ? t("loading", { ns: "common" }) : `${t("orphanClean.clean")} (${selected.size})`}
           </button>
         </div>
       </div>

@@ -1,9 +1,11 @@
 import { useStore } from "../lib/store";
 import { TERMINAL_FONT_SIZES, TERMINAL_FONT_FAMILIES } from "../lib/store";
-import type { TerminalPreferences, TerminalFontSize } from "../lib/store";
+import type { TerminalPreferences } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
+import { useTranslation } from "../i18n/react";
 
 export function TerminalSettingsBar() {
+  const { t } = useTranslation("terminal");
   const { terminalPrefs, setTerminalPrefs } = useStore();
 
   const update = (patch: Partial<TerminalPreferences>) => {
@@ -27,13 +29,13 @@ export function TerminalSettingsBar() {
   return (
     <div className="terminal-settings-bar">
       <div className="terminal-settings-group">
-        <label className="terminal-settings-label">Size</label>
+        <label className="terminal-settings-label">{t("fontSize")}</label>
         <button
           type="button"
           className="terminal-settings-stepper"
           onClick={() => cycleFontSize(-1)}
           disabled={terminalPrefs.fontSize <= TERMINAL_FONT_SIZES[0]}
-          title="Decrease font size"
+          title={t("decreaseFontSize")}
         >
           −
         </button>
@@ -43,7 +45,7 @@ export function TerminalSettingsBar() {
           className="terminal-settings-stepper"
           onClick={() => cycleFontSize(1)}
           disabled={terminalPrefs.fontSize >= TERMINAL_FONT_SIZES[TERMINAL_FONT_SIZES.length - 1]}
-          title="Increase font size"
+          title={t("increaseFontSize")}
         >
           +
         </button>

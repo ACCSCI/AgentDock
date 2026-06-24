@@ -8,6 +8,7 @@ import {
   useUpdateTodo,
   useReorderTodo,
 } from "../lib/queries";
+import { useTranslation } from "../i18n/react";
 
 interface TodoDropdownProps {
   projectId: string | null;
@@ -15,6 +16,7 @@ interface TodoDropdownProps {
 }
 
 export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
+  const { t } = useTranslation("todo");
   const [input, setInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
@@ -157,7 +159,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
   const handleCopy = useCallback(async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
-      showToast("Copied!");
+      showToast(t("copied"));
     } catch {
       showToast("Copy failed");
     }
@@ -224,7 +226,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       data-testid="todo-dropdown"
     >
       <div className="todo-dropdown-header">
-        <span className="todo-dropdown-title">Todo</span>
+        <span className="todo-dropdown-title">{t("todo")}</span>
         {todos.length > 0 && (
           <span className="todo-dropdown-count">
             {doneCount}/{todos.length}
@@ -237,7 +239,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
           ref={inputRef}
           type="text"
           className="todo-dropdown-input"
-          placeholder={projectId ? "Add a task..." : "Open a project first"}
+          placeholder={projectId ? t("addTask") : "Open a project first"}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -258,7 +260,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
         {todos.length === 0 && (
           <div className="todo-dropdown-empty">
-            {projectId ? "No tasks yet" : "Open a project to add tasks"}
+            {projectId ? t("noTasks") : "Open a project to add tasks"}
           </div>
         )}
         {todos.map((todo) => (
@@ -283,7 +285,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
           >
             <span
               className="todo-dropdown-drag-handle"
-              title="Drag to reorder"
+              title={t("dragToReorder")}
               draggable
               onDragStart={(e) => handleDragStart(e, todo.id)}
             >
@@ -321,7 +323,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
                   e.preventDefault();
                   handleCopy(todo.content);
                 }}
-                title="Double-click: edit · Right-click: copy"
+                title={`${t("doubleClickToEdit")} · ${t("rightClickToCopy")}`}
                 data-testid="todo-text"
               >
                 {todo.content}
@@ -332,7 +334,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               type="button"
               className="todo-dropdown-delete-btn"
               onClick={() => handleDelete(todo.id)}
-              title="Delete"
+              title={t("delete")}
               data-testid="todo-delete-btn"
             >
               ×

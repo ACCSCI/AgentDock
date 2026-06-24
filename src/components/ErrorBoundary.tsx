@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import i18n from "../i18n";
 
 interface Props {
   children: ReactNode;
@@ -54,19 +55,19 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="error-boundary">
           <div className="error-boundary-box">
-            <p className="error-boundary-title">出了点问题</p>
+            <p className="error-boundary-title">{i18n.t("somethingWentWrong", { ns: "error-boundary" })}</p>
             <p className="error-boundary-message">
-              {this.state.error?.message ?? "未知错误"}
+              {this.state.error?.message ?? i18n.t("unknownError", { ns: "error-boundary" })}
             </p>
             {import.meta.env.DEV && this.state.error?.stack && (
               <pre className="error-boundary-stack">{this.state.error.stack}</pre>
             )}
             <div className="error-boundary-actions">
               <button type="button" onClick={this.handleCopy} className="error-boundary-btn">
-                复制堆栈
+                {i18n.t("copyStack", { ns: "error-boundary" })}
               </button>
               <button type="button" onClick={this.handleReload} className="error-boundary-btn error-boundary-btn-primary">
-                重新加载
+                {i18n.t("reload", { ns: "error-boundary" })}
               </button>
             </div>
           </div>

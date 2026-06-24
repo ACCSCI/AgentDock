@@ -6,6 +6,7 @@ import type { TerminalDefaultAction } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
 import { TerminalSettingsBar } from "./TerminalSettingsBar";
+import { useTranslation } from "../i18n/react";
 
 interface TerminalManagerProps {
   sessionId: string;
@@ -25,6 +26,7 @@ const ACTION_ITEMS: { key: TerminalDefaultAction; label: string; icon: string; c
 ];
 
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
+  const { t } = useTranslation("terminal");
   const { setActiveTerminal, getActiveTerminal, terminalDefaultAction, setTerminalDefaultAction } = useStore();
   const activeTerminalId = getActiveTerminal(sessionId);
   const { data: terminals = [] } = useSessionTerminals(sessionId);
@@ -177,7 +179,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         terminalCache.sendText(terminal.terminalId, cmd + "\r");
       }
     } catch (err) {
-      alert(`Failed to create terminal: ${err instanceof Error ? err.message : "Unknown error"}`);
+      alert(`${t("createFailed")}: ${err instanceof Error ? err.message : t("unknownError")}`);
     } finally {
       setLoading(false);
     }
@@ -382,7 +384,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
               type="button"
               className="terminal-tab-close"
               onClick={(e) => handleCloseTerminal(t.terminalId, e)}
-              title="Close terminal"
+              title={t("closeTerminal")}
             >
               x
             </button>
@@ -421,7 +423,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
                     type="button"
                     className={`terminal-add-dropdown-pin ${isDefault(item.key) ? "terminal-add-dropdown-pin-active" : ""}`}
                     onClick={(e) => handlePin(item.key, e)}
-                    title={isDefault(item.key) ? "Default action" : "Set as default"}
+                    title={isDefault(item.key) ? t("terminal") : t("terminal")}
                   >
                     <span className="pin-icon" />
                   </button>
@@ -442,13 +444,13 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             className="terminal-context-menu-item"
             onClick={() => handleStartRename(menu.terminalId)}
           >
-            Rename
+            {t("rename")}
           </div>
           <div
             className="terminal-context-menu-item terminal-context-menu-item-danger"
             onClick={() => { setMenu(null); handleCloseTerminal(menu.terminalId); }}
           >
-            Close
+            {t("closeTerminal")}
           </div>
         </div>
       )}
