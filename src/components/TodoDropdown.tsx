@@ -303,6 +303,13 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
                 }}
                 title="Double-click: edit · Right-click: copy"
                 data-testid="todo-text"
+                onWheel={(e) => {
+                  const el = e.currentTarget;
+                  if (e.shiftKey && el.scrollWidth > el.clientWidth) {
+                    e.preventDefault();
+                    el.scrollLeft += e.deltaY;
+                  }
+                }}
               >
                 {todo.content}
               </span>

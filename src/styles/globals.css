@@ -3125,12 +3125,18 @@ body {
   flex: 1;
   font-size: 12px;
   color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: unset;
   white-space: nowrap;
   cursor: default;
   user-select: none;
+  scrollbar-width: none;
   transition: color 0.15s, opacity 0.15s;
+}
+
+.todo-dropdown-item:hover .todo-dropdown-item-text {
+  scrollbar-width: thin;
 }
 
 .todo-dropdown-item--done .todo-dropdown-item-text {
