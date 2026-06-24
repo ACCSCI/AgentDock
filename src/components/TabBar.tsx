@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useProjects } from "../lib/queries";
+import { useInitDb, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
@@ -10,6 +10,7 @@ export function TabBar() {
   const navigate = useNavigate();
   const { activeProjectId, activeSessionId, setActiveProject, setActiveSession, closedProjectIds, closeProject } = useStore();
   const { data: projects } = useProjects();
+  const initDb = useInitDb();
   const {
     openProject,
     modalOpen,
@@ -49,8 +50,20 @@ export function TabBar() {
         try { navigate({ to: "/" }); } catch {}
       }
     } else {
-      setActiveProject(projectId);
-      navigate({ to: "/app/$projectId", params: { projectId } });
+      // Tell the main process which project is active so syncProject()
+      // and other DB handlers can find the project record in the global DB.
+      const project = projects?.find((p) => p.id === projectId);
+      if (project) {
+        initDb.mutate(project.path, {
+          onSuccess: () => {
+            setActiveProject(projectId);
+            navigate({ to: "/app/$projectId", params: { projectId } });
+          },
+        });
+      } else {
+        setActiveProject(projectId);
+        navigate({ to: "/app/$projectId", params: { projectId } });
+      }
     }
   };
 

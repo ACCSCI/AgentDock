@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
-import { useCreateProject, useProjects } from "../lib/queries";
+import { queryKeys, useCreateProject, useInitDb, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 
@@ -19,6 +20,7 @@ export function useOpenProject() {
   const { setActiveProject } = useStore();
   const { data: projects } = useProjects();
   const createProject = useCreateProject();
+  const initDb = useInitDb();
   const navigate = useNavigate();
 
   // Git-init confirmation state
@@ -36,6 +38,9 @@ export function useOpenProject() {
     async (selectedPath: string, name: string) => {
       try {
         const project = await createProject.mutateAsync({ name, path: selectedPath });
+        // Tell the main process which project is active so syncProject()
+        // and other DB handlers can find the project record in the global DB.
+        await initDb.mutateAsync(selectedPath);
         setActiveProject(project.id);
         navigate({ to: "/app/$projectId", params: { projectId: project.id } });
       } catch (error) {
@@ -43,7 +48,7 @@ export function useOpenProject() {
         alert(`打开项目失败: ${message}`);
       }
     },
-    [createProject, setActiveProject, navigate],
+    [createProject, initDb, setActiveProject, navigate],
   );
 
   /**
@@ -81,6 +86,9 @@ export function useOpenProject() {
       // Fast-path: project with same path already exists → navigate.
       const existingByPath = projects?.find((p) => p.path === selectedPath);
       if (existingByPath) {
+        // Tell the main process which project is active so syncProject()
+        // and other DB handlers can find the project record in the global DB.
+        await initDb.mutateAsync(selectedPath);
         setActiveProject(existingByPath.id);
         navigate({ to: "/app/$projectId", params: { projectId: existingByPath.id } });
         return;

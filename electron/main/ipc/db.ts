@@ -49,6 +49,8 @@ export interface DbContext {
   getV2PortService: () => V2PortServiceHandle | null;
   /** P9: daemon port for direct v2 fetch to /sync. 0 if no daemon. */
   getDaemonPort: () => number;
+  /** Global projects DB (machine-level, not per-project). */
+  getGlobalDb: () => import("../../../plugins/db/index.js").DrizzleDb | null;
 }
 
 let dbBindingBroken = false;
@@ -252,11 +254,15 @@ async function syncProject(
   const worktreePorts = buildWorktreePorts(v2, v2Snapshot);
 
   // 2. Per-project sync (caller passes one project at a time).
-  const project = db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.path, projectPath))
-    .get();
+  // Project lookup uses the global DB (projects no longer in per-project DBs).
+  const globalDb = ctx.getGlobalDb();
+  const project = globalDb
+    ? globalDb
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.path, projectPath))
+      .get()
+    : undefined;
   if (!project) return;
 
   // (a) Daemon ports → DB for existing rows (by worktreePath).
@@ -321,6 +327,26 @@ async function syncProject(
       try {
         const result = await silentTakeover(v2, wt, project, db);
         ctx.setSessionStatus(wt.sessionId, "existing");
+        // Insert the session row now that the daemon has claimed the worktree.
+        // Without this, takeover sessions are invisible to the sidebar.
+        try {
+          db.insert(schema.sessions)
+            .values({
+              id: wt.sessionId,
+              projectId: project.id,
+              name: wt.sessionId,
+              branch: wt.branch,
+              worktreePath: wt.worktreePath,
+              ports: JSON.stringify(result.ports),
+              backgroundHookStatus: null,
+            })
+            .run();
+        } catch (insertErr) {
+          log.warn(
+            { err: insertErr, sessionId: wt.sessionId },
+            "syncProject: takeover session insert failed",
+          );
+        }
         log.info(
           { sessionId: wt.sessionId, ports: result.ports },
           "syncProject: takeover complete",
@@ -479,7 +505,11 @@ export function registerDb(ctx: DbContext): void {
     if (projectPath) {
       await syncProject(projectPath, ctx);
     }
-    const allProjects = db.select().from(schema.projects).all();
+    // Projects live in the global DB; sessions live in the per-project DB.
+    const globalDb = ctx.getGlobalDb();
+    const allProjects = globalDb
+      ? globalDb.select().from(schema.projects).all()
+      : [];
     const sessionRows = db
       .select()
       .from(schema.sessions)
@@ -508,18 +538,24 @@ export function registerDb(ctx: DbContext): void {
 
   ipcMain.handle(IPC_CHANNELS["db:projects:create"], (_e, body: { name: string; path: string }) => {
     if (!body?.name || !body?.path) throw new Error("name and path required");
-    const db = getDb(ctx);
     const safePath = validateProjectPath(body.path);
     const id = nanoid(8);
-    db.insert(schema.projects).values({ id, name: body.name, path: safePath }).run();
-    return db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
+    const globalDb = ctx.getGlobalDb();
+    if (!globalDb) throw new Error("Global DB not initialized");
+    globalDb.insert(schema.projects).values({ id, name: body.name, path: safePath }).run();
+    return globalDb.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
   });
 
   ipcMain.handle(IPC_CHANNELS["db:projects:delete"], async (_e, projectId: string) => {
     if (!projectId) throw new Error("projectId required");
-    const db = getDb(ctx);
-    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    // Project lookup is from the global DB.
+    const globalDb = ctx.getGlobalDb();
+    const project = globalDb
+      ? globalDb.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get()
+      : undefined;
     if (!project) return { deleted: 0, sessionIds: [], failed: [] };
+    // Sessions are from the per-project DB.
+    const db = getDb(ctx);
     const sessionsForProject = db
       .select().from(schema.sessions).where(eq(schema.sessions.projectId, projectId)).all();
     const v2 = ctx.getV2PortService();
@@ -542,7 +578,8 @@ export function registerDb(ctx: DbContext): void {
       }
     }
     db.delete(schema.sessions).where(eq(schema.sessions.projectId, projectId)).run();
-    db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+    // Project record is in the global DB.
+    globalDb?.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
     return { deleted: sessionsForProject.length, sessionIds: sessionsForProject.map((s) => s.id), failed };
   });
 

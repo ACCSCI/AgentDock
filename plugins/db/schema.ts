@@ -11,9 +11,7 @@ export const projects = sqliteTable("projects", {
 
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
   name: text("name").notNull(),
   branch: text("branch").notNull(),
   worktreePath: text("worktree_path").notNull(),
@@ -35,9 +33,7 @@ export type TodoStatus = "pending" | "in_progress" | "done";
 
 export const todos = sqliteTable("todos", {
   id: text("id").primaryKey(),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
   content: text("content").notNull(),
   status: text("status").$type<TodoStatus>().notNull().default("pending"),
   sortOrder: integer("sort_order").notNull().default(0),

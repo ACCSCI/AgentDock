@@ -46,6 +46,8 @@ export interface SessionsDeps {
   getV2PortService: () => V2PortServiceHandle | null;
   /** P9: returns the daemon port for direct v2 fetches. */
   getDaemonPort: () => number;
+  /** Global projects DB (machine-level, not per-project). */
+  getGlobalDb: () => import("../../../plugins/db/index.js").DrizzleDb | null;
 }
 
 function v2DisabledResponse(): { success: false; error: string } {
@@ -113,11 +115,14 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!db) {
       throw new Error("db not initialized");
     }
-    const project = db
-      .select()
-      .from(schema.projects)
-      .where(eq(schema.projects.id, projectId))
-      .get();
+    const globalDb = deps.getGlobalDb();
+    const project = globalDb
+      ? globalDb
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, projectId))
+        .get()
+      : undefined;
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
@@ -324,8 +329,8 @@ export function registerSessions(deps: SessionsDeps): void {
     // process-wide active path — those differ for any non-cwd project).
     // `removeWorktree(projectPath, sessionId, ...)` derives the worktree
     // dir from this, so a wrong path → "Worktree not found".
-    const ownerProject = db
-      .select()
+    const ownerProject = deps.getGlobalDb()
+      ?.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
       .get();
@@ -401,8 +406,8 @@ export function registerSessions(deps: SessionsDeps): void {
     // process-wide active path (cwd), not the project that owns this
     // session. With multiple projects open, that pointed
     // `renameWorktree` at the wrong directory.
-    const ownerProject = db
-      .select()
+    const ownerProject = deps.getGlobalDb()
+      ?.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
       .get();
@@ -497,8 +502,8 @@ export function registerSessions(deps: SessionsDeps): void {
     // Look up the owning project so loadConfig + hook context use the
     // real project root (NOT cwd — those differ for any non-cwd project
     // and would load the wrong agentdock.config.yaml).
-    const ownerProject = db
-      .select()
+    const ownerProject = deps.getGlobalDb()
+      ?.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
       .get();
@@ -688,7 +693,7 @@ export function registerSessions(deps: SessionsDeps): void {
       const v2 = deps.getV2PortService();
       const port = deps.getDaemonPort();
       if (!v2 || !port) return v2DisabledResponse();
-      const project = deps.getDb()
+      const project = deps.getGlobalDb()
         ?.select()
         .from(schema.projects)
         .where(eq(schema.projects.id, params.projectId))

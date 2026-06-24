@@ -15,6 +15,7 @@ import { registerTodos } from "./todos.js";
 import { registerBootstrap, type BootstrapDeps } from "../bootstrap.js";
 import { registerApp } from "./app.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
+import type { DrizzleDb } from "../../../plugins/db/index.js";
 import type { DaemonHonoClient } from "../hono-client.js";
 import type { DaemonManager } from "../../../plugins/daemon-manager.js";
 import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
@@ -45,6 +46,8 @@ export interface AllIpcDeps {
   getSseConsumer: () => SseConsumer | null;
   /** P9: true when AGENTDOCK_V2=1. */
   isV2Enabled: () => boolean;
+  /** Global projects DB (machine-level, not per-project). */
+  getGlobalDb: () => DrizzleDb | null;
 }
 
 export function registerAllIpc(deps: AllIpcDeps): void {
@@ -78,6 +81,7 @@ export function registerAllIpc(deps: AllIpcDeps): void {
     clearSessionStatuses: deps.clearSessionStatuses,
     getV2PortService: deps.getV2PortService,
     getDaemonPort: deps.getDaemonPort,
+    getGlobalDb: deps.getGlobalDb,
   };
   registerDb(dbCtx);
 
@@ -92,6 +96,7 @@ export function registerAllIpc(deps: AllIpcDeps): void {
     getDaemonManager: deps.getDaemonManager,
     getV2PortService: deps.getV2PortService,
     getDaemonPort: deps.getDaemonPort,
+    getGlobalDb: deps.getGlobalDb,
   };
   registerSessions(sessionsDeps);
 
@@ -99,10 +104,10 @@ export function registerAllIpc(deps: AllIpcDeps): void {
   registerTerminals();
 
   // FS + Config (4 channels)
-  registerFsAndConfig(deps.getProjectPath);
+  registerFsAndConfig(deps.getProjectPath, deps.getGlobalDb);
 
   // Worktree + Shell (4 channels)
-  registerWorktreeAndShell(deps.getProjectPath);
+  registerWorktreeAndShell(deps.getProjectPath, deps.getGlobalDb);
 
   // Git (2 channels: isRepo, init) — self-contained, no deps required.
   registerGit();

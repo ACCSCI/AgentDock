@@ -19,7 +19,7 @@ import { app, BrowserWindow, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { generateClientId } from "./main/client-id.js";
 import { DaemonManager } from "../plugins/daemon-manager.js";
 import { createDaemonClient, type DaemonHonoClient } from "./main/hono-client.js";
@@ -32,6 +32,8 @@ import {
   ensureActiveDb,
   getActiveDb,
 } from "../plugins/db/index.js";
+import { getDbPath } from "../plugins/db/index.js";
+import { openGlobalDb, migrateProjectsToGlobal } from "../plugins/db/global.js";
 import * as schema from "../plugins/db/schema.js";
 import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-port-service.js";
 import { AGENTDOCK_DEFAULT_V2 } from "../plugins/constants.js";
@@ -76,6 +78,9 @@ let sseConsumer: SseConsumer | null = null;
 let v2State: AppliedState = emptyState();
 // Port the daemon is listening on (set once at boot, used by reconcileAndDeclareSessions).
 let cachedDaemonPort = 0;
+
+// Global projects DB handle (machine-level, opened once at boot).
+let globalDbHandle: ReturnType<typeof import("../plugins/db/global.js").openGlobalDb> | null = null;
 
 // Session runtime status tracking — populated by syncProject().
 // Tracks per-session status across IPC calls:
@@ -296,7 +301,7 @@ async function reconcileAndDeclareSessions(): Promise<void> {
       newPorts,
     });
     try {
-      const project = db
+      const project = globalDbHandle?.db
         .select()
         .from(schema.projects)
         .where(eq(schema.projects.id, row.projectId))
@@ -586,6 +591,23 @@ async function bootstrap() {
 
   // 2. Register ALL IPC handlers (Phase 4: 29 channels + 3 daemon channels)
 
+  // Global projects DB — machine-level singleton at ~/.agentdock/projects.db
+  globalDbHandle = openGlobalDb();
+  // One-time seed: if global DB is empty, migrate from the active project's DB
+  try {
+    const count = globalDbHandle.db
+      .select({ c: sql<number>`count(*)` })
+      .from(schema.projects)
+      .get();
+    const seedPath = activeProjectPath || process.cwd();
+    if (count && count.c === 0 && seedPath) {
+      const srcPath = getDbPath(seedPath);
+      migrateProjectsToGlobal(globalDbHandle.db, srcPath);
+    }
+  } catch {
+    log.warn("global DB seed migration failed — will retry on next boot");
+  }
+
   const ipcDeps: AllIpcDeps = {
     getDaemonClient: () => daemonClient,
     getDaemonManager: () => daemonManager,
@@ -610,6 +632,7 @@ async function bootstrap() {
     getSseConsumer: () => sseConsumer,
     getSseLastSeq: () => sseConsumer?.getLastSeq() ?? 0,
     isV2Enabled: () => resolveV2Enabled(),
+    getGlobalDb: () => globalDbHandle?.db ?? null,
   };
 
   // Cache the v2 flag for this boot — env is static after process start.
@@ -839,6 +862,9 @@ app.on("before-quit", (e) => {
     v2PortService.dispose();
     v2PortService = null;
   }
+
+  // Close the global projects DB handle.
+  globalDbHandle?.close();
 
   // Unregister BEFORE killing the daemon child. If we're the leader,
   // the daemon dies in daemonManager.shutdown() and the unregister

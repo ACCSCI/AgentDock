@@ -198,9 +198,13 @@ export function useProjects() {
 
 // POST db:init — initialize the active project DB
 export function useInitDb() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (projectPath: string) => {
       await api().db.init(projectPath);
+      // The active project DB just changed — invalidate cached projects
+      // query so it refetches with the new project's sessions/sync state.
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       return { success: true };
     },
   });
@@ -933,7 +937,13 @@ export function useV2Projects() {
   // to old query. Empty v2State means the snapshot hasn't loaded sessions
   // yet (daemon still in RECOVERING, or no sessions exist); in that case
   // the old DB-based query is authoritative for project metadata.
-  if (v2Projects && v2Projects.length > 0) {
+  //
+  // Also fall back when v2Projects has projects but zero total sessions —
+  // this happens when v2State is ready but the daemon hasn't registered
+  // owners yet (e.g. freshly claimed takeover sessions), so the
+  // hasOwner filter strips all sessions. The DB-based oldProjects still
+  // has the correct session data.
+  if (v2Projects && v2Projects.length > 0 && v2Projects.some((p) => p.sessions.length > 0)) {
     return {
       ...oldQuery,
       data: v2Projects,

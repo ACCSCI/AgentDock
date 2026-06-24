@@ -15,20 +15,26 @@ import { stringify as yamlStringify } from "yaml";
 import { eq } from "drizzle-orm";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
-import { ensureActiveDb } from "../../../plugins/db/index.js";
 import { loadConfig, AgentDockConfigSchema } from "../../../plugins/config.js";
 import { discoverPortKeysFromEnv } from "../../../plugins/env.js";
 import { log } from "../../../plugins/logger.js";
+import type { DrizzleDb } from "../../../plugins/db/index.js";
 
-function resolveProjectRoot(projectId?: string | null, fallback?: string | null): string {
+function resolveProjectRoot(
+  projectId?: string | null,
+  fallback?: string | null,
+  getGlobalDb?: () => DrizzleDb | null,
+): string {
   if (projectId) {
-    const db = ensureActiveDb(fallback ?? process.cwd());
-    const row = db
-      .select({ path: schema.projects.path })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, projectId))
-      .get();
-    if (row?.path) return row.path;
+    const globalDb = getGlobalDb?.();
+    if (globalDb) {
+      const row = globalDb
+        .select({ path: schema.projects.path })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, projectId))
+        .get();
+      if (row?.path) return row.path;
+    }
   }
   if (fallback) return fallback;
   throw new Error("db:init must be called first");
@@ -36,6 +42,7 @@ function resolveProjectRoot(projectId?: string | null, fallback?: string | null)
 
 export function registerFsAndConfig(
   getProjectPath: () => string | null,
+  getGlobalDb?: () => DrizzleDb | null,
 ): void {
   // fs:browseDirs — list subdirectories at a given path (or drive roots if empty).
   ipcMain.handle(IPC_CHANNELS["fs:browseDirs"], async (_e, targetPath: string) => {
@@ -87,7 +94,7 @@ export function registerFsAndConfig(
     IPC_CHANNELS["config:get"],
     (_e, params?: { projectId?: string }) => {
       const projectId = params?.projectId;
-      const projectPath = resolveProjectRoot(projectId, getProjectPath());
+      const projectPath = resolveProjectRoot(projectId, getProjectPath(), getGlobalDb);
       const config = loadConfig(projectPath);
       const yamlPath = join(projectPath, "agentdock.config.yaml");
       let yaml = "";
@@ -105,7 +112,7 @@ export function registerFsAndConfig(
     IPC_CHANNELS["config:save"],
     (_e, params: { config: ReturnType<typeof loadConfig>; projectId?: string }) => {
       if (!params?.config) throw new Error("config required");
-      const projectPath = resolveProjectRoot(params.projectId, getProjectPath());
+      const projectPath = resolveProjectRoot(params.projectId, getProjectPath(), getGlobalDb);
       const parsed = AgentDockConfigSchema.parse(params.config);
       const yamlPath = join(projectPath, "agentdock.config.yaml");
       const yaml = yamlStringify(parsed);
