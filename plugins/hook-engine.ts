@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import process from "node:process";
 import type { HookDefinition, HookLifecycleEvent } from "./config.js";
 import { buildScopedChildEnv } from "./env.js";
+import { killProcessesUnderPath } from "./worktree.js";
 
 const execAsync = promisify(exec);
 
@@ -62,7 +63,6 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
 
   // 二次防线：WMI 杀进程（捕获 taskkill 可能遗漏的子进程）
   try {
-    const { killProcessesUnderPath } = await import("./worktree.js");
     await killProcessesUnderPath(dirPath);
   } catch {
     // best-effort
