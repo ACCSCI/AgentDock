@@ -158,6 +158,7 @@ function startHeartbeatLoop(): void {
 // 避免 daemon 端 replaySince(0) 在重启后回放大量历史事件。
 // 用 accessor 函数而非快照值, 让 SSE 重连 resetSeq() 后下一 tick 自动生效.
 let v2SyncTimer: ReturnType<typeof setInterval> | null = null;
+let periodicSyncTimer: ReturnType<typeof setInterval> | null = null;
 function startV2SyncLoop(
   daemonPort: number,
   getLastSeq: () => number,
@@ -715,12 +716,12 @@ async function bootstrap() {
         getDaemonPort: () => cachedDaemonPort,
         getGlobalDb: () => globalDbHandle?.db ?? null,
       } as const;
-      const periodicSyncTimer = setInterval(() => {
+      periodicSyncTimer = setInterval(() => {
         if (!activeProjectPath) return;
         void syncProject(activeProjectPath, periodicSyncCtx as Parameters<typeof syncProject>[1])
           .catch((err) => log.debug({ err }, "periodic syncProject failed"));
       }, HEARTBEAT_INTERVAL_MS);
-      if (typeof periodicSyncTimer.unref === "function") periodicSyncTimer.unref();
+      if (typeof periodicSyncTimer!.unref === "function") periodicSyncTimer!.unref();
       // 立即跑一次, 不等 30s
       if (activeProjectPath) {
         void syncProject(activeProjectPath, periodicSyncCtx as Parameters<typeof syncProject>[1])
@@ -780,6 +781,9 @@ async function bootstrap() {
     },
     clearV2SyncTimer: () => {
       if (v2SyncTimer) { clearInterval(v2SyncTimer); v2SyncTimer = null; }
+    },
+    clearPeriodicSyncTimer: () => {
+      if (periodicSyncTimer) { clearInterval(periodicSyncTimer); periodicSyncTimer = null; }
     },
   });
 
@@ -877,6 +881,10 @@ app.on("before-quit", (e) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+  if (periodicSyncTimer) {
+    clearInterval(periodicSyncTimer);
+    periodicSyncTimer = null;
   }
 
   // P9: stop the SSE consumer + dispose v2 service so their timers

@@ -27,6 +27,7 @@ export interface E2eResetDeps {
   clearV2SyncTimer?: () => void;
   // IPC-layer state in electron/main/ipc/db.ts
   resetDbBinding?: () => void;
+  clearPeriodicSyncTimer?: () => void;
 }
 
 /**
@@ -101,6 +102,10 @@ export function resetMainState(deps: E2eResetDeps): { reset: string[] } {
   if (deps.clearV2SyncTimer) {
     deps.clearV2SyncTimer();
     steps.push("v2SyncTimer");
+  }
+  if (deps.clearPeriodicSyncTimer) {
+    deps.clearPeriodicSyncTimer();
+    steps.push("periodicSyncTimer");
   }
 
   // 10. Reset IPC-layer DB binding state (optional)

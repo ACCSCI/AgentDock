@@ -280,7 +280,7 @@ export async function syncProject(
       .replace(/\\/g, "/")
       .replace(/\/+$/, "")
       .replace(/^([A-Z]):/i, (_, d) => d.toLowerCase() + ":");
-    const name = projectPath.split(/[\\/]/).pop() || projectPath;
+    const name = projectPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || projectPath;
 
     // 1) 宽松匹配: 拉所有 projects 行, 自己规范化 path 后比较
     const allProjects = globalDb
@@ -352,8 +352,7 @@ export async function syncProject(
   // 多个老 id 出现说明 per-project DB 被多个项目污染, 安全起见不自动处理
   // (留给用户手工清).
   try {
-    const dbProbe = ensureActiveDb(projectPath);
-    const projectIds = dbProbe
+    const projectIds = db
       .selectDistinct({ projectId: schema.sessions.projectId })
       .from(schema.sessions)
       .all()
@@ -361,12 +360,12 @@ export async function syncProject(
     const oldIds = projectIds.filter((id) => id !== project.id);
     if (oldIds.length === 1) {
       const oldId = oldIds[0];
-      const updatedSessions = dbProbe
+      const updatedSessions = db
         .update(schema.sessions)
         .set({ projectId: project.id })
         .where(eq(schema.sessions.projectId, oldId))
         .run();
-      const updatedTodos = dbProbe
+      const updatedTodos = db
         .update(schema.todos)
         .set({ projectId: project.id })
         .where(eq(schema.todos.projectId, oldId))
@@ -587,8 +586,13 @@ export async function syncProject(
   //     留着会污染 db:projects:list 返回 — 用 projectPath 派生 worktree base 过滤.
   //     必须在 (f) 之后做, 否则刚删的"磁盘没了"行跟这个清理逻辑重叠但原因不同.
   const expectedBase = getWorktreeBase(projectPath);
+  // §4.3.2: path 比较前统一规范化 (separators → /, lowercase, 加 trailing /)
+  // 否则 forward slash vs backslash + Windows 大小写不敏感会导致误删.
+  const normalizeForCompare = (p: string) =>
+    p.replace(/\\/g, "/").toLowerCase() + "/";
+  const normalizedExpected = normalizeForCompare(expectedBase);
   for (const row of existingRows) {
-    if (row.worktreePath.startsWith(expectedBase)) continue;
+    if (normalizeForCompare(row.worktreePath).startsWith(normalizedExpected)) continue;
     try {
       db.delete(schema.sessions).where(eq(schema.sessions.id, row.id)).run();
       log.warn(

@@ -947,9 +947,20 @@ export function useV2Projects() {
     // 注册, e.g. 人工 cp 建的 worktree). 这些 session 在 v2 path 下走不到
     // UI (被 status!=="active" / !hasOwner 过滤), 但磁盘上确实有 — 标
     // "takeover" 让 sidebar 显示, 提示用户需手动 claim.
+    //
+    // path 比较前规范化 (separators → /, lowercase, 去尾部 /), 否则
+    // v2 projectMap key 跟 DB p.path 格式不同会导致查不到已有 project,
+    // 出现重复条目.
+    const normalizeKey = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     for (const p of oldProjects) {
       if (!p.path) continue;
+      const pKey = normalizeKey(p.path);
+      // 找 v2 projectMap 里同 path 的已有 project (规范化比较)
       let target = projectMap.get(p.path);
+      if (!target) {
+        const existingKey = Array.from(projectMap.keys()).find((k) => normalizeKey(k) === pKey);
+        target = existingKey ? projectMap.get(existingKey) : undefined;
+      }
       if (!target) {
         target = {
           id: p.id,
