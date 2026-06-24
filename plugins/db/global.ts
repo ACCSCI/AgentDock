@@ -56,8 +56,8 @@ export function openGlobalDb(overrideDir?: string): GlobalDbHandle {
     return { db: globalDb, sqlite: globalSqlite, close: closeGlobalDb };
   }
 
-  // overrideDir: caller-controlled override for dev / test isolation.
-  // When undefined, falls back to the production default (homedir + .agentdock).
+  // Resolve the DB directory: use overrideDir if provided (dev/test),
+  // otherwise fall back to the production default (homedir + .agentdock).
   const dbDir = overrideDir ?? path.join(os.homedir(), GLOBAL_DB_DIR);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });

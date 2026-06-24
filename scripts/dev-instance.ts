@@ -25,7 +25,8 @@
  */
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const N = parseInt(process.argv[2] ?? "1", 10);
 if (!Number.isFinite(N) || N < 1) {
@@ -37,7 +38,7 @@ if (!Number.isFinite(N) || N < 1) {
 const sepIdx = process.argv.indexOf("--");
 const extraArgs = sepIdx >= 0 ? process.argv.slice(sepIdx + 1) : [];
 
-const projectRoot = resolve(import.meta.dirname ?? __dirname, "..");
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const userDataDir = join(projectRoot, ".agentdock-dev", `instance${N}`);
 mkdirSync(userDataDir, { recursive: true });
 
@@ -54,12 +55,8 @@ console.log(`  forwarding   = electron-vite dev ${extraArgs.join(" ") || "(no ex
 // it. Instead, we set AGENTDOCK_USER_DATA_DIR which electron/main.ts reads
 // at the very top (before app.whenReady()) and calls app.setPath('userData').
 const child = spawn(
-  process.platform === "win32" ? "npx.cmd" : "npx",
-  [
-    "electron-vite",
-    "dev",
-    ...extraArgs,
-  ],
+  resolve(projectRoot, "node_modules", ".bin", "electron-vite"),
+  ["dev", ...extraArgs],
   {
     cwd: projectRoot,
     stdio: "inherit",
