@@ -401,25 +401,39 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                       <option value="project">project</option>
                     </select>
                   </div>
-                  <div className="config-field">
+                  <div className="config-field config-field-async-mode">
                     <label>
-                      async
+                      执行模式
                       <span className="config-field-help" title={HELP.async}>?</span>
                     </label>
-                    <label className="config-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={hook.async}
-                        onChange={(e) => {
-                          updateHook(activeHookTab, i, "async", e.target.checked);
-                          // async 和 required 互斥 — 勾选 async 时自动去掉 required
-                          if (e.target.checked && hook.required) {
-                            updateHook(activeHookTab, i, "required", false);
+                    <div className="config-hook-mode-tabs">
+                      <button
+                        type="button"
+                        className={`config-hook-mode-tab ${!hook.async ? "active" : ""}`}
+                        onClick={() => {
+                          if (hook.async) {
+                            updateHook(activeHookTab, i, "async", false);
                           }
                         }}
-                      />
-                      <span>异步执行</span>
-                    </label>
+                      >
+                        同步执行
+                      </button>
+                      <button
+                        type="button"
+                        className={`config-hook-mode-tab ${hook.async ? "active" : ""}`}
+                        onClick={() => {
+                          if (!hook.async) {
+                            updateHook(activeHookTab, i, "async", true);
+                            // async 和 required 互斥 — 切换到异步时自动去掉 required
+                            if (hook.required) {
+                              updateHook(activeHookTab, i, "required", false);
+                            }
+                          }
+                        }}
+                      >
+                        异步执行
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
