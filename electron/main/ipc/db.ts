@@ -28,6 +28,7 @@ import {
 } from "../../../plugins/db/index.js";
 import { validateProjectPath } from "../../../plugins/path-validation.js";
 import {
+  getWorktreeBase,
   removeWorktree,
   scanDiskWorktrees,
 } from "../../../plugins/worktree.js";
@@ -231,7 +232,7 @@ async function silentTakeover(
  * Full project sync — mirrors origin/master `GET /api/projects` side-effects.
  * Reconciles disk worktrees ↔ DB ↔ daemon port state via v2 endpoints.
  */
-async function syncProject(
+export async function syncProject(
   projectPath: string,
   ctx: DbContext,
   force = false,
@@ -256,14 +257,132 @@ async function syncProject(
   // 2. Per-project sync (caller passes one project at a time).
   // Project lookup uses the global DB (projects no longer in per-project DBs).
   const globalDb = ctx.getGlobalDb();
-  const project = globalDb
+  let project = globalDb
     ? globalDb
       .select()
       .from(schema.projects)
       .where(eq(schema.projects.path, projectPath))
       .get()
     : undefined;
+
+  // 自愈：boot 阶段 activeProjectPath = process.cwd() 不会写 global DB,
+  // db:init IPC 也只清 lastScanAt 不写 global DB. 这里兜底注册让 syncProject
+  // 走完全流程, 否则磁盘上的 worktree 永远不被发现 (PR #86 修复的"切换"
+  // 路径覆盖不到"初次打开"路径).
+  //
+  // 宽松匹配: raw path 查不到时, 把 global DB 里所有 project 行拉出来跟
+  // 规范化后的 projectPath 匹配 (处理遗留: path 字段可能带 forward slash
+  // / 大小写不一致 / trailing slash). 找到任意匹配行就**复用其 id** —
+  // 不重新生成 id, 不破坏已有 session/todo 行对老 project_id 的引用.
+  // 这跟 db:projects:create (用 nanoid) 路径完全兼容, 因为老 id 会被保留.
+  if (!project && globalDb) {
+    const normalized = projectPath
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "")
+      .replace(/^([A-Z]):/i, (_, d) => d.toLowerCase() + ":");
+    const name = projectPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || projectPath;
+
+    // 1) 宽松匹配: 拉所有 projects 行, 自己规范化 path 后比较
+    const allProjects = globalDb
+      .select({ id: schema.projects.id, path: schema.projects.path, name: schema.projects.name })
+      .from(schema.projects)
+      .all();
+    const matchByNormalized = allProjects.find((p) => {
+      const pNorm = p.path
+        .replace(/\\/g, "/")
+        .replace(/\/+$/, "")
+        .replace(/^([A-Z]):/i, (_, d) => d.toLowerCase() + ":");
+      return pNorm === normalized;
+    });
+    if (matchByNormalized) {
+      project = matchByNormalized;
+      // 修 path 字段: 让 raw path 跟当前 projectPath 一致 (forward slash → backslash 等)
+      if (matchByNormalized.path !== projectPath) {
+        try {
+          globalDb
+            .update(schema.projects)
+            .set({ path: projectPath, name })
+            .where(eq(schema.projects.id, matchByNormalized.id))
+            .run();
+          log.warn(
+            { projectPath, id: matchByNormalized.id, oldPath: matchByNormalized.path },
+            "syncProject: repaired project path to canonical form",
+          );
+        } catch (err) {
+          log.warn({ err, id: matchByNormalized.id }, "syncProject: path repair failed (non-fatal)");
+        }
+      }
+      log.warn(
+        { projectPath, id: matchByNormalized.id },
+        "syncProject: re-using existing project (was missing from raw path lookup)",
+      );
+    } else {
+      // 2) 新建: global DB 完全没记录. 用 nanoid (跟 db:projects:create 一致)
+      try {
+        const id = nanoid(8);
+        globalDb.insert(schema.projects).values({ id, name, path: projectPath }).run();
+        project = globalDb
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, id))
+          .get();
+        log.warn(
+          { projectPath, id },
+          "syncProject: auto-registered project in global DB (was missing)",
+        );
+      } catch (err) {
+        log.error(
+          { err, projectPath },
+          "syncProject: auto-register failed; aborting sync",
+        );
+        return;
+      }
+    }
+  }
   if (!project) return;
+
+  // §4.3.2 迁移: per-project DB 里 session/todo 行的 project_id 引用的是
+  // 旧 global DB 项目 id (legacy 状态: 老 nanoid id 被新代码替换成了 path
+  // 散列 id, 但 session 行没跟着更新). 如果不迁移, syncProject 后续按
+  // project.id 查 session 会查不到老行, 然后 INSERT 撞 UNIQUE.
+  //
+  // 启发式: per-project DB 是项目私有, 它的所有 session/todo 行**应该**都
+  // 引用同一个 project id. 如果有不同 id 出现, 都是遗留状态, 统一迁移到
+  // 当前 project.id. 但**只**对那些**只有一个不同老 id**的情况自动迁 —
+  // 多个老 id 出现说明 per-project DB 被多个项目污染, 安全起见不自动处理
+  // (留给用户手工清).
+  try {
+    const projectIds = db
+      .selectDistinct({ projectId: schema.sessions.projectId })
+      .from(schema.sessions)
+      .all()
+      .map((r) => r.projectId);
+    const oldIds = projectIds.filter((id) => id !== project.id);
+    if (oldIds.length === 1) {
+      const oldId = oldIds[0];
+      const updatedSessions = db
+        .update(schema.sessions)
+        .set({ projectId: project.id })
+        .where(eq(schema.sessions.projectId, oldId))
+        .run();
+      const updatedTodos = db
+        .update(schema.todos)
+        .set({ projectId: project.id })
+        .where(eq(schema.todos.projectId, oldId))
+        .run();
+      log.warn(
+        { from: oldId, to: project.id, projectPath, sessions: updatedSessions.changes, todos: updatedTodos.changes },
+        "syncProject: migrated per-project DB project_id references to current global project id",
+      );
+    } else if (oldIds.length > 1) {
+      log.warn(
+        { oldIds, currentId: project.id, projectPath },
+        "syncProject: per-project DB has multiple legacy project_id refs — manual cleanup required",
+      );
+    }
+  } catch (err) {
+    log.warn({ err, projectPath }, "syncProject: project_id migration check failed (non-fatal)");
+  }
 
   // (a) Daemon ports → DB for existing rows (by worktreePath).
   syncProjectPortsToDb(db, project.id, worktreePorts);
@@ -459,6 +578,32 @@ async function syncProject(
         .set({ backgroundHookStatus: null })
         .where(eq(schema.sessions.id, row.id))
         .run();
+    }
+  }
+
+  // (h) §4.3.2: 清理跨项目污染行. 历史数据可能含 worktree_path 指向其他
+  //     project 的行 (e.g. seed 迁移前残留, 或用户复制粘贴别的项目 DB 覆盖过来).
+  //     留着会污染 db:projects:list 返回 — 用 projectPath 派生 worktree base 过滤.
+  //     必须在 (f) 之后做, 否则刚删的"磁盘没了"行跟这个清理逻辑重叠但原因不同.
+  const expectedBase = getWorktreeBase(projectPath);
+  // §4.3.2: path 比较前统一规范化 (separators → /, lowercase, 加 trailing /)
+  // 否则 forward slash vs backslash + Windows 大小写不敏感会导致误删.
+  const normalizeForCompare = (p: string) =>
+    p.replace(/\\/g, "/").toLowerCase() + "/";
+  const normalizedExpected = normalizeForCompare(expectedBase);
+  for (const row of existingRows) {
+    if (normalizeForCompare(row.worktreePath).startsWith(normalizedExpected)) continue;
+    try {
+      db.delete(schema.sessions).where(eq(schema.sessions.id, row.id)).run();
+      log.warn(
+        { sessionId: row.id, worktreePath: row.worktreePath, projectPath },
+        "syncProject: removed cross-project session row",
+      );
+    } catch (err) {
+      log.warn(
+        { err, sessionId: row.id },
+        "syncProject: cross-project delete failed",
+      );
     }
   }
 }

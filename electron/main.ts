@@ -25,6 +25,7 @@ import { DaemonManager } from "../plugins/daemon-manager.js";
 import { createDaemonClient, type DaemonHonoClient } from "./main/hono-client.js";
 import { IPC_CHANNELS, IPC_CHANNEL_COUNT } from "./shared/api-types.js";
 import { registerAllIpc, type AllIpcDeps } from "./main/ipc/index.js";
+import { syncProject } from "./main/ipc/db.js";
 import { log } from "../plugins/logger.js";
 import { terminalManager } from "../plugins/terminal-manager.js";
 import { writePortsToEnv } from "../plugins/port-write-env.js";
@@ -157,6 +158,7 @@ function startHeartbeatLoop(): void {
 // 避免 daemon 端 replaySince(0) 在重启后回放大量历史事件。
 // 用 accessor 函数而非快照值, 让 SSE 重连 resetSeq() 后下一 tick 自动生效.
 let v2SyncTimer: ReturnType<typeof setInterval> | null = null;
+let periodicSyncTimer: ReturnType<typeof setInterval> | null = null;
 function startV2SyncLoop(
   daemonPort: number,
   getLastSeq: () => number,
@@ -699,6 +701,32 @@ async function bootstrap() {
       // 兜底 + 全量状态修正. lastSeq 从 sseConsumer.getLastSeq() 读真实水位.
       startV2SyncLoop(cachedDaemonPort, () => sseConsumer?.getLastSeq() ?? 0);
       log.info({ port: cachedDaemonPort }, "AGENTDOCK_V2 enabled");
+
+      // §4.3.2 — 30s 周期性磁盘扫描. daemon 不主动扫盘, 人工 cp 建出来的
+      // worktree 只能靠 syncProject 兜底. syncProject 自带 5s 节流, 30s
+      // 周期不会过频. 用最小 DbContext (syncProject 只读 6 个 getter).
+      const periodicSyncCtx = {
+        getProjectPath: () => activeProjectPath,
+        setProjectPath: (p: string) => { activeProjectPath = p; },
+        getClientId: () => clientId,
+        getSessionStatus,
+        setSessionStatus,
+        clearSessionStatuses,
+        getV2PortService: () => v2PortService,
+        getDaemonPort: () => cachedDaemonPort,
+        getGlobalDb: () => globalDbHandle?.db ?? null,
+      } as const;
+      periodicSyncTimer = setInterval(() => {
+        if (!activeProjectPath) return;
+        void syncProject(activeProjectPath, periodicSyncCtx as Parameters<typeof syncProject>[1])
+          .catch((err) => log.debug({ err }, "periodic syncProject failed"));
+      }, HEARTBEAT_INTERVAL_MS);
+      if (typeof periodicSyncTimer!.unref === "function") periodicSyncTimer!.unref();
+      // 立即跑一次, 不等 30s
+      if (activeProjectPath) {
+        void syncProject(activeProjectPath, periodicSyncCtx as Parameters<typeof syncProject>[1])
+          .catch((err) => log.debug({ err }, "periodic syncProject (initial) failed"));
+      }
     } catch (err) {
       log.error({ err }, "v2 service / sse consumer init failed");
     }
@@ -753,6 +781,9 @@ async function bootstrap() {
     },
     clearV2SyncTimer: () => {
       if (v2SyncTimer) { clearInterval(v2SyncTimer); v2SyncTimer = null; }
+    },
+    clearPeriodicSyncTimer: () => {
+      if (periodicSyncTimer) { clearInterval(periodicSyncTimer); periodicSyncTimer = null; }
     },
   });
 
@@ -850,6 +881,10 @@ app.on("before-quit", (e) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+  if (periodicSyncTimer) {
+    clearInterval(periodicSyncTimer);
+    periodicSyncTimer = null;
   }
 
   // P9: stop the SSE consumer + dispose v2 service so their timers
