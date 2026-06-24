@@ -253,13 +253,13 @@ export class DaemonManager {
     // Helper: pick the best runtime for a .ts / .js entry.
     const pickRuntime = (entry: string): { cmd: string; args: string[] } => {
       const isTs = entry.endsWith(".ts");
-      const isEsm = entry.endsWith(".mjs") || entry.endsWith(".esm");
+      const isCompiled = entry.endsWith(".cjs") || entry.endsWith(".mjs") || entry.endsWith(".esm");
 
       // 打包后的 Electron 应用：daemon 已预编译为 JS，
       // 通过 ELECTRON_RUN_AS_NODE=1 运行（bun 在用户机器上不可用）。
-      if (process.env.AGENTDOCK_ELECTRON === "1" && isEsm) {
+      if (process.env.AGENTDOCK_ELECTRON === "1" && isCompiled) {
         // AGENTDOCK_ELECTRON=1 表示从 Electron 主进程启动，
-        // isEsm 表示传入的是预编译后的 daemon.mjs，直接运行即可。
+        // isCompiled 表示传入的是预编译后的 daemon，直接运行即可。
         // 注意：不在这里设置 ELECTRON_RUN_AS_NODE，
         // 而是由本文件下方的 spawn env 统一注入，避免污染主进程。
         return { cmd: process.execPath, args: ["--experimental-sqlite", entry] };
