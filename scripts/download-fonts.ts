@@ -83,12 +83,13 @@ const SOURCES: FontSource[] = [
     label: "Maple Mono v7.9 (NF + CN)",
     repo: "subframe7536/maple-font",
     tag: "v7.9",
-    directFiles: [
-      "MapleMono-NF-CN-Regular.ttf",
-      "MapleMono-NF-CN-Bold.ttf",
-      "MapleMono-NF-CN-Italic.ttf",
-      "MapleMono-NF-CN-BoldItalic.ttf",
-      "LICENSE.txt",
+    directFiles: [],
+    zipAsset: "MapleMono-NF-CN.zip",
+    zipExtract: [
+      { innerPath: "MapleMono-NF-CN-Regular.ttf", destName: "MapleMono-NF-CN-Regular.ttf" },
+      { innerPath: "MapleMono-NF-CN-Bold.ttf", destName: "MapleMono-NF-CN-Bold.ttf" },
+      { innerPath: "MapleMono-NF-CN-Italic.ttf", destName: "MapleMono-NF-CN-Italic.ttf" },
+      { innerPath: "MapleMono-NF-CN-BoldItalic.ttf", destName: "MapleMono-NF-CN-BoldItalic.ttf" },
     ],
   },
   {

@@ -15,7 +15,7 @@
  *
  * Prod mode: loadFile from the renderer dist (dist/index.html).
  */
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -678,6 +678,22 @@ async function bootstrap() {
 // which is only available after app.whenReady(). Must still be called before
 // createWindow() so the protocol resolves in the renderer.
 // In dev mode Vite serves fonts from public/fonts/, so the protocol is a no-op.
+
+// Register the scheme BEFORE app.ready so Chromium grants CORS / fetch
+// permissions — without this, @font-face requests from a file:// origin
+// are blocked by CORS policy ("Cross origin requests are only supported
+// for protocol schemes: chrome, chrome-extension, ...").
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "agentdock-fonts",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 app.whenReady().then(async () => {
   registerFontProtocol();
