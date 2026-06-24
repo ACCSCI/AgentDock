@@ -87,6 +87,37 @@
   color: var(--color-text-secondary);
 }
 
+/* §4.3.2 — 扫盘按钮: 复用 pr-btn 视觉规格, 在 PR 按钮左边 */
+.session-sidebar-rescan-btn {
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.session-sidebar-rescan-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.session-sidebar-rescan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.session-sidebar-rescan-btn:disabled:hover {
+  background: none;
+  color: var(--color-text-secondary);
+}
+
 .session-sidebar-resize-handle {
   position: absolute;
   top: 0;

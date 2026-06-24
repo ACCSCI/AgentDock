@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GitPullRequest, Plus } from "lucide-react";
+import { GitPullRequest, Plus, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useV2Projects } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useSyncProject, useV2Projects } from "../lib/queries";
 import type { SessionUserStatus } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
@@ -284,6 +284,24 @@ export function SessionSidebar() {
     }
   };
 
+  // §4.3.2 — 手动扫盘按钮. 调 main 进程 syncProject(force=true),
+  // 走完后 useSyncProject.onSuccess 自动 invalidate projects query,
+  // sidebar 重新拉一次显示新发现的 worktree.
+  const rescan = useSyncProject();
+  const handleRescanDisk = async () => {
+    try {
+      const result = await rescan.mutateAsync();
+      const n = result?.synced ?? 0;
+      if (n > 0) {
+        toast.success(`扫描完成, 共 ${n} 个 session`);
+      } else {
+        toast.info("扫描完成, 没有发现新 worktree");
+      }
+    } catch (err) {
+      toast.error(`扫描失败: ${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  };
+
   if (!activeProject) return null;
 
   if (sidebarCollapsed) {
@@ -299,6 +317,16 @@ export function SessionSidebar() {
     <div className="session-sidebar" style={{ width: sidebarWidth }} data-testid="session-sidebar">
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
+        <button
+          type="button"
+          className="session-sidebar-rescan-btn"
+          onClick={handleRescanDisk}
+          disabled={rescan.isPending}
+          title="扫描磁盘 worktree"
+          data-testid="rescan-disk"
+        >
+          {rescan.isPending ? <span className="step-spinner" /> : <RefreshCw size={16} />}
+        </button>
         <button
           type="button"
           className="session-sidebar-pr-btn"

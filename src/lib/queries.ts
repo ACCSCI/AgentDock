@@ -210,6 +210,20 @@ export function useInitDb() {
   });
 }
 
+// sync:project — 手动触发磁盘扫描. 调 main 进程 syncProject(force=true),
+// 完成后 invalidate projects query 让 sidebar 重新拉一次.
+export function useSyncProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return await api().sync.project();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
 // POST projects:create
 export function useCreateProject() {
   const queryClient = useQueryClient();
@@ -905,7 +919,6 @@ export function useV2Projects() {
       for (const cachedProj of cachedProjects) {
         const projectRoot = cachedProj.path;
         if (!projectRoot) continue;
-
         const optimisticSessions = cachedProj.sessions.filter(
           (s) => isCreatingSession(s) || isDeletingSession(s),
         );
@@ -927,6 +940,43 @@ export function useV2Projects() {
             project.sessions.push(optSession);
           }
         }
+      }
+    }
+
+    // §4.3.2 — 兜底合并: v2 不认但 DB 有的 session (磁盘存在但 daemon 未
+    // 注册, e.g. 人工 cp 建的 worktree). 这些 session 在 v2 path 下走不到
+    // UI (被 status!=="active" / !hasOwner 过滤), 但磁盘上确实有 — 标
+    // "takeover" 让 sidebar 显示, 提示用户需手动 claim.
+    for (const p of oldProjects) {
+      if (!p.path) continue;
+      let target = projectMap.get(p.path);
+      if (!target) {
+        target = {
+          id: p.id,
+          name: p.name,
+          path: p.path,
+          createdAt: p.createdAt,
+          sessions: [],
+        };
+        projectMap.set(p.path, target);
+      }
+      const existingIds = new Set(target.sessions.map((s) => s.id));
+      for (const s of p.sessions) {
+        if (existingIds.has(s.id)) continue;
+        target.sessions.push({
+          id: s.id,
+          projectId: target.id,
+          name: s.name,
+          branch: s.branch,
+          worktreePath: s.worktreePath,
+          ports: s.ports,
+          backgroundHookStatus: s.backgroundHookStatus ?? null,
+          createdAt: s.createdAt,
+          userStatus: s.userStatus ?? null,
+          lastActivatedAt: s.lastActivatedAt ?? null,
+          // 标 takeover 让 SessionCard 知道这是 "磁盘有但 daemon 不认"
+          status: "takeover" as const,
+        });
       }
     }
 
