@@ -25,6 +25,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const { data: todos = [] } = useTodos(projectId);
   const createTodo = useCreateTodo();
@@ -63,6 +64,25 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       window.removeEventListener("keydown", handleKey);
     };
   }, [onClose]);
+
+  // Shift + wheel → horizontal scroll on todo text items (non-passive to allow preventDefault)
+  useEffect(() => {
+    const listEl = listRef.current;
+    if (!listEl) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.shiftKey) return;
+      const target = e.target as HTMLElement;
+      const textEl = target.closest<HTMLElement>(".todo-dropdown-item-text");
+      if (textEl && textEl.scrollWidth > textEl.clientWidth) {
+        e.preventDefault();
+        textEl.scrollLeft += e.deltaY;
+      }
+    };
+
+    listEl.addEventListener("wheel", handleWheel, { passive: false });
+    return () => listEl.removeEventListener("wheel", handleWheel);
+  }, []);
 
   // ── Create ──
   const handleCreate = useCallback(() => {
@@ -235,7 +255,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
         </button>
       </div>
 
-      <div className="todo-dropdown-list" data-testid="todo-list">
+      <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
         {todos.length === 0 && (
           <div className="todo-dropdown-empty">
             {projectId ? "No tasks yet" : "Open a project to add tasks"}
@@ -303,13 +323,6 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
                 }}
                 title="Double-click: edit · Right-click: copy"
                 data-testid="todo-text"
-                onWheel={(e) => {
-                  const el = e.currentTarget;
-                  if (e.shiftKey && el.scrollWidth > el.clientWidth) {
-                    e.preventDefault();
-                    el.scrollLeft += e.deltaY;
-                  }
-                }}
               >
                 {todo.content}
               </span>

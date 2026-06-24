@@ -3125,9 +3125,8 @@ body {
   flex: 1;
   font-size: 12px;
   color: var(--color-text);
-  overflow-x: auto;
-  overflow-y: hidden;
-  text-overflow: unset;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
   user-select: none;
@@ -3136,6 +3135,9 @@ body {
 }
 
 .todo-dropdown-item:hover .todo-dropdown-item-text {
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
   scrollbar-width: thin;
 }
 
