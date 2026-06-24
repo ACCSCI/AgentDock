@@ -74,6 +74,8 @@ export interface SessionStep {
 export interface CreatingSession extends Omit<SessionData, "status"> {
   status: "creating";
   steps: SessionStep[];
+  /** IPC 返回的真实 sessionId，用于 v2State 过滤防止竞态覆盖 */
+  realSessionId?: string;
 }
 
 export type SessionListItem = SessionData | CreatingSession | DeletingSession;
@@ -263,6 +265,7 @@ export function useCreateSessionSSE() {
             createdAt: new Date().toISOString(),
             status: "creating",
             steps: [],
+            realSessionId: sessionId,
           };
           return { ...p, sessions: [...p.sessions, temp] };
         });
@@ -797,10 +800,28 @@ export function useSaveConfig(projectId: string) {
 export function useV2Projects() {
   const v2State = isV2StateAvailable() ? useV2State() : null;
   const oldQuery = useProjects();
+  const queryClient = useQueryClient();
 
   // Transform v2State data to ProjectData[] format
   const v2Projects = useMemo(() => {
     if (!v2State?.ready) return null;
+
+    // Collect realSessionIds from active CreatingSession entries in the
+    // React Query cache. These sessions are still in their optimistic
+    // creation lifecycle and must not be replaced by v2State data —
+    // otherwise the session card flashes from "loading" to "clickable"
+    // before the lifecycle completes.
+    const creatingRealIds = new Set<string>();
+    const cachedProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    if (cachedProjects) {
+      for (const p of cachedProjects) {
+        for (const s of p.sessions) {
+          if (isCreatingSession(s) && s.realSessionId) {
+            creatingRealIds.add(s.realSessionId);
+          }
+        }
+      }
+    }
 
     // Build a path→nanoid lookup from the old DB query so v2State-derived
     // projects get the same `id` the local DB uses. This keeps
@@ -816,6 +837,10 @@ export function useV2Projects() {
     const myClientId = v2State.clientId;
 
     for (const [sessionId, session] of v2State.sessions) {
+      // Skip sessions still in CreatingSession optimistic state to prevent
+      // v2State from prematurely overriding the loading spinner.
+      if (creatingRealIds.has(sessionId)) continue;
+
       const projectRoot = session.projectRoot || "";
 
       // §4.3: 判定有主/无主
@@ -862,7 +887,7 @@ export function useV2Projects() {
     }
 
     return Array.from(projectMap.values());
-  }, [v2State, oldQuery.data]);
+  }, [v2State, oldQuery.data, queryClient]);
 
   // Return v2State data if available and non-empty, otherwise fall back
   // to old query. Empty v2State means the snapshot hasn't loaded sessions
