@@ -439,6 +439,9 @@ function createWindow(): BrowserWindow {
 // 自动更新 (electron-updater + GitHub Releases)
 // ============================================================
 
+// 模块级定时器引用，避免重复创建（macOS 重新 activate 时会多次调用 initAutoUpdater）
+let autoUpdateTimer: ReturnType<typeof setInterval> | null = null;
+
 /**
  * 配置并启动自动更新检查。
  *
@@ -447,8 +450,11 @@ function createWindow(): BrowserWindow {
  * - 更新源: GitHub Releases（由 electron-builder.yml 的 publish 段配置）。
  * - 事件通知渲染进程以展示更新状态 UI。
  * - 实际安装在下次退出时进行。
+ *
+ * 注意: 不接收 BrowserWindow 参数。直接通过模块级 mainWindow 读取最新窗口，
+ * 避免闭包持有已销毁的窗口引用。
  */
-function initAutoUpdater(win: BrowserWindow): void {
+function initAutoUpdater(): void {
   // 开发模式不检查更新
   if (!app.isPackaged) {
     log.info("autoUpdater: skipped (not packaged)");
@@ -460,35 +466,44 @@ function initAutoUpdater(win: BrowserWindow): void {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // 避免重复注册监听器（macOS activate 等场景）
+  autoUpdater.removeAllListeners();
+
+  const sendToRenderer = (channel: string, payload?: unknown): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  };
+
   // 转发事件到渲染进程
   autoUpdater.on("checking-for-update", () => {
     log.info("autoUpdater: checking for update");
-    win.webContents.send("update:checking");
+    sendToRenderer("update:checking");
   });
 
   autoUpdater.on("update-available", (info) => {
     log.info({ version: info.version }, "autoUpdater: update available");
-    win.webContents.send("update:available", info);
+    sendToRenderer("update:available", info);
   });
 
   autoUpdater.on("update-not-available", (info) => {
     log.info({ version: info.version }, "autoUpdater: update not available");
-    win.webContents.send("update:not-available", info);
+    sendToRenderer("update:not-available", info);
   });
 
   autoUpdater.on("download-progress", (progress) => {
     log.info({ percent: progress.percent }, "autoUpdater: download progress");
-    win.webContents.send("update:download-progress", progress);
+    sendToRenderer("update:download-progress", progress);
   });
 
   autoUpdater.on("update-downloaded", (info) => {
     log.info({ version: info.version }, "autoUpdater: update downloaded");
-    win.webContents.send("update:downloaded", info);
+    sendToRenderer("update:downloaded", info);
   });
 
   autoUpdater.on("error", (err) => {
     log.error({ err }, "autoUpdater: error");
-    win.webContents.send("update:error", { message: err.message });
+    sendToRenderer("update:error", { message: err.message });
   });
 
   // 启动时检查
@@ -498,15 +513,16 @@ function initAutoUpdater(win: BrowserWindow): void {
     log.warn({ err }, "autoUpdater: initial check failed");
   });
 
-  // 每 4 小时定期检查
+  // 每 4 小时定期检查（先清理已有定时器避免累积）
+  if (autoUpdateTimer) clearInterval(autoUpdateTimer);
   const FOUR_HOURS = 4 * 60 * 60 * 1000;
-  const timer = setInterval(() => {
+  autoUpdateTimer = setInterval(() => {
     void autoUpdater.checkForUpdatesAndNotify().catch((err) => {
       log.warn({ err }, "autoUpdater: periodic check failed");
     });
   }, FOUR_HOURS);
 
-  if (typeof timer.unref === "function") timer.unref();
+  if (typeof autoUpdateTimer.unref === "function") autoUpdateTimer.unref();
 }
 
 async function bootstrap() {
@@ -761,7 +777,7 @@ async function bootstrap() {
   log.info("window loaded");
 
   // 4. 初始化自动更新（开发模式为 NO-OP）
-  initAutoUpdater(win);
+  initAutoUpdater();
 }
 
 // Register the custom font protocol after the app is ready — required by

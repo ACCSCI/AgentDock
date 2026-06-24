@@ -261,7 +261,7 @@ export class DaemonManager {
         // AGENTDOCK_ELECTRON=1 表示从 Electron 主进程启动，
         // isEsm 表示传入的是预编译后的 daemon.mjs，直接运行即可。
         // 注意：不在这里设置 ELECTRON_RUN_AS_NODE，
-        // 由 main.ts 中的 bootstrap() 统一设置 spawn env。
+        // 而是由本文件下方的 spawn env 统一注入，避免污染主进程。
         return { cmd: process.execPath, args: ["--experimental-sqlite", entry] };
       }
 
@@ -301,14 +301,12 @@ export class DaemonManager {
       }
     }
 
-    // 打包环境下 daemon 是预编译的 JS，需要用 ELECTRON_RUN_AS_NODE=1
-    // 让 electron.exe 以 Node 模式运行它。此变量仅注入 daemon 子进程的 env，
-    // 不污染主进程（否则渲染器/GPU 进程会退化为 Node 模式）。
-    const isPackagedJs = process.env.AGENTDOCK_ELECTRON === "1" && daemonEntry?.endsWith(".mjs");
+    // 如果运行命令是 Electron 可执行文件本身，则必须启用 ELECTRON_RUN_AS_NODE=1
+    // 以 Node 模式运行 daemon，避免启动新的 GUI 窗口，同时不污染主进程 env。
     const env = {
       ...process.env,
       AGENTDOCK_DAEMON_PORT: String(port),
-      ...(isPackagedJs ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+      ...(cmd === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     };
 
     // Phase 3: when running from Electron, detached:true + stdio:"ignore"

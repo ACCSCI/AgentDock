@@ -28,7 +28,15 @@ if (!arg) {
   process.exit(1);
 }
 
-const [major, minor, patch] = pkg.version.split(".").map(Number);
+// 安全提取 semver 主.次.修订号，忽略末尾的预发布标签（如 0.1.0-rc.1）
+const match = pkg.version.match(/^(\d+)\.(\d+)\.(\d+)/);
+if (!match) {
+  console.error(`当前 package.json 中的版本号格式无法解析: "${pkg.version}"`);
+  process.exit(1);
+}
+const major = Number(match[1]);
+const minor = Number(match[2]);
+const patch = Number(match[3]);
 
 let newVersion: string;
 switch (arg) {
