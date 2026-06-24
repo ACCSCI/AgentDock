@@ -440,11 +440,11 @@ hooks:
       cwd: worktree
       required: true
       timeout: 30000
-    - run: "pip install -r requirements.txt"
+    - run: ".venv/bin/pip install -r requirements.txt"
       cwd: worktree
       required: true
       timeout: 120000
-    - run: "python manage.py migrate"
+    - run: ".venv/bin/python manage.py migrate"
       cwd: worktree
       required: false
       timeout: 30000
