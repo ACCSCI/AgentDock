@@ -3,7 +3,6 @@ import type { AgentDockConfig, HookLifecycleEvent } from "./config.js";
 import {
   createHookEngine,
   createHookRegistry,
-  killSessionHookProcessesAndWait,
   type HookContext,
   type HookReport,
 } from "./hook-engine.js";
@@ -364,11 +363,9 @@ export function createSessionLifecycle(deps?: {
     const wtStepStart = Date.now();
     let worktreeRemoved = false;
     if (existsSync(worktreePath)) {
-      // Kill any lingering async hook child processes that may hold CWD handles
-      // and wait for OS to release them before attempting directory removal.
-      await killSessionHookProcessesAndWait(sessionId, worktreePath);
       // Forward currentBranch so a renamed session's real branch (not
       // `agentdock/<sessionId>`) is deleted alongside the worktree.
+      // Note: removeWorktree handles process killing internally.
       try {
         await removeWorktree(projectPath, sessionId, { currentBranch, force: true });
         worktreeRemoved = true;

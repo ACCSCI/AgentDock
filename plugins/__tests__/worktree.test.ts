@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import {
+  classifyOrphans,
   createWorktree,
+  dispatchOrphanCleanup,
   getWorktreePath,
   isRegisteredWorktree,
   listWorktrees,
@@ -173,6 +175,20 @@ describe("removeWorktree", () => {
     writeFileSync(lockedFile, Buffer.alloc(1024, 0xFF));
 
     const removed = await removeWorktree(projectDir, "s9", { force: true });
+    expect(removed.removed).toBe(result.worktreePath);
+    expect(existsSync(result.worktreePath)).toBe(false);
+  });
+
+  it("W10: force=true 时有已修改的已追踪文件 — git checkout . 丢弃后仍能删除", async () => {
+    const result = createWorktree(projectDir, "s10");
+    // Modify a tracked file (README.md was committed during initGitRepo)
+    const readme = path.join(result.worktreePath, "README.md");
+    writeFileSync(readme, "# modified\n");
+
+    // Verify the modification exists
+    expect(readFileSync(readme, "utf-8")).toContain("modified");
+
+    const removed = await removeWorktree(projectDir, "s10", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
     expect(existsSync(result.worktreePath)).toBe(false);
   });
@@ -546,6 +562,83 @@ describe("scanOrphanBranches with worktree-list union (foreign session guard)", 
     expect(orphans.find((o) => o.branch === "agentdock/ghost-after-remove")).toBeDefined();
     // Sanity: the renamed branch with a live worktree is NOT in the list
     expect(orphans.find((o) => o.branch === renamed.newBranch)).toBeUndefined();
+  });
+});
+
+// ============================================================
+// classifyOrphans + dispatchOrphanCleanup — 两路清理模型验证
+// ============================================================
+describe("classifyOrphans + dispatchOrphanCleanup", () => {
+  function listBranches(): string {
+    return execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  }
+
+  it("DC1: filesystem-orphan 有分支 → 目录 + 分支都被清理", async () => {
+    // 创建目录 + 分支, 但不创建 git worktree 注册
+    const fakeId = "dc1";
+    const fakePath = getWorktreePath(projectDir, fakeId);
+    mkdirSync(fakePath, { recursive: true });
+    writeFileSync(path.join(fakePath, "file.txt"), "data");
+    execSync("git branch agentdock/dc1", { cwd: projectDir, stdio: "pipe" });
+
+    const classified = classifyOrphans(projectDir, new Set(), new Set());
+    const fsItem = classified.filesystemOrphans.find((o) => o.sessionId === "dc1");
+    expect(fsItem).toBeDefined();
+    expect(fsItem!.branch).toBe("agentdock/dc1");
+
+    const result = await dispatchOrphanCleanup(projectDir, classified);
+    expect(result.failed).toHaveLength(0);
+    expect(existsSync(fakePath)).toBe(false);
+    expect(listBranches()).not.toContain("agentdock/dc1");
+  });
+
+  it("DC2: git-metadata-orphan → 目录(已不存在) + 分支都被清理", async () => {
+    // 创建 worktree, 然后手动删除目录 — 留下 git metadata + branch 残留
+    const result = createWorktree(projectDir, "dc2");
+    rmSync(result.worktreePath, { recursive: true, force: true });
+    expect(existsSync(result.worktreePath)).toBe(false);
+    expect(listBranches()).toContain("agentdock/dc2");
+
+    const classified = classifyOrphans(projectDir, new Set(), new Set());
+    const gitItem = classified.gitMetadataOrphans.find((o) => o.sessionId === "dc2");
+    expect(gitItem).toBeDefined();
+
+    const cleanup = await dispatchOrphanCleanup(projectDir, classified);
+    expect(cleanup.failed).toHaveLength(0);
+    expect(listBranches()).not.toContain("agentdock/dc2");
+  });
+
+  it("DC3: branch-orphan → 只删分支, 无目录操作", async () => {
+    execSync("git branch agentdock/dc3", { cwd: projectDir, stdio: "pipe" });
+    expect(listBranches()).toContain("agentdock/dc3");
+
+    const classified = classifyOrphans(projectDir, new Set(), new Set());
+    const branchItem = classified.branchOrphans.find((o) => o.sessionId === "dc3");
+    expect(branchItem).toBeDefined();
+    expect(branchItem!.worktreePath).toBe("");
+
+    const cleanup = await dispatchOrphanCleanup(projectDir, classified);
+    expect(cleanup.failed).toHaveLength(0);
+    expect(listBranches()).not.toContain("agentdock/dc3");
+  });
+
+  it("DC4: orphan-session (目录+git 注册+分支) → 全套清理", async () => {
+    const result = createWorktree(projectDir, "dc4");
+    writeFileSync(path.join(result.worktreePath, "extra.txt"), "data");
+
+    // 不传 dc4 的 sessionId → registry 不知道它 → orphan-session
+    const classified = classifyOrphans(projectDir, new Set(), new Set());
+    const sessionItem = classified.orphanSessions.find((o) => o.sessionId === "dc4");
+    expect(sessionItem).toBeDefined();
+
+    const cleanup = await dispatchOrphanCleanup(projectDir, classified);
+    expect(cleanup.failed).toHaveLength(0);
+    expect(existsSync(result.worktreePath)).toBe(false);
+    expect(listBranches()).not.toContain("agentdock/dc4");
   });
 });
 
