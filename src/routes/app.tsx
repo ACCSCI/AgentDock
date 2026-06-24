@@ -11,7 +11,10 @@ export const Route = createFileRoute("/app")({
 function AppLayout() {
   const { activeProjectId } = useStore();
   const { data: projects } = useProjects();
-  const project = projects?.find((p) => p.id === activeProjectId);
+  // Match by id first (nanoid from DB), then by path fallback (v2State
+  // path-based IDs when the project was opened by path rather than DB id).
+  const project = projects?.find((p) => p.id === activeProjectId)
+    ?? projects?.find((p) => p.path === activeProjectId);
 
   return (
     <div className="app-layout">

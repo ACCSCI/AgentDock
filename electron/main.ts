@@ -673,12 +673,16 @@ async function bootstrap() {
   log.info("window loaded");
 }
 
-// Register the custom font protocol before the app is ready — required by
-// Electron so that `agentdock-fonts:///fonts/…` URLs resolve in the renderer.
+// Register the custom font protocol after the app is ready — required by
+// Electron 42+ where protocol.handle implicitly accesses app.defaultSession
+// which is only available after app.whenReady(). Must still be called before
+// createWindow() so the protocol resolves in the renderer.
 // In dev mode Vite serves fonts from public/fonts/, so the protocol is a no-op.
-registerFontProtocol();
 
-app.whenReady().then(bootstrap).catch((err) => {
+app.whenReady().then(async () => {
+  registerFontProtocol();
+  await bootstrap();
+}).catch((err) => {
   log.error({ err }, "bootstrap failed");
   app.exit(1);
 });

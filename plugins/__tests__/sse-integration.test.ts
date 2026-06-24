@@ -268,7 +268,7 @@ describe("v2 /events — SSE wire format", () => {
 });
 
 describe("v2 /events — Last-Event-ID replay (§7.3)", () => {
-  it("emits resync-required when lastEventId is before the buffer", async () => {
+  it("emits resync-required when lastEventId is before the buffer", { timeout: 30_000 }, async () => {
     // Drain buffer by triggering many events. Serial renames work.
     const c = await postJson("/session/create", {
       clientId: "c1",

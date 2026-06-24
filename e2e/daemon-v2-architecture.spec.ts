@@ -95,7 +95,7 @@ test.describe("v2 architecture contract (新架构 §13.1)", () => {
         capabilities: string[];
       };
     });
-    expect(health.protocolVersion).toBe("1");
+    expect(health.protocolVersion).toBe("2");
     expect(health.capabilities).toEqual(
       expect.arrayContaining([
         "port-allocation",

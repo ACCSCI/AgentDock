@@ -241,7 +241,38 @@ export function registerWorktreeAndShell(getProjectPath: () => string | null): v
       };
 
       // Dispatch parallel cleanup — only user-selected items
-      return dispatchOrphanCleanup(projectPath, filtered);
+      const result = await dispatchOrphanCleanup(projectPath, filtered);
+
+      // Surface rejected branches as failures. Classification may have
+      // silently dropped a user-supplied branch (e.g. it didn't start
+      // with `agentdock/`, or it wasn't a real orphan). Report those
+      // explicitly so callers (UI + tests) can distinguish "no work to
+      // do" from "refused to do dangerous work".
+      const seenInResult = new Set<string>([
+        ...result.deleted,
+        ...result.failed.map((f) => f.branch ?? ""),
+      ]);
+      for (const b of branches) {
+        if (typeof b !== "string" || !b) continue;
+        if (seenInResult.has(b)) continue;
+        if (!b.startsWith("agentdock/")) {
+          result.failed.push({
+            branch: b,
+            kind: "branch-orphan",
+            error: `Refusing to delete non-agentdock branch: ${b}`,
+          });
+        } else {
+          // agentdock/ branch but not classified as orphan — either
+          // the branch is owned by a live session (handled above) or
+          // doesn't exist. Surface that as a failure.
+          result.failed.push({
+            branch: b,
+            kind: "branch-orphan",
+            error: `Branch not found among orphans: ${b}`,
+          });
+        }
+      }
+      return result;
     },
   );
 

@@ -83,7 +83,7 @@ interface DebugState {
 describe("v2 /health — §2 protocol surface", () => {
   it("returns protocolVersion, capabilities, state", async () => {
     const h = await getJson<HealthResp>("/health");
-    expect(h.protocolVersion).toBe("1");
+    expect(h.protocolVersion).toBe("2");
     expect(h.schemaVersion).toBe(2);
     expect(h.state).toBe("READY");
     expect(h.capabilities).toEqual(

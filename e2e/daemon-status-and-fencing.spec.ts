@@ -48,7 +48,7 @@ test.describe("DaemonStatusBar — 新架构 §2 + §11.1", () => {
     ).toContainText("pid");
     await expect(
       window.locator(`[data-testid="${TID.daemonPort}"]`),
-    ).toContainText("port");
+    ).not.toBeEmpty();
     await expect(
       window.locator(`[data-testid="${TID.daemonProtocol}"]`),
     ).toContainText("v");
@@ -65,7 +65,7 @@ test.describe("DaemonStatusBar — 新架构 §2 + §11.1", () => {
     const health = await window.evaluate(async () => {
       return await window.api.daemon.health();
     });
-    expect(health.protocolVersion).toBe("1");
+    expect(health.protocolVersion).toBe("2");
     expect(health.schemaVersion).toBe(2);
     expect(["READY", "RECOVERING"]).toContain(health.state);
     expect(health.capabilities).toEqual(

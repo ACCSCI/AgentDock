@@ -78,7 +78,20 @@ export class AgentDockDaemon {
         try {
           writeDaemonInfo(process.pid, actualPort);
         } catch (err) {
-          log.warn({ err }, "failed to write daemon.json (non-fatal)");
+          // daemon.json is the contract between the daemon and the
+          // DaemonManager — without it, the manager can't find this
+          // daemon and will treat it as a failed spawn. Earlier we
+          // logged-and-continued, but that left a zombie process: the
+          // server kept serving /health, the manager's waitForReady
+          // returned early on the health check, and then readDaemonInfo
+          // returned null → "Daemon started but did not write
+          // daemon.json" → app.exit(1). This is the root cause of
+          // E2E flakes (session-lifecycle, session-orphan-ui,
+          // session-terminal-typing) under load, where the tmpfile
+          // rename can fail intermittently on Windows. Exiting here
+          // lets the manager retry cleanly on a new port.
+          log.error({ err }, "failed to write daemon.json — exiting so the manager can retry");
+          process.exit(1);
         }
 
         this.heartbeatTimer = setInterval(() => {

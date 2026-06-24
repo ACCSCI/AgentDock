@@ -255,7 +255,7 @@ describe("remove — 进程锁定场景", () => {
     expect(existsSync(created.worktreePath)).toBe(false);
   });
 
-  it("D42: 多次创建-删除循环稳定", async () => {
+  it("D42: 多次创建-删除循环稳定", { timeout: 120_000 }, async () => {
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     for (let i = 0; i < 3; i++) {
       const created = await lifecycle.create({

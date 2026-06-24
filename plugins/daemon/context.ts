@@ -296,7 +296,12 @@ export async function cleanupStaleClients(ctx: DaemonContext): Promise<void> {
       }
     }
     if (changed) {
+      // §5.1 — both v1 and v2 mutations must hit the WAL before we return.
+      // Skipping the v2 persist here would let the zombies resurrect on the
+      // next restart, since v2 in-memory state is the only truth source for
+      // the three-table model (§4.1).
       ctx.wal.persist(ctx.state);
+      ctx.walV2.persist(ctx.stateV2);
     }
   });
 }

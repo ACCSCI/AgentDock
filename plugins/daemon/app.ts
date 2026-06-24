@@ -21,7 +21,6 @@ import { hostGuard } from "./middleware/host.js";
 import { originGuard } from "./middleware/origin.js";
 import { registerClients } from "./routes/clients.js";
 import { registerDebug } from "./routes/debug.js";
-import { registerHealth } from "./routes/health.js";
 import { registerRegistry } from "./routes/registry.js";
 import { registerV2 } from "./routes/v2.js";
 import { registerFaultEndpoints } from "../fault-injector.js";
@@ -36,6 +35,10 @@ export function createApp(ctx: DaemonContext): Hono {
   app.use("*", errorEnvelope);
 
   // v2 routes — 新架构 §13.1. Primary API surface.
+  // /health is mounted here via registerHealthV2 (§2 protocol surface).
+  // The v1 registerHealth (from ./routes/health.ts) was removed in F10 — its
+  // legacy v1-shape payload was a strict subset of registerHealthV2's, so
+  // the v2 handler is the only one wired up.
   registerV2(app, ctx);
 
   // Fault injection (新架构 §11.2) — only active when NODE_ENV=test.
@@ -46,7 +49,9 @@ export function createApp(ctx: DaemonContext): Hono {
     registerFaultEndpoints(app, ctx.faults);
   }
 
-  registerHealth(app, ctx);
+  // Legacy /register + /unregister + /status (新架构 §13.1 末段).
+  // 镜像到 ~/.agentdock/registry.json, 供 kill-all.ts 等运维脚本使用.
+  // 数据已被 /client/register 吸收; 保留为兼容窗口, 旧版下线后删除.
   registerRegistry(app, ctx);
   registerClients(app, ctx);
   registerDebug(app, ctx);

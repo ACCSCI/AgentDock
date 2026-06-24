@@ -27,13 +27,14 @@ const execAsync = promisify(exec);
 const FONTS_SUBDIR = "fonts";
 const READY_CHANNEL = "fonts:ready";
 
-// Maple Mono NF CN v7.9 — includes CJK glyphs (SIL OFL 1.1)
+// Maple Mono NF CN v7.9 — shipped as a zip archive (SIL OFL 1.1)
 const MAPLE_MONO_TAG = "v7.9";
-const MAPLE_MONO_FILES = [
-  "MapleMono-NF-CN-Regular.ttf",
-  "MapleMono-NF-CN-Bold.ttf",
-  "MapleMono-NF-CN-Italic.ttf",
-  "MapleMono-NF-CN-BoldItalic.ttf",
+const MAPLE_MONO_ZIP = "MapleMono-NF-CN.zip";
+const MAPLE_MONO_EXTRACT = [
+  { inner: "MapleMono-NF-CN-Regular.ttf", dest: "MapleMono-NF-CN-Regular.ttf" },
+  { inner: "MapleMono-NF-CN-Bold.ttf", dest: "MapleMono-NF-CN-Bold.ttf" },
+  { inner: "MapleMono-NF-CN-Italic.ttf", dest: "MapleMono-NF-CN-Italic.ttf" },
+  { inner: "MapleMono-NF-CN-BoldItalic.ttf", dest: "MapleMono-NF-CN-BoldItalic.ttf" },
 ];
 
 // JetBrains Mono v2.304 — shipped as a zip archive (SIL OFL 1.1)
@@ -67,7 +68,10 @@ function fontExists(name: string): boolean {
  * Skipped in dev mode — Vite's dev-server serves `public/fonts/` instead.
  */
 export function registerFontProtocol(): void {
-  if (process.env.ELECTRON_RENDERER_URL) return; // dev mode
+  // Register in BOTH dev and production — the CSS always references
+  // agentdock-fonts:///fonts/... so the protocol must exist.
+  // In dev mode Vite also serves public/fonts/ but the CSS uses the
+  // custom protocol, not relative paths.
 
   const dir = fontsDir();
   if (!existsSync(dir)) {
@@ -142,16 +146,23 @@ async function unzipSingle(zipPath: string, outDir: string, innerPath: string, d
 // ── Font download ──────────────────────────────────────────────────────
 
 async function downloadMapleMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
-  await Promise.all(
-    MAPLE_MONO_FILES.map(async (file) => {
-      const dest = join(destDir, file);
-      if (existsSync(dest)) return;
-      const asset = assets.get(file);
-      if (!asset) throw new Error(`Asset ${file} not found in maple-font@${MAPLE_MONO_TAG}`);
-      log.info({ file }, "downloading Maple Mono");
-      await downloadFile(asset.browser_download_url, dest);
-    }),
-  );
+  // Check if already extracted
+  if (MAPLE_MONO_EXTRACT.every((e) => existsSync(join(destDir, e.dest)))) return;
+
+  const zipDest = join(destDir, MAPLE_MONO_ZIP);
+  if (!existsSync(zipDest)) {
+    const asset = assets.get(MAPLE_MONO_ZIP);
+    if (!asset) throw new Error(`Asset ${MAPLE_MONO_ZIP} not found in maple-font@${MAPLE_MONO_TAG}`);
+    log.info({ file: MAPLE_MONO_ZIP }, "downloading Maple Mono");
+    await downloadFile(asset.browser_download_url, zipDest);
+  }
+  for (const { inner, dest } of MAPLE_MONO_EXTRACT) {
+    const destPath = join(destDir, dest);
+    if (existsSync(destPath)) continue;
+    log.info({ file: dest }, "extracting Maple Mono");
+    await unzipSingle(zipDest, destDir, inner, destPath);
+  }
+  await rm(zipDest, { force: true });
 }
 
 async function downloadJetBrainsMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
@@ -181,7 +192,7 @@ async function downloadFonts(): Promise<void> {
   }
 
   // Fast-path: only skip when ALL font files are present.
-  const allMaplePresent = MAPLE_MONO_FILES.every((f) => fontExists(f));
+  const allMaplePresent = MAPLE_MONO_EXTRACT.every((e) => fontExists(e.dest));
   const allJetbrainsPresent = JETBRAINS_EXTRACT.every((e) => fontExists(e.dest));
   if (allMaplePresent && allJetbrainsPresent) {
     log.info("bundled fonts already present — skipping download");

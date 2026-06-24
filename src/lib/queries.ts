@@ -303,12 +303,41 @@ export function useCreateSessionSSE() {
           offStep();
           offComplete();
           if (!result.success) {
+            // Roll back the optimistic insert before the failure reaches
+            // the caller's catch — otherwise the temp card would linger
+            // alongside the rolled-back DB row and confuse the user
+            // (and break tests that count cards).
+            queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+              if (!old) return old;
+              return old.map((p) => {
+                if (p.id !== projectId) return p;
+                return {
+                  ...p,
+                  sessions: (p.sessions ?? []).filter((s) => s.id !== tempId),
+                };
+              });
+            });
             reject(new Error(result.error ?? "session create failed"));
             return;
           }
-          // Replace the tempId placeholder with the real sessionId. We
-          // don't get the full SessionData back from the stream — fetch it
-          // from the projects list after a brief refresh.
+          // Replace the tempId placeholder with the real sessionId. The
+          // backend inserted a real DB row under the real sessionId, so
+          // we have to remove our temp placeholder before invalidating,
+          // otherwise the refetch returns BOTH the temp and the real
+          // card (same display name, different IDs) and the sidebar
+          // shows duplicates.
+          queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+            if (!old) return old;
+            return old.map((p) => {
+              if (p.id !== projectId) return p;
+              return {
+                ...p,
+                sessions: (p.sessions ?? []).filter((s) => s.id !== tempId),
+              };
+            });
+          });
+          // Now invalidate so the cache refetches with the real session
+          // (DB row) populated under the real sessionId.
           queryClient.invalidateQueries({ queryKey: queryKeys.projects });
           // For the return value, construct a minimal SessionData.
           resolve({
@@ -327,6 +356,15 @@ export function useCreateSessionSSE() {
     onError: (_err, _variables, context) => {
       if (context?.prevProjects) {
         queryClient.setQueryData(queryKeys.projects, context.prevProjects);
+      } else {
+        // No onMutate snapshot available (e.g. mutationFn threw before
+        // it could set context). Fall back to removing any temp card
+        // we may have inserted for this mutation. We don't have the
+        // tempId here, so we rely on the more robust onSuccess-path
+        // cleanup to have already removed it. (Failure path: the
+        // stream's onComplete handler removes the temp card before
+        // rejecting, so by the time onError runs, the card is gone.)
+        // This branch is a no-op safety net.
       }
     },
   });
@@ -764,6 +802,15 @@ export function useV2Projects() {
   const v2Projects = useMemo(() => {
     if (!v2State?.ready) return null;
 
+    // Build a path→nanoid lookup from the old DB query so v2State-derived
+    // projects get the same `id` the local DB uses. This keeps
+    // `activeProjectId` (nanoid) compatible with v2State's path-based IDs.
+    const oldProjects = oldQuery.data ?? [];
+    const pathToDbId = new Map<string, string>();
+    for (const p of oldProjects) {
+      if (p.path) pathToDbId.set(p.path, p.id);
+    }
+
     // Group sessions by projectRoot
     const projectMap = new Map<string, ProjectData>();
     const myClientId = v2State.clientId;
@@ -779,8 +826,11 @@ export function useV2Projects() {
       if (!hasOwner) continue;
 
       if (!projectMap.has(projectRoot)) {
+        // Prefer the nanoid id from the DB query when available, so
+        // activeProjectId (which stores the nanoid) resolves correctly.
+        const dbId = pathToDbId.get(projectRoot);
         projectMap.set(projectRoot, {
-          id: projectRoot,
+          id: dbId ?? projectRoot,
           name: projectRoot.split("/").pop() || projectRoot,
           path: projectRoot,
           createdAt: new Date(session.createdAt).toISOString(),
@@ -812,10 +862,13 @@ export function useV2Projects() {
     }
 
     return Array.from(projectMap.values());
-  }, [v2State]);
+  }, [v2State, oldQuery.data]);
 
-  // Return v2State data if available, otherwise fall back to old query
-  if (v2Projects) {
+  // Return v2State data if available and non-empty, otherwise fall back
+  // to old query. Empty v2State means the snapshot hasn't loaded sessions
+  // yet (daemon still in RECOVERING, or no sessions exist); in that case
+  // the old DB-based query is authoritative for project metadata.
+  if (v2Projects && v2Projects.length > 0) {
     return {
       ...oldQuery,
       data: v2Projects,

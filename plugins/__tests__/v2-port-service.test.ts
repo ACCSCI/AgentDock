@@ -119,7 +119,7 @@ describe("v2PortService.allocateSession", () => {
     const refreshed = 2;
     const { fetchImpl, calls } = buildMockFetch(
       new Map([
-        ["/session/create", () => ({ body: { success: true, sessionId: "v2-sid", fencingToken: token } })],
+        ["/session/create", () => ({ body: { success: true, sessionId: "app2", fencingToken: token } })],
         [
           "/claim",
           (req: FetchCall) => {
@@ -127,7 +127,7 @@ describe("v2PortService.allocateSession", () => {
             return { body: { success: true, port: 30001, picked: body.name === "BACKEND_PORT" } };
           },
         ],
-        ["/debug/state", () => ({ body: { v2Owners: { "v2-sid": { fencingToken: refreshed } } } })],
+        ["/debug/state", () => ({ body: { v2Owners: { "app2": { fencingToken: refreshed } } } })],
         ["/session/activate", () => ({ body: { success: true } })],
       ]),
     );
@@ -271,7 +271,7 @@ describe("v2PortService lease-renewal timer", () => {
     let hbCalls = 0;
     const { fetchImpl, calls } = buildMockFetch(
       new Map([
-        ["/session/create", () => ({ body: { success: true, sessionId: "v2-sid", fencingToken: initialToken } })],
+        ["/session/create", () => ({ body: { success: true, sessionId: "app6", fencingToken: initialToken } })],
         ["/claim", () => ({ body: { success: true, port: 30001, picked: false } })],
         ["/session/activate", () => ({ body: { success: true } })],
         ["/session/delete", () => ({ body: { success: true } })],
@@ -284,7 +284,7 @@ describe("v2PortService lease-renewal timer", () => {
               : { body: { success: true } };
           },
         ],
-        ["/debug/state", () => ({ body: { v2Owners: { "v2-sid": { fencingToken: refreshedToken } } } })],
+        ["/debug/state", () => ({ body: { v2Owners: { "app6": { fencingToken: refreshedToken } } } })],
       ]),
     );
     const svc = createV2PortService({

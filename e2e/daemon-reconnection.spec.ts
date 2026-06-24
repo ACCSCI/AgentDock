@@ -36,25 +36,33 @@ function writeEmptyConfig(dir: string): void {
 }
 
 /**
- * Find and kill the daemon child process (by name).
+ * Find and kill the daemon child process (by command line).
  * Returns true if a process was killed.
+ *
+ * IMPORTANT: we can't just kill all children of the Electron main
+ * process — that includes the renderer/zygote/GPU processes, and
+ * killing them closes the BrowserWindow. The daemon entry is a
+ * `.ts`/`.js` file in `plugins/daemon.ts` (or similar) and is
+ * spawned with `bun run` / `node`. Filter children by command line
+ * to target only the daemon.
  */
 function killDaemonProcess(appPid: number): boolean {
   try {
     if (process.platform === "win32") {
-      // Find child processes of the Electron app that look like a daemon.
+      // Find children whose command line contains "daemon" — that's
+      // the daemon entry. Skip renderers/zygotes/GPU processes.
       const out = execSync(
-        `powershell -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${appPid} } | Select-Object -ExpandProperty ProcessId)"`,
+        `powershell -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${appPid} -and $_.CommandLine -match 'daemon' } | Select-Object -ExpandProperty ProcessId)"`,
         { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
       );
-      const childPids = out
+      const daemonPids = out
         .split(/\r?\n/)
         .map((s) => Number.parseInt(s.trim(), 10))
         .filter((n) => Number.isFinite(n) && n > 0);
 
-      // Kill each child process — one of them should be the daemon.
+      // Kill only the daemon children.
       let killed = false;
-      for (const pid of childPids) {
+      for (const pid of daemonPids) {
         try {
           execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
           killed = true;
@@ -64,9 +72,23 @@ function killDaemonProcess(appPid: number): boolean {
       }
       return killed;
     } else {
-      // Unix: kill all children of the Electron process.
-      execSync(`pkill -P ${appPid}`, { stdio: "ignore" });
-      return true;
+      // Unix: filter to children whose argv contains "daemon".
+      const out = execSync(
+        `ps -o pid=,args= -ax --ppid ${appPid} | grep -E 'daemon' | awk '{print $1}'`,
+        { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const pids = out
+        .split(/\r?\n/)
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // Process may already be gone.
+        }
+      }
+      return pids.length > 0;
     }
   } catch {
     return false;

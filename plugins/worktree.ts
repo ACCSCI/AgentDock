@@ -127,38 +127,55 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
   const normalized = path.resolve(dirPath);
   try {
     if (process.platform === "win32") {
-      // Build the PowerShell script as a string, then encode to base64
-      // to safely pass through cmd.exe without any interpolation risk.
-      // The path is read from $env:AGENTDOCK_TARGET_DIR (set via env on
-      // execAsync), since -EncodedCommand does not support trailing
-      // arguments like `-dir` (review feedback on PR #35).
-      // A malicious path cannot break out because the script only reads
-      // the value via $env, never as part of the script text.
-      const psScript =
-        `$dir = $env:AGENTDOCK_TARGET_DIR; ` +
-        `$e = $dir -replace '\\\\\\\\', '\\\\\\\\' -replace "'", "''"; ` +
-        `$c = if ($e.EndsWith('\\\\')) { $e } else { $e + '\\\\' }; ` +
-        `Get-CimInstance Win32_Process | Where-Object { ` +
-        `$_.ExecutablePath -like "$e\\\\*" -or ` +
-        `$_.CommandLine -like "*$e*" -or ` +
-        `$_.CurrentDirectory -like "$c*" } | ` +
-        `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      // 1. Use handle64 (Sysinternals) if available — finds exact PIDs with
+      //    open handles in the target dir. Preferred because it's precise.
+      try {
+        const { stdout } = await execFileAsync("handle64", ["-accepteula", "-nobanner", "-p", normalized], {
+          encoding: "utf-8",
+          timeout: 5000,
+        });
+        const pids = new Set<string>();
+        for (const line of stdout.split("\n")) {
+          const m = line.match(/pid:\s*(\d+)/i);
+          if (m) pids.add(m[1]);
+        }
+        for (const pid of pids) {
+          await execFileAsync("taskkill", ["/F", "/PID", pid], {
+            encoding: "utf-8",
+            timeout: 5000,
+          }).catch(() => {});
+        }
+      } catch {
+        // handle64 not available — fall through to broader approach
+      }
 
-      // Encode to UTF-16LE base64 for PowerShell's -EncodedCommand
-      const encoded = Buffer.from(psScript, "utf16le").toString("base64");
-      await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, {
-        encoding: "utf-8",
-        env: { ...process.env, AGENTDOCK_TARGET_DIR: normalized },
-        timeout: 8000,
-      }).catch(() => {});
+      // 2. Broader sweep: find any process whose command-line references
+      //    the target dir (from hook child processes).
+      try {
+        const escapedPath = normalized.replace(/\\/g, "\\\\");
+        const { stdout } = await execFileAsync("wmic", [
+          "process", "where",
+          `CommandLine like '%${escapedPath}%'`,
+          "get", "ProcessId", "/format:list",
+        ], { encoding: "utf-8", timeout: 5000 });
+        for (const line of stdout.split("\n")) {
+          const m = line.match(/ProcessId=(\d+)/);
+          if (m) {
+            await execFileAsync("taskkill", ["/F", "/PID", m[1]], {
+              encoding: "utf-8", timeout: 5000,
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // wmic not available (Win11 24H2 removed it) — fall through
+      }
 
-      // Give processes a moment to release their directory handles.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // 4. Wait for OS to fully release file handles after process termination.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } else {
-      // lsof lists processes with open files under the dir; kill their PIDs.
-      const { stdout } = await execAsync(`lsof -t +D "${normalized}" 2>/dev/null || true`, {
+      // Unix: lsof to find PIDs with open files under the dir, then SIGKILL.
+      const { stdout } = await execFileAsync("sh", ["-c", `lsof -t +D "${normalized}" 2>/dev/null || true`], {
         encoding: "utf-8",
-        shell: "/bin/sh",
       });
       const pids = [...new Set(stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
       for (const pid of pids) {
@@ -170,7 +187,7 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
       }
     }
   } catch {
-    // Best-effort: if we can't enumerate/kill, fall through to fs.rm which will retry.
+    // Best-effort: if we can't enumerate/kill, fall through to rm/rimraf which will retry.
   }
 }
 
@@ -267,39 +284,31 @@ export async function removeWorktree(
   // Check worktree registration once — reused below and for prune.
   const isRegistered = await isRegisteredWorktree(projectPath, worktreePath).catch(() => false);
 
-  // Non-force path: run git worktree remove + branch delete (safe but slow).
-  // Force path: skip these entirely — on Windows they take 20+ seconds due
-  // to antivirus scanning and file-handle contention.
+  // Non-force path: run git worktree remove (safe but slow).
+  // Force path: skip git worktree remove (slow on Windows) — directory
+  // removal below handles cleanup.
   if (!force && isRegistered) {
     try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8", timeout: 15_000 }); } catch {}
-    try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
   }
 
-  // Always ensure directory is removed (handles git failure or non-worktree directories)
+  // Always ensure directory is removed (handles git failure or non-worktree directories).
+  // Must happen BEFORE branch deletion — git refuses to delete a branch
+  // that's checked out by a worktree, even if that worktree is about to
+  // be removed.
+  // Uses rimraf (Windows-safe, retries EBUSY/EPERM with backoff).
   if (existsSync(worktreePath)) {
-    const MAX_DIR_REMOVE_ATTEMPTS = 3;
-    for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {
-      if (!existsSync(worktreePath)) break;
-
-      await killProcessesUnderPath(worktreePath);
-
-      try {
-        await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-        break; // success
-      } catch (err) {
-        if (attempt < MAX_DIR_REMOVE_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-        } else {
-          throw err;
-        }
-      }
-    }
+    await killProcessesUnderPath(worktreePath);
+    await rimrafOrFallback(worktreePath);
   }
 
-  // Clean up stale git worktree registration left behind by force removal
+  // Delete the branch AFTER the worktree directory is gone — git allows
+  // branch deletion once the worktree is removed from disk.
+  // First prune stale git worktree registrations so git doesn't think the
+  // branch is still checked out by a phantom worktree.
   if (isRegistered) {
     try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
   }
+  try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
 
   return { removed: worktreePath };
 }
@@ -476,31 +485,57 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
  * path that doesn't look like a per-session subdirectory, preventing
  * accidental bulk deletion of all session worktrees.
  */
+let _rimraf: ((p: string) => Promise<void>) | null = null;
+async function rimrafOrFallback(dirPath: string): Promise<void> {
+  if (!_rimraf) {
+    try {
+      const mod = await import("rimraf") as any;
+      _rimraf = mod.rimraf ?? mod.default ?? null;
+    } catch {
+      _rimraf = null;
+    }
+  }
+
+  if (_rimraf) {
+    await _rimraf(dirPath);
+  } else {
+    await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+}
+
+/**
+ * Remove an orphan directory with retry logic for Windows EBUSY/EPERM.
+ *
+ * 1. Kill processes holding handles (best-effort)
+ * 2. Attempt rimraf (or rm fallback)
+ * 3. On failure: wait → kill again → retry (up to MAX_DIR_REMOVE_ATTEMPTS)
+ */
 export async function removeOrphanDir(dirPath: string): Promise<void> {
   if (!existsSync(dirPath)) return;
 
-  // Defense-in-depth: refuse to delete the worktree base or anything above it.
-  // Callers (IPC handlers) should already validate, but this guard protects
-  // against future callers that forget.
   const resolved = path.resolve(dirPath);
   const basename = path.basename(resolved);
   if (!basename || basename === "worktrees" || basename === ".agentdock") {
     throw new Error(`Refusing to remove non-orphan path: ${dirPath}`);
   }
 
-  const MAX_DIR_REMOVE_ATTEMPTS = 3;
+  const MAX_DIR_REMOVE_ATTEMPTS = 5;
   for (let attempt = 1; attempt <= MAX_DIR_REMOVE_ATTEMPTS; attempt++) {
     if (!existsSync(dirPath)) return;
 
     await killProcessesUnderPath(dirPath);
 
+    // Exponential backoff: 500ms, 1s, 2s, 3s, 5s — gives OS time to
+    // release file handles after process termination. On Windows the
+    // handle-release delay can be 1-3s depending on antivirus scan.
+    const backoffMs = [500, 1000, 2000, 3000, 5000][attempt - 1] ?? 5000;
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
     try {
-      await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rimrafOrFallback(dirPath);
       return; // success
     } catch (err) {
-      if (attempt < MAX_DIR_REMOVE_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-      } else {
+      if (attempt === MAX_DIR_REMOVE_ATTEMPTS) {
         throw err; // final attempt failed, propagate
       }
     }
@@ -694,6 +729,15 @@ export function classifyOrphans(
     ...knownSessionIds,
   ]);
 
+  // Also include branch-only orphans whose sessionId isn't in any of the
+  // three sources above (no DB record, no worktree dir, no git worktree
+  // registration). These are pure branch remnants from deleted sessions.
+  for (const branch of gitBranches) {
+    if (!branch.startsWith("agentdock/")) continue;
+    const sid = branch.slice("agentdock/".length);
+    if (!allSessionIds.has(sid)) allSessionIds.add(sid);
+  }
+
   for (const sessionId of allSessionIds) {
     const inFs = fsDirs.has(sessionId);
     const inGit = gitWorktrees.has(sessionId);
@@ -869,7 +913,8 @@ export async function dispatchOrphanCleanup(
 
   // ---- 最后统一一次 git worktree prune (清残余 git 登记) ----
   // 单次调用, 不在每个 git-metadata-orphan 里反复调 (git 内部锁)
-  if (classified.gitMetadataOrphans.length > 0 || classified.orphanSessions.length > 0) {
+  // 任何孤儿类型都可能涉及 git metadata 残留, 所以始终 run
+  if (allResults.length > 0) {
     try {
       await execFileAsync("git", ["worktree", "prune"], {
         cwd: projectPath,
