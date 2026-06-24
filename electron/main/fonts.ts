@@ -1,89 +1,84 @@
 /**
- * Font Manager — automatic bundled font provisioning.
+ * Font Manager — copy bundled fonts to user-data on first launch.
  *
- * On app startup, checks whether the required monospace fonts (Maple Mono
- * NF CN with CJK support, JetBrains Mono) exist in the user-data directory.
- * If missing, downloads them silently in the background from GitHub Releases
- * and notifies the renderer via IPC so the `@font-face` rules can resolve.
+ * The build step (`copyBundledFontsPlugin` in electron.vite.config.ts)
+ * places the .ttf files under `app.getAppPath()/fonts/` alongside the
+ * bundled main-process code. On startup we copy them into
+ * `userData/fonts/` (where the `agentdock-fonts://` protocol serves them
+ * from) — only when they are not already present, so subsequent launches
+ * are instant and work offline.
  *
- * In production builds the custom protocol `agentdock-fonts://` maps
- * `userData/fonts/` to the renderer's `/fonts/` path. In dev mode Vite's
- * dev-server serves `public/fonts/` directly, so no protocol is registered.
- *
- * Font versions must stay in sync with `scripts/download-fonts.ts`.
+ * A version file (`font-bundled-version`) is written alongside the fonts
+ * so that a future release that ships new font files triggers a fresh copy.
  */
-import { app, protocol, type BrowserWindow } from "electron";
-import { existsSync, mkdirSync } from "node:fs";
-import { readFile, writeFile, rename, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { exec, type ExecOptions } from "node:child_process";
-import { promisify } from "node:util";
-import { log } from "../../plugins/logger.js";
 
-const execAsync = promisify(exec);
+import { app, protocol, type BrowserWindow } from "electron";
+import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { log } from "../../plugins/logger.js";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
 const FONTS_SUBDIR = "fonts";
 const READY_CHANNEL = "fonts:ready";
+const VERSION_FILE = "font-bundled-version";
 
-// Maple Mono NF CN v7.9 — shipped as a zip archive (SIL OFL 1.1)
-const MAPLE_MONO_TAG = "v7.9";
-const MAPLE_MONO_ZIP = "MapleMono-NF-CN.zip";
-const MAPLE_MONO_EXTRACT = [
-  { inner: "MapleMono-NF-CN-Regular.ttf", dest: "MapleMono-NF-CN-Regular.ttf" },
-  { inner: "MapleMono-NF-CN-Bold.ttf", dest: "MapleMono-NF-CN-Bold.ttf" },
-  { inner: "MapleMono-NF-CN-Italic.ttf", dest: "MapleMono-NF-CN-Italic.ttf" },
-  { inner: "MapleMono-NF-CN-BoldItalic.ttf", dest: "MapleMono-NF-CN-BoldItalic.ttf" },
+// Maple Mono NF CN v7.9
+const MAPLE_MONO_FILES = [
+  "MapleMono-NF-CN-Regular.ttf",
+  "MapleMono-NF-CN-Bold.ttf",
+  "MapleMono-NF-CN-Italic.ttf",
+  "MapleMono-NF-CN-BoldItalic.ttf",
 ];
 
-// JetBrains Mono v2.304 — shipped as a zip archive (SIL OFL 1.1)
-const JETBRAINS_TAG = "v2.304";
-const JETBRAINS_ZIP = "JetBrainsMono-2.304.zip";
-const JETBRAINS_EXTRACT = [
-  { inner: "fonts/ttf/JetBrainsMono-Regular.ttf", dest: "JetBrainsMono-Regular.ttf" },
-  { inner: "fonts/ttf/JetBrainsMono-Bold.ttf", dest: "JetBrainsMono-Bold.ttf" },
-  { inner: "fonts/ttf/JetBrainsMono-Italic.ttf", dest: "JetBrainsMono-Italic.ttf" },
-  { inner: "fonts/ttf/JetBrainsMono-BoldItalic.ttf", dest: "JetBrainsMono-BoldItalic.ttf" },
+// JetBrains Mono v2.304
+const JETBRAINS_FILES = [
+  "JetBrainsMono-Regular.ttf",
+  "JetBrainsMono-Bold.ttf",
+  "JetBrainsMono-Italic.ttf",
+  "JetBrainsMono-BoldItalic.ttf",
 ];
+
+const ALL_BUNDLED_FILES = [...MAPLE_MONO_FILES, ...JETBRAINS_FILES];
+
+// Increment this whenever the bundled font set changes so existing
+// user-data copies are refreshed on next launch.
+const BUNDLED_VERSION = "1";
 
 // ── Path helpers ───────────────────────────────────────────────────────
 
-function fontsDir(): string {
+function bundledFontsDir(): string {
+  return join(app.getAppPath(), FONTS_SUBDIR);
+}
+
+function userFontsDir(): string {
   return join(app.getPath("userData"), FONTS_SUBDIR);
 }
 
-function fontExists(name: string): boolean {
-  return existsSync(join(fontsDir(), name));
+function userVersionPath(): string {
+  return join(userFontsDir(), VERSION_FILE);
 }
 
 // ── Protocol registration ──────────────────────────────────────────────
 
 /**
- * Register the `agentdock-fonts://` custom protocol in production builds
- * so that `@font-face` rules referencing
- * `agentdock-fonts:///fonts/<file>` resolve to files in userData.
+ * Register the `agentdock-fonts://` custom protocol so that `@font-face`
+ * rules referencing `agentdock-fonts:///fonts/<file>` resolve to files
+ * in userData/fonts/.
  *
- * Must be called **before** any BrowserWindow is created.
- * Skipped in dev mode — Vite's dev-server serves `public/fonts/` instead.
+ * Must be called before any BrowserWindow is created.
  */
 export function registerFontProtocol(): void {
-  // Register in BOTH dev and production — the CSS always references
-  // agentdock-fonts:///fonts/... so the protocol must exist.
-  // In dev mode Vite also serves public/fonts/ but the CSS uses the
-  // custom protocol, not relative paths.
-
-  const dir = fontsDir();
+  const dir = userFontsDir();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
 
   protocol.handle("agentdock-fonts", async (request) => {
-    // URL shape: agentdock-fonts:///fonts/MapleMono-NF-CN-Regular.ttf
-    const relativePath = new URL(request.url).pathname; // e.g. "/fonts/MapleMono-..."
+    const relativePath = new URL(request.url).pathname;
     const filePath = join(dir, relativePath.replace(/^\/fonts\//, ""));
     try {
-      const data = await readFile(filePath);
+      const data = readFileSync(filePath);
       return new Response(data);
     } catch {
       return new Response(null, { status: 404 });
@@ -93,125 +88,78 @@ export function registerFontProtocol(): void {
   log.info("agentdock-fonts protocol registered");
 }
 
-// ── GitHub helpers ─────────────────────────────────────────────────────
+// ── Bundled → userData copy ───────────────────────────────────────────
 
-interface GhAsset {
-  name: string;
-  browser_download_url: string;
-}
+/**
+ * Returns true when the fonts in userData/fonts/ match the current
+ * bundled version (i.e. no copy needed).
+ */
+function fontsAreUpToDate(): boolean {
+  const vPath = userVersionPath();
+  if (!existsSync(vPath)) return false;
 
-async function ghReleaseAssets(repo: string, tag: string): Promise<Map<string, GhAsset>> {
-  const url = `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
-  const res = await fetch(url, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
-  if (!res.ok) throw new Error(`GitHub release ${repo}@${tag}: ${res.status}`);
-  const data = (await res.json()) as { assets: GhAsset[] };
-  return new Map(data.assets.map((a) => [a.name, a]));
-}
-
-async function downloadFile(url: string, dest: string): Promise<void> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed ${url}: ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-}
-
-async function unzipSingle(zipPath: string, outDir: string, innerPath: string, destPath: string): Promise<void> {
-  const esc = (s: string) => s.replace(/'/g, "'\\''");
-  const opts: ExecOptions = { stdio: "ignore" };
-  const cmds = [
-    `unzip -o '${esc(zipPath)}' '${esc(innerPath)}' -d '${esc(outDir)}'`,
-    `tar -xf '${esc(zipPath)}' '${esc(innerPath)}' -C '${esc(outDir)}'`,
-  ];
-  for (const cmd of cmds) {
-    try {
-      await execAsync(cmd, opts);
-      await rename(join(outDir, innerPath), destPath);
-      return;
-    } catch { /* try next */ }
-  }
-  // PowerShell fallback
   try {
-    await execAsync(
-      `powershell -Command "Expand-Archive -Path '${esc(zipPath)}' -DestinationPath '${esc(outDir)}' -Force"`,
-      opts,
-    );
-    await rename(join(outDir, innerPath), destPath);
-    return;
-  } catch { /* fail */ }
-  throw new Error(`Could not extract ${innerPath} from ${zipPath}`);
+    const current = readdirSync(userFontsDir());
+    const hasAll = ALL_BUNDLED_FILES.every((f) => current.includes(f));
+    if (!hasAll) return false;
+    const version = readFileSync(vPath, "utf-8").trim();
+    return version === BUNDLED_VERSION;
+  } catch {
+    return false;
+  }
 }
 
-// ── Font download ──────────────────────────────────────────────────────
+/**
+ * Copy all font .ttf files from the bundled location (app.getAppPath()/fonts/)
+ * into userData/fonts/. Writes a version marker so we can detect future updates.
+ */
+function copyBundledFonts(): void {
+  const srcDir = bundledFontsDir();
+  const dstDir = userFontsDir();
 
-async function downloadMapleMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
-  // Check if already extracted
-  if (MAPLE_MONO_EXTRACT.every((e) => existsSync(join(destDir, e.dest)))) return;
-
-  const zipDest = join(destDir, MAPLE_MONO_ZIP);
-  if (!existsSync(zipDest)) {
-    const asset = assets.get(MAPLE_MONO_ZIP);
-    if (!asset) throw new Error(`Asset ${MAPLE_MONO_ZIP} not found in maple-font@${MAPLE_MONO_TAG}`);
-    log.info({ file: MAPLE_MONO_ZIP }, "downloading Maple Mono");
-    await downloadFile(asset.browser_download_url, zipDest);
-  }
-  for (const { inner, dest } of MAPLE_MONO_EXTRACT) {
-    const destPath = join(destDir, dest);
-    if (existsSync(destPath)) continue;
-    log.info({ file: dest }, "extracting Maple Mono");
-    await unzipSingle(zipDest, destDir, inner, destPath);
-  }
-  await rm(zipDest, { force: true });
-}
-
-async function downloadJetBrainsMono(destDir: string, assets: Map<string, GhAsset>): Promise<void> {
-  // Check if already extracted
-  if (JETBRAINS_EXTRACT.every((e) => existsSync(join(destDir, e.dest)))) return;
-
-  const zipDest = join(destDir, JETBRAINS_ZIP);
-  if (!existsSync(zipDest)) {
-    const asset = assets.get(JETBRAINS_ZIP);
-    if (!asset) throw new Error(`Asset ${JETBRAINS_ZIP} not found in JetBrainsMono@${JETBRAINS_TAG}`);
-    log.info({ file: JETBRAINS_ZIP }, "downloading JetBrains Mono");
-    await downloadFile(asset.browser_download_url, zipDest);
-  }
-  for (const { inner, dest } of JETBRAINS_EXTRACT) {
-    const destPath = join(destDir, dest);
-    if (existsSync(destPath)) continue;
-    log.info({ file: dest }, "extracting JetBrains Mono");
-    await unzipSingle(zipDest, destDir, inner, destPath);
-  }
-  await rm(zipDest, { force: true });
-}
-
-async function downloadFonts(): Promise<void> {
-  const dir = fontsDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+  if (!existsSync(dstDir)) {
+    mkdirSync(dstDir, { recursive: true });
   }
 
-  // Fast-path: only skip when ALL font files are present.
-  const allMaplePresent = MAPLE_MONO_EXTRACT.every((e) => fontExists(e.dest));
-  const allJetbrainsPresent = JETBRAINS_EXTRACT.every((e) => fontExists(e.dest));
-  if (allMaplePresent && allJetbrainsPresent) {
-    log.info("bundled fonts already present — skipping download");
+  // Validate source — if the build plugin didn't copy fonts, warn and
+  // fall through silently so dev-mode (Vite serving public/fonts/) still works.
+  if (!existsSync(srcDir)) {
+    log.warn(`bundled fonts not found at ${srcDir} — running in dev mode? fonts served from public/fonts/`);
     return;
   }
 
-  log.info("downloading bundled fonts …");
+  // Skip copy if already up to date
+  if (fontsAreUpToDate()) {
+    log.info("bundled fonts already present in userData — skipping copy");
+    return;
+  }
 
-  const [mapleAssets, jetbrainsAssets] = await Promise.all([
-    ghReleaseAssets("subframe7536/maple-font", MAPLE_MONO_TAG),
-    ghReleaseAssets("JetBrains/JetBrainsMono", JETBRAINS_TAG),
-  ]);
+  // Clear old files (partial copy from a previous failed launch)
+  try {
+    const existing = readdirSync(dstDir);
+    for (const f of existing) {
+      if (f !== VERSION_FILE) {
+        rmSync(join(dstDir, f), { force: true });
+      }
+    }
+  } catch {
+    // dir may not exist yet
+  }
 
-  await Promise.all([
-    downloadMapleMono(dir, mapleAssets),
-    downloadJetBrainsMono(dir, jetbrainsAssets),
-  ]);
+  // Copy all font files
+  for (const file of ALL_BUNDLED_FILES) {
+    const src = join(srcDir, file);
+    const dst = join(dstDir, file);
+    if (existsSync(src)) {
+      cpSync(src, dst);
+    } else {
+      log.warn({ file }, "bundled font file missing — font may not render correctly");
+    }
+  }
 
-  log.info("bundled fonts downloaded");
+  // Write version marker
+  writeFileSync(userVersionPath(), BUNDLED_VERSION);
+  log.info(`bundled fonts copied to userData (v${BUNDLED_VERSION})`);
 }
 
 // ── Renderer notification ──────────────────────────────────────────────
@@ -225,20 +173,13 @@ function notifyRenderer(win: BrowserWindow): void {
 // ── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Main entry point — called once during bootstrap after the window is
- * created. Kicks off a background font download if needed. The window
- * loads immediately with fallback system fonts; once the download finishes
- * the renderer is notified and CSS re-renders with the real fonts
- * (`font-display: swap`).
+ * Called once during bootstrap after the window is created.
  *
- * The custom protocol (`registerFontProtocol`) must be registered before
- * any BrowserWindow is created — call it at the module level in main.ts.
+ * Copies bundled fonts to userData if needed (instant local operation).
+ * Notifies the renderer so `@font-face` rules resolve.
  */
-export async function ensureFontsReady(win: BrowserWindow): Promise<void> {
-  // Background — never blocks the window from loading.
-  downloadFonts()
-    .then(() => notifyRenderer(win))
-    .catch((err) => {
-      log.warn({ err }, "bundled font download failed — using fallback fonts");
-    });
+export function ensureFontsReady(win: BrowserWindow): void {
+  // Fonts are now bundled — copy is always instantaneous.
+  copyBundledFonts();
+  notifyRenderer(win);
 }

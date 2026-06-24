@@ -51,9 +51,32 @@ function copyPtyHostPlugin(): Plugin {
   };
 }
 
+/**
+ * Copy `public/fonts/` into the main-process output directory so the
+ * fonts are bundled with the packaged app (no runtime download needed).
+ *
+ * Depends on `prebuild` having already run `bun run download-fonts`
+ * so that `public/fonts/` contains the .ttf files.
+ */
+function copyBundledFontsPlugin(): Plugin {
+  return {
+    name: "agentdock:copy-fonts",
+    apply: "build",
+    closeBundle() {
+      const src = resolve(__dirname, "public/fonts");
+      const dest = resolve(__dirname, "out/main/fonts");
+      if (!existsSync(src)) {
+        this.warn?.(`public/fonts/ missing — run \`bun run download-fonts\` first`);
+        return;
+      }
+      cpSync(src, dest, { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyPtyHostPlugin()],
+    plugins: [externalizeDepsPlugin(), copyPtyHostPlugin(), copyBundledFontsPlugin()],
     build: {
       lib: { entry: resolve(__dirname, "electron/main.ts") },
     },
