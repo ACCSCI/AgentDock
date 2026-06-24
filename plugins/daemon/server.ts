@@ -372,7 +372,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<AgentDockD
 // (matches the original plugins/daemon.ts:1005-1016 behavior)
 if (
   process.argv[1] &&
-  (process.argv[1].endsWith("daemon.ts") || process.argv[1].endsWith("daemon.js"))
+  (process.argv[1].endsWith("daemon.ts") || process.argv[1].endsWith("daemon.js") || process.argv[1].endsWith("daemon.cjs"))
 ) {
   runDaemon()
     .then((daemon) => {

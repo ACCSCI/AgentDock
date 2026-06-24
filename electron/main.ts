@@ -548,11 +548,11 @@ async function bootstrap() {
   // (main is at out/main/main.js, daemon is at plugins/daemon.ts).
   // Tell the manager to spawn an explicit entry point.
   //
-  // 打包后：daemon 已预编译为 out/daemon/daemon.mjs，通过 Electron
+  // 打包后：daemon 已预编译为 out/daemon/daemon.cjs，通过 Electron
   // 的 Node 模式（ELECTRON_RUN_AS_NODE=1）运行，无需 bun。
   // 开发环境：通过 bun 运行 plugins/daemon.ts。
   if (app.isPackaged) {
-    daemonManager.daemonEntry = resolve(__dirname, "../daemon/daemon.mjs");
+    daemonManager.daemonEntry = resolve(__dirname, "../daemon/daemon.cjs");
     // 打包后不使用 bun（用户机器上没有 bun）
     delete process.env.AGENTDOCK_USE_BUN;
     // 注意：不要在主进程设置 ELECTRON_RUN_AS_NODE，否则 Electron 的
