@@ -284,20 +284,48 @@ export async function removeWorktree(
   // Check worktree registration once — reused below and for prune.
   const isRegistered = await isRegisteredWorktree(projectPath, worktreePath).catch(() => false);
 
-  // Non-force path: run git worktree remove (safe but slow).
-  // Force path: skip git worktree remove (slow on Windows) — directory
-  // removal below handles cleanup.
-  if (!force && isRegistered) {
-    try { await execAsync(`git worktree remove "${worktreePath}"`, { cwd: projectPath, encoding: "utf-8", timeout: 15_000 }); } catch {}
+  // ── Force path ──────────────────────────────────────────────────
+  // Discard uncommitted changes so `git worktree remove` can run
+  // quickly without reverting each file one-by-one (the main
+  // Windows performance bottleneck). After checkout, kill any
+  // processes that still hold file handles, then attempt the
+  // safe git removal. If that still fails (locked files, untracked
+  // node_modules, etc.), fall back to rimraf + prune.
+  //
+  // SAFETY: only run `git checkout .` when the path is a real,
+  // registered worktree with its own `.git` pointer file. Otherwise
+  // git would walk up the directory tree, find the main repo at
+  // `projectPath`, and silently discard uncommitted changes there.
+  if (force && isRegistered && existsSync(path.join(worktreePath, ".git"))) {
+    try {
+      await execAsync("git checkout .", {
+        cwd: worktreePath, encoding: "utf-8", stdio: "pipe", timeout: 15_000,
+      });
+    } catch {
+      // Non-fatal: rimraf will handle whatever checkout couldn't revert.
+    }
+  }
+
+  if (existsSync(worktreePath)) {
+    await killProcessesUnderPath(worktreePath);
+  }
+
+  if (force && isRegistered) {
+    // Attempt safe removal first — much faster now that tracked changes
+    // have been discarded via `git checkout .` above.
+    try {
+      await execAsync(`git worktree remove "${worktreePath}"`, {
+        cwd: projectPath, encoding: "utf-8", timeout: 15_000,
+      });
+    } catch {
+      // Fallback: force directory deletion below.
+    }
   }
 
   // Always ensure directory is removed (handles git failure or non-worktree directories).
-  // Must happen BEFORE branch deletion — git refuses to delete a branch
-  // that's checked out by a worktree, even if that worktree is about to
-  // be removed.
-  // Uses rimraf (Windows-safe, retries EBUSY/EPERM with backoff).
+  // On Windows, EBUSY/EPERM from locked node_modules/.env should be rare now
+  // because `git checkout .` above discards tracked changes before killing processes.
   if (existsSync(worktreePath)) {
-    await killProcessesUnderPath(worktreePath);
     await rimrafOrFallback(worktreePath);
   }
 
@@ -798,11 +826,14 @@ export function classifyOrphans(
     }
 
     if (!inReg && !inGit && inFs) {
-      // ❌❌✅ — filesystem orphan: 真物理孤儿
+      // ❌❌✅ — filesystem orphan: 真物理孤儿.
+      // Look up the actual branch (if any) — the branch may survive
+      // even when git worktree registration is lost.
+      const fsBranch = `agentdock/${sessionId}`;
       result.filesystemOrphans.push({
         sessionId,
         worktreePath: fsDirs.get(sessionId)!,
-        branch: null,
+        branch: gitBranches.has(fsBranch) ? fsBranch : null,
         kind: "filesystem-orphan",
       });
       continue;
@@ -824,13 +855,13 @@ export function classifyOrphans(
 }
 
 /**
- * 派发清理 — 按 kind 分桶并行执行, 每个失败独立报告.
+ * 派发清理 — 顺序三阶段避免 git lock 竞争:
  *
- * 并行策略:
- *   - filesystemOrphans / orphanSessions / branchOrphans: 互相独立, 全并行
- *   - gitMetadataOrphans: 先并行 rm + git branch -D, 最后统一一次 git worktree prune
- *     (避免 N 次串行 prune, git 内部有锁)
- *   - registryStale: 不动 (UI 处理)
+ *   1. 删除所有孤儿目录 (并行)
+ *   2. 全局一次 git worktree prune (清 git 元数据)
+ *   3. 删除所有孤儿分支 (并行)
+ *
+ * registry-stale 不动 (UI 处理).
  */
 export async function dispatchOrphanCleanup(
   projectPath: string,
@@ -839,66 +870,55 @@ export async function dispatchOrphanCleanup(
   const deleted: string[] = [];
   const failed: Array<{ path?: string; branch?: string; kind: OrphanKind; error: string }> = [];
 
-  // ---- Filesystem orphans: killProcessesUnderPath + rm ----
-  const fsTasks = classified.filesystemOrphans.map(async (item) => {
-    try {
-      await removeOrphanDir(item.worktreePath);
-      return { ok: true as const, item };
-    } catch (err) {
-      return { ok: false as const, item, err };
-    }
-  });
+  // 统一四种孤儿 kind 到同一列表
+  const items = [
+    ...classified.filesystemOrphans,
+    ...classified.orphanSessions,
+    ...classified.gitMetadataOrphans,
+    ...classified.branchOrphans,
+  ];
 
-  // ---- Orphan sessions: git worktree remove --force + fs.rm fallback ----
-  const sessionTasks = classified.orphanSessions.map(async (item) => {
-    try {
-      // 先尝试 git 清理
-      try {
-        await execFileAsync("git", ["worktree", "remove", "--force", item.worktreePath], {
-          cwd: projectPath,
-          encoding: "utf-8",
-          timeout: 15_000,
-        });
-      } catch {
-        // git remove 失败 (Windows 上常见) — 兜底 fs.rm
+  // 1. 删除目录 — 并行
+  const dirResults = await Promise.all(
+    items.map(async (item) => {
+      if (item.worktreePath && existsSync(item.worktreePath)) {
+        try {
+          await removeOrphanDir(item.worktreePath);
+        } catch (err) {
+          return { ok: false as const, item, err };
+        }
       }
-      // 不管 git 是否成功, 都强制 fs 删
-      await removeOrphanDir(item.worktreePath);
       return { ok: true as const, item };
-    } catch (err) {
-      return { ok: false as const, item, err };
-    }
-  });
+    }),
+  );
 
-  // ---- Git metadata orphans: branch -D + 统一 prune ----
-  const gitMetaTasks = classified.gitMetadataOrphans.map(async (item) => {
-    if (!item.branch) return { ok: true as const, item };
-    try {
-      await removeOrphanBranch(projectPath, item.branch);
+  // 2. 全局一次 prune — 顺序执行, 避免 N 个 git 进程同时改 git 元数据锁
+  try {
+    await execFileAsync("git", ["worktree", "prune"], {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 10_000,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn({ err: msg }, "git worktree prune failed during orphan cleanup");
+  }
+
+  // 3. 删除分支 — 并行 (prune 已清完元数据, branch -D 不会再被 phantom worktree 阻塞)
+  const allResults = await Promise.all(
+    dirResults.map(async (r) => {
+      if (!r.ok) return r;
+      const { item } = r;
+      if (item.branch) {
+        try {
+          await removeOrphanBranch(projectPath, item.branch);
+        } catch (err) {
+          return { ok: false as const, item, err };
+        }
+      }
       return { ok: true as const, item };
-    } catch (err) {
-      return { ok: false as const, item, err };
-    }
-  });
-
-  // ---- Branch orphans: git branch -D ----
-  const branchTasks = classified.branchOrphans.map(async (item) => {
-    if (!item.branch) return { ok: true as const, item };
-    try {
-      await removeOrphanBranch(projectPath, item.branch);
-      return { ok: true as const, item };
-    } catch (err) {
-      return { ok: false as const, item, err };
-    }
-  });
-
-  // 全部并行 (git 操作互不依赖)
-  const allResults = await Promise.all([
-    ...fsTasks,
-    ...sessionTasks,
-    ...gitMetaTasks,
-    ...branchTasks,
-  ]);
+    }),
+  );
 
   for (const r of allResults) {
     if (r.ok) {
@@ -912,23 +932,6 @@ export async function dispatchOrphanCleanup(
         kind: r.item.kind,
         error: errorMsg,
       });
-    }
-  }
-
-  // ---- 最后统一一次 git worktree prune (清残余 git 登记) ----
-  // 单次调用, 不在每个 git-metadata-orphan 里反复调 (git 内部锁)
-  // 任何孤儿类型都可能涉及 git metadata 残留, 所以始终 run
-  if (allResults.length > 0) {
-    try {
-      await execFileAsync("git", ["worktree", "prune"], {
-        cwd: projectPath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // prune 失败不致命 — 但要显式上报
-      log.warn({ err: msg }, "git worktree prune failed after orphan cleanup");
     }
   }
 
