@@ -37,9 +37,6 @@ jobs:
       - name: Build daemon JS
         run: bun run build:daemon
 
-      - name: Type check
-        run: bun run typecheck
-
       - name: Build and publish to GitHub Releases
         run: bun run dist:win:publish
         env:

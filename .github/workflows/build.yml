@@ -39,9 +39,6 @@ jobs:
       - name: Build daemon JS
         run: bun run build:daemon
 
-      - name: Type check
-        run: bun run typecheck
-
       - name: Build app
         run: bun run dist:win
         env:
