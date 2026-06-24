@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    name: Release (Windows x64)
+
+    permissions:
+      contents: write    # 创建 GitHub Release 需要写权限
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download fonts
+        run: bun run download-fonts
+
+      - name: Build daemon JS
+        run: bun run build:daemon
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Build and publish to GitHub Releases
+        run: bun run dist:win:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*/AgentDock-Setup-*.exe
+            release/*/AgentDock-Setup-*.exe.blockmap
+            release/*/latest.yml
+          draft: false
+          prerelease: false
+          generateReleaseNotes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -40,6 +40,8 @@ import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2Syn
 import { serializeForPush } from "./main/v2-state-bridge.js";
 import { registerE2eReset } from "./main/e2e-reset.js";
 import { registerFontProtocol, ensureFontsReady } from "./main/fonts.js";
+import electronUpdater from "electron-updater";
+const { autoUpdater } = electronUpdater;
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -433,6 +435,80 @@ function createWindow(): BrowserWindow {
   return mainWindow;
 }
 
+// ============================================================
+// 自动更新 (electron-updater + GitHub Releases)
+// ============================================================
+
+/**
+ * 配置并启动自动更新检查。
+ *
+ * - 开发模式 (app.isPackaged === false): NO-OP。
+ * - 生产模式: 启动时检查更新，之后每 4 小时检查一次。
+ * - 更新源: GitHub Releases（由 electron-builder.yml 的 publish 段配置）。
+ * - 事件通知渲染进程以展示更新状态 UI。
+ * - 实际安装在下次退出时进行。
+ */
+function initAutoUpdater(win: BrowserWindow): void {
+  // 开发模式不检查更新
+  if (!app.isPackaged) {
+    log.info("autoUpdater: skipped (not packaged)");
+    return;
+  }
+
+  autoUpdater.logger = log;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  // 转发事件到渲染进程
+  autoUpdater.on("checking-for-update", () => {
+    log.info("autoUpdater: checking for update");
+    win.webContents.send("update:checking");
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    log.info({ version: info.version }, "autoUpdater: update available");
+    win.webContents.send("update:available", info);
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    log.info({ version: info.version }, "autoUpdater: update not available");
+    win.webContents.send("update:not-available", info);
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    log.info({ percent: progress.percent }, "autoUpdater: download progress");
+    win.webContents.send("update:download-progress", progress);
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    log.info({ version: info.version }, "autoUpdater: update downloaded");
+    win.webContents.send("update:downloaded", info);
+  });
+
+  autoUpdater.on("error", (err) => {
+    log.error({ err }, "autoUpdater: error");
+    win.webContents.send("update:error", { message: err.message });
+  });
+
+  // 启动时检查
+  void autoUpdater.checkForUpdatesAndNotify().then((result) => {
+    log.info({ result }, "autoUpdater: initial check complete");
+  }).catch((err) => {
+    log.warn({ err }, "autoUpdater: initial check failed");
+  });
+
+  // 每 4 小时定期检查
+  const FOUR_HOURS = 4 * 60 * 60 * 1000;
+  const timer = setInterval(() => {
+    void autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      log.warn({ err }, "autoUpdater: periodic check failed");
+    });
+  }, FOUR_HOURS);
+
+  if (typeof timer.unref === "function") timer.unref();
+}
+
 async function bootstrap() {
   log.info({ pid: process.pid }, "AgentDock main starting");
 
@@ -448,11 +524,23 @@ async function bootstrap() {
   // __dirname-relative lookup for `daemon.js` / `daemon.ts` doesn't work
   // (main is at out/main/main.js, daemon is at plugins/daemon.ts).
   // Tell the manager to spawn an explicit entry point.
-  daemonManager.daemonEntry = resolve(__dirname, "../../plugins/daemon.ts");
-  // Use bun to run the TS daemon natively (no tsx loader needed). bun is
-  // already a project dep (used for scripts), so it ships in node_modules.
-  process.env.AGENTDOCK_USE_BUN = "1";
-  log.info({ entry: daemonManager.daemonEntry, cwd: process.cwd() }, "spawning daemon");
+  //
+  // 打包后：daemon 已预编译为 out/daemon/daemon.mjs，通过 Electron
+  // 的 Node 模式（ELECTRON_RUN_AS_NODE=1）运行，无需 bun。
+  // 开发环境：通过 bun 运行 plugins/daemon.ts。
+  if (app.isPackaged) {
+    daemonManager.daemonEntry = resolve(__dirname, "../daemon/daemon.mjs");
+    // 打包后不使用 bun（用户机器上没有 bun）
+    delete process.env.AGENTDOCK_USE_BUN;
+    // 注意：不要在主进程设置 ELECTRON_RUN_AS_NODE，否则 Electron 的
+    // 渲染器/GPU 进程会退化为 Node 模式，导致 loadFile 失败。
+    // ELECTRON_RUN_AS_NODE 由 daemon-manager.ts 在 spawn daemon 时单独注入。
+    log.info({ entry: daemonManager.daemonEntry }, "packaged mode: using compiled daemon");
+  } else {
+    daemonManager.daemonEntry = resolve(__dirname, "../../plugins/daemon.ts");
+    process.env.AGENTDOCK_USE_BUN = "1";
+    log.info({ entry: daemonManager.daemonEntry }, "dev mode: using bun + daemon.ts");
+  }
   try {
     const { client } = await daemonManager.init();
     daemonClient = createDaemonClient(`http://127.0.0.1:${client.port}`);
@@ -671,6 +759,9 @@ async function bootstrap() {
   }
 
   log.info("window loaded");
+
+  // 4. 初始化自动更新（开发模式为 NO-OP）
+  initAutoUpdater(win);
 }
 
 // Register the custom font protocol after the app is ready — required by
@@ -694,6 +785,13 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+
+// 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock，
+// 避免 GPU 缓存/IndexedDB 写入只读的安装目录导致渲染进程崩溃。
+if (app.isPackaged) {
+  app.setPath("userData", resolve(app.getPath("appData"), "AgentDock"));
+  app.setPath("sessionData", resolve(app.getPath("appData"), "AgentDock"));
+}
 
 app.whenReady().then(async () => {
   registerFontProtocol();
