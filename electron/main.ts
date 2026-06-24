@@ -495,8 +495,9 @@ async function bootstrap() {
       .select({ c: sql<number>`count(*)` })
       .from(schema.projects)
       .get();
-    if (count && count.c === 0 && activeProjectPath) {
-      const srcPath = getDbPath(activeProjectPath);
+    const seedPath = activeProjectPath || process.cwd();
+    if (count && count.c === 0 && seedPath) {
+      const srcPath = getDbPath(seedPath);
       migrateProjectsToGlobal(globalDbHandle.db, srcPath);
     }
   } catch {

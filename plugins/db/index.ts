@@ -87,14 +87,15 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
   // Per-project DBs no longer hold the projects table.
   //
   // SQLite quirk: a `DROP TABLE projects` does NOT remove the FK metadata
-  // that v1's CREATE TABLE recorded for `sessions.project_id REFERENCES
-  // projects(id)`. With `PRAGMA foreign_keys = ON`, every INSERT into
-  // sessions then errors with "no such table: main.projects". To make the
-  // legacy FK declaration inert we must drop & recreate sessions without
-  // the REFERENCES clause.
+  // that earlier CREATE TABLE statements recorded for REFERENCES projects(id).
+  // With `PRAGMA foreign_keys = ON`, every INSERT into sessions/todos then
+  // errors with "no such table: main.projects". To make the legacy FK
+  // declarations inert we must drop & recreate both tables without the
+  // REFERENCES clause.
   (sqlite) => {
-    // Recreate sessions without the FK to projects (SQLite preserves the
-    // dangling reference otherwise). Copy rows verbatim, then swap.
+    // Recreate sessions and todos without the FK to projects (SQLite
+    // preserves the dangling reference otherwise). Copy rows verbatim,
+    // then swap.
     sqlite.exec(`
       PRAGMA foreign_keys = OFF;
       CREATE TABLE IF NOT EXISTS sessions_new (
@@ -116,6 +117,23 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
         FROM sessions;
       DROP TABLE sessions;
       ALTER TABLE sessions_new RENAME TO sessions;
+
+      CREATE TABLE IF NOT EXISTS todos_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        completed INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+      );
+      INSERT INTO todos_new (id, project_id, content, completed, sort_order, created_at, updated_at, status)
+        SELECT id, project_id, content, completed, sort_order, created_at, updated_at, status
+        FROM todos;
+      DROP TABLE todos;
+      ALTER TABLE todos_new RENAME TO todos;
+
       DROP TABLE IF EXISTS projects;
       PRAGMA foreign_keys = ON;
     `);

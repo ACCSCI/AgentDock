@@ -54,10 +54,16 @@ export function TabBar() {
       // and other DB handlers can find the project record in the global DB.
       const project = projects?.find((p) => p.id === projectId);
       if (project) {
-        void initDb.mutateAsync(project.path);
+        initDb.mutate(project.path, {
+          onSuccess: () => {
+            setActiveProject(projectId);
+            navigate({ to: "/app/$projectId", params: { projectId } });
+          },
+        });
+      } else {
+        setActiveProject(projectId);
+        navigate({ to: "/app/$projectId", params: { projectId } });
       }
-      setActiveProject(projectId);
-      navigate({ to: "/app/$projectId", params: { projectId } });
     }
   };
 
