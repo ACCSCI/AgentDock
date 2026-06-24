@@ -1,0 +1,19 @@
+---
+name: AgentDock
+about: 报告 AgentDock 相关问题
+---
+
+👋 感谢你提交 Issue!
+
+为了更快地帮助你,请提供以下信息:
+
+- [ ] 你的问题是 **Bug** 还是 **功能建议**?
+  - Bug → 使用 [Bug Report 模板](./bug_report.md)
+  - 功能建议 → 先去 [Discussions](https://github.com/ACCSCI/AgentDock/discussions/categories/ideas) 讨论
+- [ ] 你的问题是 **文档问题**?
+  - 是 → 使用 [Documentation 模板](./documentation.md)
+- [ ] 你的问题是 **一般性问题**?
+  - 是 → 使用 [Question 模板](./question.md)
+- [ ] 你已经搜索过 [现有 issues](https://github.com/ACCSCI/AgentDock/issues?q=is%3Aissue) 没找到答案?
+
+如果以上都不匹配,可以直接在下方描述。
