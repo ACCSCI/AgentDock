@@ -3820,11 +3820,11 @@ body {
 }
 
 .settings-version-ok {
-  color: #2a8a3e;
+  color: var(--daemon-ready-text);
 }
 
 .settings-version-error {
-  color: #c0392b;
+  color: var(--daemon-error-text);
 }
 
 .settings-version-progress {

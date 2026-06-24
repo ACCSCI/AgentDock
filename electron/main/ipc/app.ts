@@ -59,28 +59,15 @@ export function registerApp(): void {
         return { status: "dev-mode" };
       }
       try {
-        // checkForUpdates resolves with null when no update is available
-        // (older electron-updater versions) or with an UpdateCheckResult
-        // (newer). The canonical signal is the event chain — listeners
-        // registered in initAutoUpdater() will fire onAvailable /
-        // update-not-available / update-downloaded / error. We just need
-        // a single-shot answer for the renderer; the event stream keeps
-        // progress in sync.
-        const result = await autoUpdater.checkForUpdates();
-        if (!result) {
-          return { status: "checking" };
-        }
-        // UpdateCheckResult is { updateInfo, downloadPromise? } when an
-        // update is available; null when not. Older versions returned
-        // { version } directly — guard with optional chaining.
-        const info = (result as { updateInfo?: { version: string } }).updateInfo;
-        if (info?.version) {
-          // We can't know here whether the download finished — that's an
-          // async event. Return "available"; the renderer's
-          // onDownloaded listener flips to "downloaded" when the file
-          // is on disk.
-          return { status: "available", info: { version: info.version } };
-        }
+        // checkForUpdates resolves with UpdateCheckResult even when
+        // no newer version is available — the result.info always
+        // carries the latest release, which may be the same as the
+        // current version. The canonical signal is the event chain
+        // (onAvailable / update-not-available / update-downloaded /
+        // error) registered in initAutoUpdater(). The renderer
+        // subscribes to these and manages state transitions; all we
+        // do here is kick off the check.
+        await autoUpdater.checkForUpdates();
         return { status: "checking" };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
