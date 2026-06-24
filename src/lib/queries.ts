@@ -800,19 +800,19 @@ export function useSaveConfig(projectId: string) {
 export function useV2Projects() {
   const v2State = isV2StateAvailable() ? useV2State() : null;
   const oldQuery = useProjects();
-  const queryClient = useQueryClient();
 
   // Transform v2State data to ProjectData[] format
   const v2Projects = useMemo(() => {
     if (!v2State?.ready) return null;
 
     // Collect realSessionIds from active CreatingSession entries in the
-    // React Query cache. These sessions are still in their optimistic
-    // creation lifecycle and must not be replaced by v2State data —
-    // otherwise the session card flashes from "loading" to "clickable"
-    // before the lifecycle completes.
+    // React Query cache (oldQuery.data shares the same cache key so it
+    // reflects optimistic inserts like CreatingSession). These sessions
+    // are still in their optimistic creation lifecycle and must not be
+    // replaced by v2State data — otherwise the session card flashes from
+    // "loading" to "clickable" before the lifecycle completes.
     const creatingRealIds = new Set<string>();
-    const cachedProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    const cachedProjects = oldQuery.data;
     if (cachedProjects) {
       for (const p of cachedProjects) {
         for (const s of p.sessions) {
@@ -887,7 +887,7 @@ export function useV2Projects() {
     }
 
     return Array.from(projectMap.values());
-  }, [v2State, oldQuery.data, queryClient]);
+  }, [v2State, oldQuery.data]);
 
   // Return v2State data if available and non-empty, otherwise fall back
   // to old query. Empty v2State means the snapshot hasn't loaded sessions
