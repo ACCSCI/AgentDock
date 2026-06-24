@@ -1,0 +1,209 @@
+/* ── Session card: heatmap overlay + status icon ─────────────────── */
+.session-card-user-status {
+  position: relative;
+}
+
+.session-card-user-status::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--session-status-color, transparent);
+  opacity: var(--session-heat, 0);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.8s ease;
+}
+
+/* Left accent bar — always visible when status is set, opacity tied to heat */
+.session-card-user-status::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--session-status-color, transparent);
+  opacity: calc(var(--session-heat, 0) + 0.15);
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.8s ease;
+}
+
+.session-card-user-status > * {
+  position: relative;
+  z-index: 1;
+}
+
+.session-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 6px;
+  border: 1.5px solid var(--session-status-color, #d1d5db);
+  background: transparent;
+}
+
+/* Empty circle when no status is set */
+.session-status-icon-empty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
+}
+
+/* Workspace Session Info */
+.workspace-session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--color-session-bg);
+  border: 1px solid var(--color-session-border);
+  border-radius: var(--radius-sm);
+}
+
+.workspace-session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-session-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.workspace-session-path {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-session-ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-port-badge {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary);
+  background: var(--color-bg, #fff);
+  border: 1px solid var(--color-session-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  white-space: nowrap;
+  user-select: all;
+}
+
+/* Session Card — Creating State */
+.session-card-creating {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: default;
+  opacity: 0.85;
+  background: #fff8f9;
+}
+
+.session-card-creating:hover {
+  background: #fff8f9;
+}
+
+/* Session Card — Deleting State */
+.session-card-deleting {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: default;
+  opacity: 0.85;
+  background: #fff5f5;
+  border-left: 3px solid #ef4444;
+}
+
+.session-card-deleting:hover {
+  background: #fff5f5;
+}
+
+.session-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.creating-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.step-label {
+  flex: 1;
+}
+
+.step-duration {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.step-icon-done {
+  color: #22c55e;
+}
+
+.step-icon-error {
+  color: #ef4444;
+}
+
+.step-icon-pending {
+  color: var(--color-text-secondary);
+  opacity: 0.4;
+}
+
+/* Spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.step-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border-light);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}

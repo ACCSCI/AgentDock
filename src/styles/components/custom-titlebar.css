@@ -1,0 +1,93 @@
+/* ============================================
+   Custom Titlebar
+   ============================================ */
+
+.custom-titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.custom-titlebar--macos {
+  height: 28px;
+  padding-left: 70px; /* Space for native traffic lights */
+}
+
+.custom-titlebar-left {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.custom-titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.custom-titlebar-drag {
+  flex: 1;
+  -webkit-app-region: drag;
+  height: 100%;
+}
+
+.custom-titlebar-drag--macos {
+  -webkit-app-region: drag;
+}
+
+.custom-titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn {
+  width: 46px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.custom-titlebar-btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.custom-titlebar-todo-btn {
+  width: 36px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.custom-titlebar-todo-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
