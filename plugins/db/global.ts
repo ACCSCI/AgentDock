@@ -16,7 +16,13 @@ import * as schema from "./schema.js";
 const GLOBAL_DB_DIR = ".agentdock";
 const GLOBAL_DB_FILE = "projects.db";
 
-/** Schema version for the global DB (independent of per-project SCHEMA_VERSION). */
+/**
+ * Schema version for the global DB (independent of per-project SCHEMA_VERSION).
+ *
+ * Default location is `<homedir>/.agentdock/projects.db` (production). Dev / test
+ * callers may pass an `overrideDir` to `openGlobalDb()` to redirect the DB into a
+ * per-instance userData path. The override MUST be a directory path, not a file.
+ */
 const GLOBAL_DB_VERSION = 1;
 
 // Reuse schema.projects — the Drizzle table definition does not encode FK
@@ -35,16 +41,24 @@ let globalSqlite: DatabaseSync | null = null;
 
 /**
  * Open (or return the cached) global projects database.
- * Creates ~/.agentdock/ directory if needed, enables WAL, and runs
+ * Creates the parent directory if needed, enables WAL, and runs
  * the global schema migration (projects table only).
+ *
+ * @param overrideDir  Optional caller-controlled directory override. When set,
+ *                     the DB lives at `<overrideDir>/projects.db` instead of the
+ *                     production default `<homedir>/.agentdock/projects.db`.
+ *                     Used by dev mode (per-userData isolation) and by E2E
+ *                     fixtures to keep test DBs out of the user's real home dir.
+ *                     Must be a directory path, not a file path.
  */
-export function openGlobalDb(): GlobalDbHandle {
+export function openGlobalDb(overrideDir?: string): GlobalDbHandle {
   if (globalDb && globalSqlite) {
     return { db: globalDb, sqlite: globalSqlite, close: closeGlobalDb };
   }
 
-  const homeDir = os.homedir();
-  const dbDir = path.join(homeDir, GLOBAL_DB_DIR);
+  // Resolve the DB directory: use overrideDir if provided (dev/test),
+  // otherwise fall back to the production default (homedir + .agentdock).
+  const dbDir = overrideDir ?? path.join(os.homedir(), GLOBAL_DB_DIR);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
   }

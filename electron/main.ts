@@ -17,7 +17,7 @@
  */
 import { app, BrowserWindow, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { eq, sql } from "drizzle-orm";
 import { generateClientId } from "./main/client-id.js";
@@ -593,8 +593,26 @@ async function bootstrap() {
 
   // 2. Register ALL IPC handlers (Phase 4: 29 channels + 3 daemon channels)
 
-  // Global projects DB — machine-level singleton at ~/.agentdock/projects.db
-  globalDbHandle = openGlobalDb();
+  // Global projects DB — production default is ~/.agentdock/projects.db.
+  // In dev mode (AGENTDOCK_DEV_INSTANCE set by scripts/dev-instance.ts, the
+  // PR-2 follow-up), the DB follows the per-instance userData so multiple dev
+  // AgentDock instances do not collide on the same SQLite file. Today, the
+  // override is wired through unconditionally so any caller can opt in by
+  // setting the env var; the dev script itself lands in PR-2.
+  const isDevInstance =
+    typeof process.env.AGENTDOCK_DEV_INSTANCE === "string" &&
+    process.env.AGENTDOCK_DEV_INSTANCE !== "";
+  if (isDevInstance) {
+    const userDataDir = app.getPath("userData");
+    const projectsDbDir = join(userDataDir, "global");
+    log.info(
+      { projectsDbDir, instance: process.env.AGENTDOCK_DEV_INSTANCE },
+      "dev mode: projects.db follows userData",
+    );
+    globalDbHandle = openGlobalDb(projectsDbDir);
+  } else {
+    globalDbHandle = openGlobalDb();
+  }
   // One-time seed: if global DB is empty, migrate from the active project's DB
   try {
     const count = globalDbHandle.db
@@ -855,6 +873,17 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+
+// Dev mode userData isolation: when AGENTDOCK_USER_DATA_DIR is set, redirect
+// Electron's userData path before anything else reads it. This must run
+// before app.whenReady() since some Electron APIs (localStorage, GPU cache)
+// resolve userData at ready time.
+// In production this env var is never set, so the default %APPDATA%/AgentDock
+// path applies.
+if (process.env.AGENTDOCK_USER_DATA_DIR) {
+  const devUserData = resolve(process.env.AGENTDOCK_USER_DATA_DIR);
+  app.setPath("userData", devUserData);
+}
 
 // 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock，
 // 避免 GPU 缓存/IndexedDB 写入只读的安装目录导致渲染进程崩溃。
