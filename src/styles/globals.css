@@ -3783,6 +3783,94 @@ body {
   color: var(--color-text);
 }
 
+/* Version & updates block */
+.settings-version-block {
+  padding: 16px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.settings-version-label {
+  color: var(--color-text-secondary);
+}
+
+.settings-version-value {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+.settings-version-status {
+  font-size: 13px;
+  min-height: 18px;
+}
+
+.settings-version-hint {
+  color: var(--color-text-secondary);
+}
+
+.settings-version-ok {
+  color: var(--daemon-ready-text);
+}
+
+.settings-version-error {
+  color: var(--daemon-error-text);
+}
+
+.settings-version-progress {
+  color: var(--color-primary);
+}
+
+.settings-version-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-version-check-btn,
+.settings-version-install-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.settings-version-check-btn {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+}
+
+.settings-version-check-btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+}
+
+.settings-version-check-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-version-install-btn {
+  color: white;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.settings-version-install-btn:hover {
+  filter: brightness(1.05);
+}
+
 /* Error Boundary fallback */
 .error-boundary {
   display: flex;
