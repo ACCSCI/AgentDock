@@ -486,6 +486,7 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
  * accidental bulk deletion of all session worktrees.
  */
 let _rimraf: ((p: string) => Promise<void>) | null = null;
+const _rmFallback = (p: string) => rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 async function rimrafOrFallback(dirPath: string): Promise<void> {
   if (!_rimraf) {
     try {
@@ -495,19 +496,15 @@ async function rimrafOrFallback(dirPath: string): Promise<void> {
       // fs-extra bundles a callback-based rimraf with arity 3 (p, options, cb)
       // that throws "callback function required" when called without a callback.
       // If the candidate looks callback-based, skip it and fall through to rm.
-      if (typeof candidate === "function" && candidate.length <= 2) {
-        _rimraf = candidate;
-      }
+      _rimraf = (typeof candidate === "function" && candidate.length <= 2)
+        ? candidate
+        : _rmFallback;
     } catch {
-      _rimraf = null;
+      _rimraf = _rmFallback;
     }
   }
 
-  if (_rimraf) {
-    await _rimraf(dirPath);
-  } else {
-    await rm(dirPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+  await _rimraf(dirPath);
 }
 
 /**
