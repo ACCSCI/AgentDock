@@ -841,6 +841,13 @@ export function useV2Projects() {
       // v2State from prematurely overriding the loading spinner.
       if (creatingRealIds.has(sessionId)) continue;
 
+      // Skip non-active sessions (creating/deleting) — these are already
+      // represented as optimistic CreatingSession/DeletingSession entries
+      // in the React Query cache. Without this guard, v2State can push a
+      // session before the optimistic insert lands, making it clickable
+      // while the create button is still spinning.
+      if (session.status !== "active") continue;
+
       const projectRoot = session.projectRoot || "";
 
       // §4.3: 判定有主/无主
@@ -923,6 +930,9 @@ export function useV2ProjectSessions(projectId: string | null) {
       const myClientId = v2State.clientId;
       return Array.from(v2State.sessions.values())
         .filter((s) => s.projectRoot === projectId)
+        // Only include active sessions — creating/deleting sessions are
+        // handled by optimistic CreatingSession/DeletingSession in cache.
+        .filter((s) => s.status === "active")
         .filter((s) => {
           // 无主 session 不进 sidebar
           const ownerClientId = v2State.owners.get(s.sessionId)?.clientId;
@@ -945,7 +955,7 @@ export function useV2ProjectSessions(projectId: string | null) {
               PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
             } : null,
             createdAt: new Date(s.createdAt).toISOString(),
-            status: (isForeign ? "foreign" : s.status === "active" ? "existing" : s.status) as SessionRuntimeStatus,
+            status: (isForeign ? "foreign" : "existing") as SessionRuntimeStatus,
             ownerClientId,
           };
         }) as SessionData[];
