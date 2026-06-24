@@ -17,7 +17,7 @@
  */
 import { app, BrowserWindow, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { eq, sql } from "drizzle-orm";
 import { generateClientId } from "./main/client-id.js";
@@ -591,8 +591,26 @@ async function bootstrap() {
 
   // 2. Register ALL IPC handlers (Phase 4: 29 channels + 3 daemon channels)
 
-  // Global projects DB — machine-level singleton at ~/.agentdock/projects.db
-  globalDbHandle = openGlobalDb();
+  // Global projects DB — production default is ~/.agentdock/projects.db.
+  // In dev mode (AGENTDOCK_DEV_INSTANCE set by scripts/dev-instance.ts, the
+  // PR-2 follow-up), the DB follows the per-instance userData so multiple dev
+  // AgentDock instances do not collide on the same SQLite file. Today, the
+  // override is wired through unconditionally so any caller can opt in by
+  // setting the env var; the dev script itself lands in PR-2.
+  const isDevInstance =
+    typeof process.env.AGENTDOCK_DEV_INSTANCE === "string" &&
+    process.env.AGENTDOCK_DEV_INSTANCE !== "";
+  if (isDevInstance) {
+    const userDataDir = app.getPath("userData");
+    const projectsDbDir = join(userDataDir, "global");
+    log.info(
+      { projectsDbDir, instance: process.env.AGENTDOCK_DEV_INSTANCE },
+      "dev mode: projects.db follows userData",
+    );
+    globalDbHandle = openGlobalDb(projectsDbDir);
+  } else {
+    globalDbHandle = openGlobalDb();
+  }
   // One-time seed: if global DB is empty, migrate from the active project's DB
   try {
     const count = globalDbHandle.db

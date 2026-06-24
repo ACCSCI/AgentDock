@@ -125,7 +125,7 @@ export default defineConfig({
       })(),
       strictPort: true,
       watch: {
-        ignored: ["**/.agentdock/**", "**/.claude/**"],
+        ignored: ["**/.agentdock/**", "**/.agentdock-dev/**", "**/.claude/**"],
       },
     },
   },

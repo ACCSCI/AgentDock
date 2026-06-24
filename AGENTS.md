@@ -21,3 +21,12 @@
 ## Vite watcher
 
 - Keep `.agentdock/**` and `.claude/**` excluded from Vite file watching to avoid unrelated reloads during session management or Claude usage.
+- Also exclude `.agentdock-dev/**` — dev-mode per-instance userData directories live there (see "Dev mode userData isolation").
+
+## Dev mode userData isolation
+
+- `AGENTDOCK_DEV_INSTANCE=<N>` env var (set by `scripts/dev-instance.ts`, PR-2) signals dev mode.
+- When set, `projects.db` follows `<userData>/global/projects.db` instead of the production `~/.agentdock/projects.db`. This lets multiple dev AgentDock instances run in parallel without colliding on a shared SQLite file.
+- When unset, behavior is identical to production (single global `~/.agentdock/projects.db`).
+- Worktree directories (`<project>/.agentdock/worktrees/`) are project-level and do NOT follow userData — they are the same in dev and production.
+- `app.requestSingleInstanceLock()` keys off `userData`, so dev instances with distinct `--user-data-dir` automatically coexist; the production single-instance invariant is preserved unchanged.
