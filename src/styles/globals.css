@@ -3130,7 +3130,15 @@ body {
   white-space: nowrap;
   cursor: default;
   user-select: none;
+  scrollbar-width: none;
   transition: color 0.15s, opacity 0.15s;
+}
+
+.todo-dropdown-item:hover .todo-dropdown-item-text {
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
+  scrollbar-width: thin;
 }
 
 .todo-dropdown-item--done .todo-dropdown-item-text {
