@@ -56,17 +56,18 @@ function normalizePath(p: string): string {
 
 /**
  * Resolve the actual filesystem root of a project. If `projectId` is
- * supplied, look it up in the active DB — this is the path callers SHOULD
+ * supplied, look it up in the global DB — this is the path callers SHOULD
  * use when they have a project context (multi-project setups would
  * otherwise hit the launch-cwd path). Falls back to `getProjectPath()`
  * (the active path) for legacy callers and the daemon-auto-init case.
  */
 let getProjectPathRef: (() => string | null) | null = null;
+let getGlobalDbRef: (() => import("../../../plugins/db/index.js").DrizzleDb | null) | null = null;
 function resolveProjectPath(projectId?: string): string {
   if (projectId) {
-    const db = getActiveDb();
-    if (db) {
-      const row = db
+    const globalDb = getGlobalDbRef?.();
+    if (globalDb) {
+      const row = globalDb
         .select()
         .from(schema.projects)
         .where(eq(schema.projects.id, projectId))
@@ -84,10 +85,14 @@ function resolveProjectPath(projectId?: string): string {
   return fallback;
 }
 
-export function registerWorktreeAndShell(getProjectPath: () => string | null): void {
+export function registerWorktreeAndShell(
+  getProjectPath: () => string | null,
+  getGlobalDb?: () => import("../../../plugins/db/index.js").DrizzleDb | null,
+): void {
   // Stash the lookup for resolveProjectPath above. Avoids threading the
   // ref through every helper signature.
   getProjectPathRef = getProjectPath;
+  getGlobalDbRef = getGlobalDb ?? null;
   // worktree:orphans — list orphan worktree directories AND orphan
   // agentdock/* branches under the project. Accepts an optional
   // `projectId`; resolves the real project root from DB so multi-

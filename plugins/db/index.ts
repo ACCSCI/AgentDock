@@ -83,6 +83,43 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
     // Backfill: any row with completed = 1 becomes "done"; default "pending" covers the rest.
     sqlite.exec(`UPDATE todos SET status = 'done' WHERE completed = 1`);
   },
+  // v9: Move projects table to global DB (~/.agentdock/projects.db).
+  // Per-project DBs no longer hold the projects table.
+  //
+  // SQLite quirk: a `DROP TABLE projects` does NOT remove the FK metadata
+  // that v1's CREATE TABLE recorded for `sessions.project_id REFERENCES
+  // projects(id)`. With `PRAGMA foreign_keys = ON`, every INSERT into
+  // sessions then errors with "no such table: main.projects". To make the
+  // legacy FK declaration inert we must drop & recreate sessions without
+  // the REFERENCES clause.
+  (sqlite) => {
+    // Recreate sessions without the FK to projects (SQLite preserves the
+    // dangling reference otherwise). Copy rows verbatim, then swap.
+    sqlite.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE IF NOT EXISTS sessions_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        worktree_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        ports TEXT,
+        background_hook_status TEXT,
+        sort_order INTEGER,
+        background_hook_errors TEXT,
+        user_status TEXT,
+        last_activated_at TEXT
+      );
+      INSERT INTO sessions_new (id, project_id, name, branch, worktree_path, created_at, ports, background_hook_status, sort_order, background_hook_errors, user_status, last_activated_at)
+        SELECT id, project_id, name, branch, worktree_path, created_at, ports, background_hook_status, sort_order, background_hook_errors, user_status, last_activated_at
+        FROM sessions;
+      DROP TABLE sessions;
+      ALTER TABLE sessions_new RENAME TO sessions;
+      DROP TABLE IF EXISTS projects;
+      PRAGMA foreign_keys = ON;
+    `);
+  },
 ];
 
 /** Target schema version after all migrations are applied. */
