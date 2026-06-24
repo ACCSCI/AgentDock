@@ -35,7 +35,7 @@ Closes #
 <!-- 涉及 daemon/session/端口的改动必须说明 -->
 
 - [ ] 不涉及核心架构(daemon/session/端口)
-- [ ] 涉及核心架构,**已阅读并遵循** [新架构.md](docs/新架构.md) §0 不变式
+- [ ] 涉及核心架构,**已阅读并遵循** [新架构.md](https://github.com/ACCSCI/AgentDock/blob/master/docs/%E6%96%B0%E6%9E%B6%E6%9E%84.md) §0 不变式
 
 ## 测试
 
@@ -60,8 +60,8 @@ Closes #
 
 ## 检查清单
 
-- [ ] 我已阅读 [CONTRIBUTING.md](CONTRIBUTING.md)
-- [ ] 我已阅读 [新架构.md](docs/新架构.md)(如涉及核心架构)
+- [ ] 我已阅读 [CONTRIBUTING.md](https://github.com/ACCSCI/AgentDock/blob/master/CONTRIBUTING.md)
+- [ ] 我已阅读 [新架构.md](https://github.com/ACCSCI/AgentDock/blob/master/docs/%E6%96%B0%E6%9E%B6%E6%9E%84.md)(如涉及核心架构)
 - [ ] Commit 信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] PR 标题遵循 Conventional Commits 格式(如 `feat: add amazing feature`)
 - [ ] 我已运行 `bun run check:fix` 格式化代码

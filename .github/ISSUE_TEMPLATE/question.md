@@ -14,8 +14,8 @@ assignees: ''
 
 你已经尝试过什么?
 
-- [ ] 搜索过 [README](README.md)
-- [ ] 搜索过 [docs/](docs/)
+- [ ] 搜索过 [README](https://github.com/ACCSCI/AgentDock/blob/master/README.md)
+- [ ] 搜索过 [docs/](https://github.com/ACCSCI/AgentDock/tree/master/docs)
 - [ ] 搜索过 [现有 issues](https://github.com/ACCSCI/AgentDock/issues?q=is%3Aissue)
 - [ ] 搜索过 [Discussions](https://github.com/ACCSCI/AgentDock/discussions)
 

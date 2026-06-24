@@ -56,4 +56,4 @@ assignees: ''
 
 - [ ] 我已搜索过 [现有 issues](https://github.com/ACCSCI/AgentDock/issues?q=is%3Aissue+label%3Aenhancement),未发现重复
 - [ ] 我已在 Discussions 中发起过讨论
-- [ ] 我已阅读 [新架构.md](docs/新架构.md),确认该功能与现有架构兼容
+- [ ] 我已阅读 [新架构.md](https://github.com/ACCSCI/AgentDock/blob/master/docs/%E6%96%B0%E6%9E%B6%E6%9E%84.md),确认该功能与现有架构兼容
