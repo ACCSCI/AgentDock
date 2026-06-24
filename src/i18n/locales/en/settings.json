@@ -3,5 +3,9 @@
   "version": "Version",
   "checkForUpdates": "Check for Updates",
   "updateAvailable": "Update available",
-  "upToDate": "You're up to date"
+  "upToDate": "You're up to date",
+  "shortcuts": "Shortcuts",
+  "focusDirSearch": "Focus directory search",
+  "resetDefault": "Reset to default",
+  "back": "Back"
 }

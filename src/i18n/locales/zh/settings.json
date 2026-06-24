@@ -3,5 +3,9 @@
   "version": "版本",
   "checkForUpdates": "检查更新",
   "updateAvailable": "有新版本可用",
-  "upToDate": "已是最新版本"
+  "upToDate": "已是最新版本",
+  "shortcuts": "快捷键",
+  "focusDirSearch": "聚焦目录搜索栏",
+  "resetDefault": "恢复默认",
+  "back": "返回"
 }
