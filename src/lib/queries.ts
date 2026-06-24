@@ -33,7 +33,7 @@ export type SessionRuntimeStatus =
   | "deleting"
   | "takeover";
 
-export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "done";
+export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "verifying" | "done";
 
 export interface SessionPorts {
   FRONTEND_PORT: number;
