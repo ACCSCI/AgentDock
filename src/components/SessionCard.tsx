@@ -98,7 +98,7 @@ interface SessionCardProps {
   session: SessionListItem;
   isActive: boolean;
   onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => void;
+  onRequestDelete: (sessionId: string) => void;
   onRename: (sessionId: string, newName: string) => void;
   onOpenInExplorer: (worktreePath: string) => void;
   onOpenInTerminal: (worktreePath: string) => void;
@@ -115,7 +115,7 @@ export function SessionCard({
   session,
   isActive,
   onSelect,
-  onDelete,
+  onRequestDelete,
   onRename,
   onOpenInExplorer,
   onOpenInTerminal,
@@ -131,11 +131,9 @@ export function SessionCard({
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(session.name);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
-  const confirmRef = useRef<HTMLDivElement>(null);
 
   // Heat value — recomputed every 10s via interval + on session data change
   const lastActivatedAt = "lastActivatedAt" in session ? (session as SessionData).lastActivatedAt : null;
@@ -190,25 +188,6 @@ export function SessionCard({
     };
   }, [menuPos]);
 
-  // Cancel delete confirmation on click-outside or Escape
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    const handleClick = (e: MouseEvent) => {
-      if (confirmRef.current && !confirmRef.current.contains(e.target as Node)) {
-        setConfirmingDelete(false);
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setConfirmingDelete(false);
-    };
-    window.addEventListener("mousedown", handleClick);
-    window.addEventListener("keydown", handleKey);
-    return () => {
-      window.removeEventListener("mousedown", handleClick);
-      window.removeEventListener("keydown", handleKey);
-    };
-  }, [confirmingDelete]);
-
   // Clamp context menu position to viewport
   useEffect(() => {
     if (!menuPos || !menuRef.current) return;
@@ -236,13 +215,6 @@ export function SessionCard({
     }
   }, [session.name, editing]);
 
-  // Reset delete confirmation when card becomes inactive
-  useEffect(() => {
-    if (!isActive) {
-      setConfirmingDelete(false);
-    }
-  }, [isActive]);
-
   useEffect(() => {
     if (editing && inputRef.current) {
       inputRef.current.focus();
@@ -260,7 +232,6 @@ export function SessionCard({
   const handleStartRename = useCallback(() => {
     setMenuPos(null);
     setSubmenuPos(null);
-    setConfirmingDelete(false);
     setEditValue(session.name);
     setEditing(true);
   }, [session.name]);
@@ -300,8 +271,8 @@ export function SessionCard({
     setMenuPos(null);
     setSubmenuPos(null);
     setEditing(false);
-    setConfirmingDelete(true);
-  }, []);
+    onRequestDelete(session.id);
+  }, [session.id, onRequestDelete]);
 
   const handleReassignPorts = useCallback(() => {
     setMenuPos(null);
@@ -414,33 +385,13 @@ export function SessionCard({
           >
             重试
           </button>
-          {confirmingDelete ? (
-            <span className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
-              <span className="session-delete-confirm-text">确认删除?</span>
-              <button
-                type="button"
-                className="session-delete-confirm-btn session-delete-confirm-yes"
-                onClick={() => { setConfirmingDelete(false); onDelete(session.id); }}
-              >
-                ✓
-              </button>
-              <button
-                type="button"
-                className="session-delete-confirm-btn session-delete-confirm-no"
-                onClick={() => setConfirmingDelete(false)}
-              >
-                ✕
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="failed-delete-btn"
-              onClick={(e) => { e.stopPropagation(); setConfirmingDelete(true); }}
-            >
-              删除
-            </button>
-          )}
+          <button
+            type="button"
+            className="failed-delete-btn"
+            onClick={(e) => { e.stopPropagation(); onRequestDelete(session.id); }}
+          >
+            删除
+          </button>
         </div>
       </div>
     );
@@ -512,45 +463,16 @@ export function SessionCard({
         {statusLabel && session.status !== "foreign" && (
           <span className={`session-status-badge session-status-badge-${session.status}`}>{statusLabel}</span>
         )}
-        {confirmingDelete ? (
-          <div ref={confirmRef} className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
-            <span className="session-delete-confirm-text">确认删除?</span>
-            <button
-              type="button"
-              className="session-delete-confirm-btn session-delete-confirm-yes"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmingDelete(false);
-                onDelete(session.id);
-              }}
-              title="确认删除"
-            >
-              ✓
-            </button>
-            <button
-              type="button"
-              className="session-delete-confirm-btn session-delete-confirm-no"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmingDelete(false);
-              }}
-              title="取消"
-            >
-              ✕
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="session-close"
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmingDelete(true);
-            }}
-          >
-            ✕
-          </button>
-        )}
+        <button
+          type="button"
+          className="session-close"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRequestDelete(session.id);
+          }}
+        >
+          ✕
+        </button>
       </div>
 
       {menuPos && (

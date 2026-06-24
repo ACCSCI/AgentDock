@@ -1,0 +1,75 @@
+import { useEffect } from "react";
+
+interface ConfirmDeleteModalProps {
+  open: boolean;
+  sessionName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+export function ConfirmDeleteModal({
+  open,
+  sessionName,
+  onConfirm,
+  onCancel,
+}: ConfirmDeleteModalProps) {
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div className="dir-modal-overlay" onClick={onCancel}>
+      <div
+        className="dir-modal git-init-modal"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="confirm-delete-modal"
+      >
+        <div className="dir-modal-header">
+          <div className="dir-modal-header-left">
+            <h3>删除确认</h3>
+          </div>
+          <button
+            type="button"
+            className="dir-modal-close"
+            onClick={onCancel}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="git-init-description">
+          <p>
+            确定要删除 <strong>{sessionName}</strong> 吗？
+          </p>
+          <p>删除后，该 session 的 worktree 和端口将被释放。</p>
+        </div>
+
+        <div className="dir-modal-actions">
+          <button
+            type="button"
+            className="dir-modal-btn dir-modal-btn-cancel"
+            onClick={onCancel}
+            data-testid="confirm-delete-cancel"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="dir-modal-btn dir-modal-btn-confirm dir-modal-btn-danger"
+            onClick={onConfirm}
+            data-testid="confirm-delete-ok"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

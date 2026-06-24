@@ -7,6 +7,7 @@ import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { toast } from "../lib/toast";
 import { SessionCard } from "./SessionCard";
+import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
@@ -29,6 +30,7 @@ export function SessionSidebar() {
 
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<"before" | "after">("after");
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const draggedIdRef = useRef<string | null>(null);
   const lastCreateAtRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -199,6 +201,7 @@ export function SessionSidebar() {
 
   const handleDeleteSession = async (sessionId: string) => {
     if (!activeProject) return;
+    setDeletingSessionId(null);
     try {
       await deleteSession.mutateAsync({ sessionId, projectId: activeProject.id });
       terminalCache.disposeBySession(sessionId);
@@ -206,6 +209,10 @@ export function SessionSidebar() {
       console.error("Failed to delete session:", err);
       toast.error(`删除失败: ${err instanceof Error ? err.message : "未知错误"}`);
     }
+  };
+
+  const handleRequestDelete = (sessionId: string) => {
+    setDeletingSessionId(sessionId);
   };
 
   const handleRenameSession = async (sessionId: string, newName: string) => {
@@ -288,6 +295,7 @@ export function SessionSidebar() {
   }
 
   return (
+    <>
     <div className="session-sidebar" style={{ width: sidebarWidth }} data-testid="session-sidebar">
       <div className="session-sidebar-header">
         <span className="session-sidebar-title">Sessions</span>
@@ -336,7 +344,7 @@ export function SessionSidebar() {
               session={session}
               isActive={session.id === activeSessionId}
               onSelect={setActiveSession}
-              onDelete={handleDeleteSession}
+              onRequestDelete={handleRequestDelete}
               onRename={handleRenameSession}
               onOpenInExplorer={handleOpenInExplorer}
               onOpenInTerminal={handleOpenInTerminal}
@@ -364,7 +372,7 @@ export function SessionSidebar() {
                     session={session}
                     isActive={false}
                     onSelect={setActiveSession}
-                    onDelete={handleDeleteSession}
+                    onRequestDelete={handleRequestDelete}
                     onRename={handleRenameSession}
                     onOpenInExplorer={handleOpenInExplorer}
                     onOpenInTerminal={handleOpenInTerminal}
@@ -389,5 +397,12 @@ export function SessionSidebar() {
         <span className="session-sidebar-resize-dots" />
       </div>
     </div>
+    <ConfirmDeleteModal
+      open={deletingSessionId !== null}
+      sessionName={sessions.find((s) => s.id === deletingSessionId)?.name ?? ""}
+      onConfirm={() => deletingSessionId && handleDeleteSession(deletingSessionId)}
+      onCancel={() => setDeletingSessionId(null)}
+    />
+    </>
   );
 }
