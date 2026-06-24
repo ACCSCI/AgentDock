@@ -41,6 +41,7 @@ jobs:
         run: bun run dist:win:publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FRONTEND_PORT: 5173
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
