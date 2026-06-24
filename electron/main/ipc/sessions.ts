@@ -625,7 +625,7 @@ export function registerSessions(deps: SessionsDeps): void {
     IPC_CHANNELS["sessions:setUserStatus"],
     (_e, params: { sessionId: string; status: string | null }) => {
       if (!params?.sessionId) throw new Error("sessionId required");
-      const VALID_STATUSES = ["draft", "plan", "working", "pr", "done"];
+      const VALID_STATUSES = ["draft", "plan", "working", "pr", "verifying", "done"];
       if (params.status !== null && !VALID_STATUSES.includes(params.status)) {
         throw new Error(`Invalid status: ${params.status}`);
       }

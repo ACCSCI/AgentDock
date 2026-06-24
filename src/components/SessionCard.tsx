@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { FileText, ClipboardList, Wrench, Send, CheckCircle2 } from "lucide-react";
+import { FileText, ClipboardList, Wrench, Send, CircleHelp, CheckCircle2 } from "lucide-react";
 import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionListItem, type SessionStep, type SessionUserStatus } from "../lib/queries";
 
 const CREATE_STEP_LABELS: Record<string, string> = {
@@ -30,6 +30,7 @@ const USER_STATUS_OPTIONS: Array<{
   { key: "plan", Icon: ClipboardList, label: "规划中", color: "#3B82F6" },
   { key: "working", Icon: Wrench, label: "开发中", color: "#F59E0B" },
   { key: "pr", Icon: Send, label: "待合并", color: "#10B981" },
+  { key: "verifying", Icon: CircleHelp, label: "待验证", color: "#F97316" },
   { key: "done", Icon: CheckCircle2, label: "已完成", color: "#6B7280" },
 ];
 
