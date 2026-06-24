@@ -38,7 +38,7 @@ jobs:
         run: bun run build:daemon
 
       - name: Build and publish to GitHub Releases
-        run: bun run dist:win
+        run: bun run dist:win:publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FRONTEND_PORT: 5173
@@ -52,6 +52,6 @@ jobs:
             release/*/latest.yml
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generateReleaseNotes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
