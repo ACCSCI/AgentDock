@@ -13,6 +13,7 @@ import { registerWorktreeAndShell } from "./worktree-shell.js";
 import { registerGit } from "./git.js";
 import { registerTodos } from "./todos.js";
 import { registerBootstrap, type BootstrapDeps } from "../bootstrap.js";
+import { registerApp } from "./app.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import type { DaemonHonoClient } from "../hono-client.js";
 import type { DaemonManager } from "../../../plugins/daemon-manager.js";
@@ -108,4 +109,8 @@ export function registerAllIpc(deps: AllIpcDeps): void {
 
   // Todos (5 channels: list, create, toggle, update, delete)
   registerTodos();
+
+  // App (3 channels: version, checkForUpdates, quitAndInstall) —
+  // self-contained, no deps required.
+  registerApp();
 }

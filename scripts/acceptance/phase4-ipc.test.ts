@@ -90,9 +90,9 @@ describe("Phase 4: Full IPC surface (29 channels)", () => {
       expect(content).toContain('exposeInMainWorld("api"');
     });
 
-    it("exposes all 9 namespaces (bootstrap, db, sessions, terminals, fs, config, worktree, shell, git)", () => {
+    it("exposes all 10 namespaces (bootstrap, db, sessions, terminals, fs, config, worktree, shell, git, app)", () => {
       const content = readFileSync(join(ROOT, "electron/preload.ts"), "utf-8");
-      for (const ns of ["bootstrap", "db", "sessions", "terminals", "fs", "config", "worktree", "shell", "git"]) {
+      for (const ns of ["bootstrap", "db", "sessions", "terminals", "fs", "config", "worktree", "shell", "git", "app"]) {
         expect(content, `missing ${ns}:`).toContain(`${ns}:`);
       }
     });

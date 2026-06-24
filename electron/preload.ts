@@ -413,6 +413,24 @@ const api = {
     onError: (cb: (err: { message: string }) => void) => on("update:error", cb),
   },
 
+  // App-level commands: version readout + manual update trigger.
+  // The settings page uses these to display the current build and let
+  // the user force a check outside the 4h interval kicked off at boot.
+  app: {
+    version: () =>
+      invoke<{ version: string; isPackaged: boolean }>("app:version"),
+    checkForUpdates: () =>
+      invoke<
+        | { status: "dev-mode" }
+        | { status: "checking" }
+        | { status: "available"; info: { version: string } }
+        | { status: "not-available"; info: { version: string } }
+        | { status: "downloaded"; info: { version: string } }
+        | { status: "error"; message: string }
+      >("app:checkForUpdates"),
+    quitAndInstall: () => invoke<{ ok: boolean }>("app:quitAndInstall"),
+  },
+
   // Per-project todo list
   todos: {
     list: (projectId: string) =>

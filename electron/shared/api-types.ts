@@ -132,6 +132,11 @@ export const IPC_CHANNELS = {
   // process logger so they land in the persistent log file (see
   // plugins/logger.ts) instead of dying in the renderer's DevTools.
   "renderer:reportError": "renderer:reportError",
+
+  // app (version info + manual update check trigger)
+  "app:version": "app:version",
+  "app:checkForUpdates": "app:checkForUpdates",
+  "app:quitAndInstall": "app:quitAndInstall",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;
