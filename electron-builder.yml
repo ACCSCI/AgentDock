@@ -43,7 +43,8 @@ win:
         - x64
   artifactName: ${productName}-Setup-${version}.${ext}
   # 签名暂不启用（unsigned = SmartScreen 警告，可后续补充 EV 证书）
-  signAndEditExecutable: false
+  # 注意：不要设置 signAndEditExecutable: false，否则会同时跳过 exe 资源编辑（导致图标无法嵌入）
+  # 不配置 signAndEditExecutable（默认 true），无证书时签名自动跳过，资源编辑正常执行
 
 # NSIS 安装器详细配置
 nsis:
