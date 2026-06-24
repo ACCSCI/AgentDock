@@ -1,0 +1,16 @@
+{
+  "lifecycle": {
+    "beforeCreateSession": "创建前",
+    "beforeCreateSessionDesc": "创建 Session 前执行的命令",
+    "afterCreateSession": "创建后",
+    "afterCreateSessionDesc": "创建 Session 后执行的命令",
+    "beforeDeleteSession": "删除前",
+    "beforeDeleteSessionDesc": "删除 Session 前执行的命令",
+    "afterDeleteSession": "删除后",
+    "afterDeleteSessionDesc": "删除 Session 后执行的命令"
+  },
+  "addCommand": "添加命令",
+  "commandPlaceholder": "输入命令...",
+  "help": "帮助",
+  "saveFailed": "保存失败"
+}

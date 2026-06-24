@@ -1,0 +1,16 @@
+{
+  "createFailed": "创建失败",
+  "deleteFailed": "删除失败",
+  "renameFailed": "重命名失败",
+  "reassignPortsFailed": "重新分配端口失败",
+  "retryFailed": "重试失败",
+  "setUserStatusFailed": "设置状态失败",
+  "cannotOpenPRs": "无法打开 Pull Requests",
+  "scanFailed": "扫描失败",
+  "expandSidebar": "展开 Session 侧栏",
+  "scanDiskWorktrees": "扫描磁盘 worktree",
+  "viewPullRequests": "查看 Pull Requests",
+  "newSession": "新建 Session",
+  "collapseSidebar": "收起侧栏",
+  "dragToResize": "拖拽调整宽度"
+}

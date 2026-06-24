@@ -8,6 +8,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { routeTree } from "./routeTree.gen";
 import { ToastContainer } from "./components/Toast";
+import i18n from "./i18n";
+import { I18nextProvider } from "./i18n/react";
 import "./styles/globals.css";
 import "./styles/toast.css";
 
@@ -67,10 +69,12 @@ if (rootElement && !rootElement.innerHTML) {
   const root = createRoot(rootElement);
   root.render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-        <ToastContainer />
-      </QueryClientProvider>
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+          <ToastContainer />
+        </QueryClientProvider>
+      </I18nextProvider>
     </StrictMode>,
   );
 }

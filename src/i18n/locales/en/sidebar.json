@@ -1,0 +1,16 @@
+{
+  "createFailed": "Creation failed",
+  "deleteFailed": "Deletion failed",
+  "renameFailed": "Rename failed",
+  "reassignPortsFailed": "Failed to reassign ports",
+  "retryFailed": "Retry failed",
+  "setUserStatusFailed": "Failed to set status",
+  "cannotOpenPRs": "Cannot open Pull Requests",
+  "scanFailed": "Scan failed",
+  "expandSidebar": "Expand Session sidebar",
+  "scanDiskWorktrees": "Scan disk worktrees",
+  "viewPullRequests": "View Pull Requests",
+  "newSession": "New Session",
+  "collapseSidebar": "Collapse sidebar",
+  "dragToResize": "Drag to resize"
+}

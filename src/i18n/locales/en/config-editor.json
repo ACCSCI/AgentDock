@@ -1,0 +1,16 @@
+{
+  "lifecycle": {
+    "beforeCreateSession": "Before Create",
+    "beforeCreateSessionDesc": "Commands to run before creating a session",
+    "afterCreateSession": "After Create",
+    "afterCreateSessionDesc": "Commands to run after creating a session",
+    "beforeDeleteSession": "Before Delete",
+    "beforeDeleteSessionDesc": "Commands to run before deleting a session",
+    "afterDeleteSession": "After Delete",
+    "afterDeleteSessionDesc": "Commands to run after deleting a session"
+  },
+  "addCommand": "Add command",
+  "commandPlaceholder": "Enter command...",
+  "help": "Help",
+  "saveFailed": "Save failed"
+}
