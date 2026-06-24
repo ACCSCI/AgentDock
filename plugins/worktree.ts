@@ -490,7 +490,14 @@ async function rimrafOrFallback(dirPath: string): Promise<void> {
   if (!_rimraf) {
     try {
       const mod = await import("rimraf") as any;
-      _rimraf = mod.rimraf ?? mod.default ?? null;
+      const candidate = mod.rimraf ?? mod.default ?? null;
+      // Guard: rimraf v6 exports an async function with arity 2 (path, opt).
+      // fs-extra bundles a callback-based rimraf with arity 3 (p, options, cb)
+      // that throws "callback function required" when called without a callback.
+      // If the candidate looks callback-based, skip it and fall through to rm.
+      if (typeof candidate === "function" && candidate.length <= 2) {
+        _rimraf = candidate;
+      }
     } catch {
       _rimraf = null;
     }
