@@ -24,6 +24,12 @@ sse-probe2.ts
 probe-config.mjs
 public/fonts/
 
+# electron-builder 打包输出
+release/
+
+# electron-updater 开发环境配置
+dev-app-update.yml
+
 # E2E pipeline generated artifacts
 e2e/run-state.json
 e2e/reports/

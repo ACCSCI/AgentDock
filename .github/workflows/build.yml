@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# 同一分支的重复构建自动取消
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    name: Build (Windows x64)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download fonts
+        run: bun run download-fonts
+
+      - name: Build daemon JS
+        run: bun run build:daemon
+
+      - name: Build app
+        run: bun run dist:win
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FRONTEND_PORT: 5173
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDock-Setup-${{ github.sha }}
+          path: release/*/AgentDock-Setup-*.exe
+          retention-days: 7
+
+      - name: Upload blockmap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDock-Blockmap-${{ github.sha }}
+          path: release/*/AgentDock-Setup-*.exe.blockmap
+          retention-days: 7

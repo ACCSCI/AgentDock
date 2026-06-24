@@ -1,0 +1,66 @@
+# AgentDock electron-builder configuration
+# 在 electron-vite build 完成后运行（产出在 out/ 目录）
+
+appId: com.agentdock.app
+productName: AgentDock
+copyright: "Copyright © 2025 AgentDock"
+
+# 发布到 GitHub Releases — electron-updater 从中读取 latest.yml
+publish:
+  provider: github
+  owner: ACCSCI
+  repo: AgentDock
+  releaseType: release
+  vPrefixedTagName: true
+
+# 目录配置
+directories:
+  output: release/${version}
+  buildResources: build
+
+# 打包到 app.asar 的文件
+# electron-vite 输出在 out/，编译后的 daemon 在 out/daemon/
+files:
+  - out/**/*
+  - package.json
+  # 原生模块及其运行时依赖（不被 esbuild 打包）
+  - node_modules/node-pty/**/*
+  # 不在 asar 中，必须 unpack 的原生模块
+  - "!node_modules/node-pty/build/**/*"
+
+# 原生模块解包到 app.asar.unpacked
+asarUnpack:
+  - node_modules/node-pty/**/*
+
+# 启用 asar（electron-builder 默认行为）
+asar: true
+
+# NSIS 安装器 — Windows 标准安装器
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}.${ext}
+  # 签名暂不启用（unsigned = SmartScreen 警告，可后续补充 EV 证书）
+  signAndEditExecutable: false
+
+# NSIS 安装器详细配置
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AgentDock
+  # 启用差分更新（blockmap），electron-updater 利用它做增量下载
+  differentialPackage: true
+
+# 仅构建 Windows
+mac: null
+linux: null
+
+# node-pty 已有预编译二进制（prebuilds/win32-x64/），
+# 跳过 @electron/rebuild 的源码编译以避免 Spectre/mitigation 问题。
+npmRebuild: false

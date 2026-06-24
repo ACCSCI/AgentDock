@@ -401,6 +401,18 @@ const api = {
     ready: (cb: () => void) => on("fonts:ready", cb),
   },
 
+  // 自动更新事件 (electron-updater + GitHub Releases)
+  // 渲染进程可通过这些事件展示更新检查/下载/完成状态。
+  updates: {
+    onChecking: (cb: () => void) => on("update:checking", cb),
+    onAvailable: (cb: (info: unknown) => void) => on("update:available", cb),
+    onNotAvailable: (cb: (info: unknown) => void) => on("update:not-available", cb),
+    onDownloadProgress: (cb: (progress: { percent: number }) => void) =>
+      on("update:download-progress", cb),
+    onDownloaded: (cb: (info: unknown) => void) => on("update:downloaded", cb),
+    onError: (cb: (err: { message: string }) => void) => on("update:error", cb),
+  },
+
   // Per-project todo list
   todos: {
     list: (projectId: string) =>

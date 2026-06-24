@@ -253,7 +253,19 @@ export class DaemonManager {
     // Helper: pick the best runtime for a .ts / .js entry.
     const pickRuntime = (entry: string): { cmd: string; args: string[] } => {
       const isTs = entry.endsWith(".ts");
-      // Prefer bun — runs TS natively, no --import needed.
+      const isEsm = entry.endsWith(".mjs") || entry.endsWith(".esm");
+
+      // 打包后的 Electron 应用：daemon 已预编译为 JS，
+      // 通过 ELECTRON_RUN_AS_NODE=1 运行（bun 在用户机器上不可用）。
+      if (process.env.AGENTDOCK_ELECTRON === "1" && isEsm) {
+        // AGENTDOCK_ELECTRON=1 表示从 Electron 主进程启动，
+        // isEsm 表示传入的是预编译后的 daemon.mjs，直接运行即可。
+        // 注意：不在这里设置 ELECTRON_RUN_AS_NODE，
+        // 而是由本文件下方的 spawn env 统一注入，避免污染主进程。
+        return { cmd: process.execPath, args: ["--experimental-sqlite", entry] };
+      }
+
+      // 开发环境：优先 bun（原生 TS，无需 loader），回退到 node+tsx
       if (process.env.BUN_INSTALL || process.env.AGENTDOCK_USE_BUN) {
         return { cmd: "bun", args: ["run", entry] };
       }
@@ -289,7 +301,13 @@ export class DaemonManager {
       }
     }
 
-    const env = { ...process.env, AGENTDOCK_DAEMON_PORT: String(port) };
+    // 如果运行命令是 Electron 可执行文件本身，则必须启用 ELECTRON_RUN_AS_NODE=1
+    // 以 Node 模式运行 daemon，避免启动新的 GUI 窗口，同时不污染主进程 env。
+    const env = {
+      ...process.env,
+      AGENTDOCK_DAEMON_PORT: String(port),
+      ...(cmd === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    };
 
     // Phase 3: when running from Electron, detached:true + stdio:"ignore"
     // can cause the child to be killed by the parent process tree cleanup
