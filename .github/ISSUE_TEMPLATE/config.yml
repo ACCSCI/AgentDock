@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/ACCSCI/AgentDock/discussions
+    about: 提议新功能或进行一般性讨论,请前往 Discussions。
+  - name: 📖 Documentation
+    url: https://github.com/ACCSCI/AgentDock/tree/master/docs
+    about: 查看架构与设计文档。
