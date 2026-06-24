@@ -893,6 +893,39 @@ export function useV2Projects() {
       });
     }
 
+    // Merge optimistic sessions (CreatingSession / DeletingSession) from the
+    // React Query cache into the v2State-derived projectMap. Without this,
+    // filtering non-active v2State sessions would also remove the loading
+    // spinner during creation and the "deleting" state during deletion.
+    if (cachedProjects) {
+      for (const cachedProj of cachedProjects) {
+        const projectRoot = cachedProj.path;
+        if (!projectRoot) continue;
+
+        const optimisticSessions = cachedProj.sessions.filter(
+          (s) => isCreatingSession(s) || isDeletingSession(s),
+        );
+        if (optimisticSessions.length === 0) continue;
+
+        if (!projectMap.has(projectRoot)) {
+          projectMap.set(projectRoot, {
+            id: cachedProj.id,
+            name: cachedProj.name,
+            path: projectRoot,
+            createdAt: cachedProj.createdAt,
+            sessions: [],
+          });
+        }
+        const project = projectMap.get(projectRoot)!;
+        const existingIds = new Set(project.sessions.map((s) => s.id));
+        for (const optSession of optimisticSessions) {
+          if (!existingIds.has(optSession.id)) {
+            project.sessions.push(optSession);
+          }
+        }
+      }
+    }
+
     return Array.from(projectMap.values());
   }, [v2State, oldQuery.data]);
 
@@ -928,13 +961,11 @@ export function useV2ProjectSessions(projectId: string | null) {
     // Try v2State first
     if (v2State?.ready) {
       const myClientId = v2State.clientId;
-      return Array.from(v2State.sessions.values())
-        .filter((s) => s.projectRoot === projectId)
-        // Only include active sessions — creating/deleting sessions are
-        // handled by optimistic CreatingSession/DeletingSession in cache.
-        .filter((s) => s.status === "active")
+      const activeSessions = Array.from(v2State.sessions.values())
         .filter((s) => {
-          // 无主 session 不进 sidebar
+          // Only include active sessions owned by someone
+          if (s.projectRoot !== projectId) return false;
+          if (s.status !== "active") return false;
           const ownerClientId = v2State.owners.get(s.sessionId)?.clientId;
           return ownerClientId != null && ownerClientId !== "";
         })
@@ -959,6 +990,18 @@ export function useV2ProjectSessions(projectId: string | null) {
             ownerClientId,
           };
         }) as SessionData[];
+
+      // Merge optimistic sessions (CreatingSession / DeletingSession) from
+      // the React Query cache so the sidebar still shows loading spinners
+      // during creation and deletion.
+      const cachedProject = oldQuery.data?.find(
+        (p) => p.id === projectId || p.path === projectId,
+      );
+      const optimisticSessions = cachedProject?.sessions.filter(
+        (s) => isCreatingSession(s) || isDeletingSession(s),
+      ) ?? [];
+
+      return [...activeSessions, ...optimisticSessions];
     }
 
     // Fall back to old query
