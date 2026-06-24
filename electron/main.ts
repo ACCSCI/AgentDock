@@ -843,6 +843,17 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+// Dev mode userData isolation: when AGENTDOCK_USER_DATA_DIR is set, redirect
+// Electron's userData path before anything else reads it. This must run
+// before app.whenReady() since some Electron APIs (localStorage, GPU cache)
+// resolve userData at ready time.
+// In production this env var is never set, so the default %APPDATA%/AgentDock
+// path applies.
+if (process.env.AGENTDOCK_USER_DATA_DIR) {
+  const devUserData = resolve(process.env.AGENTDOCK_USER_DATA_DIR);
+  app.setPath("userData", devUserData);
+}
+
 // 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock，
 // 避免 GPU 缓存/IndexedDB 写入只读的安装目录导致渲染进程崩溃。
 if (app.isPackaged) {

@@ -6,6 +6,9 @@
   "main": "out/main/main.js",
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--experimental-sqlite electron-vite dev",
+    "dev:1": "cross-env NODE_OPTIONS=--experimental-sqlite node scripts/dev-instance.js 1",
+    "dev:2": "cross-env NODE_OPTIONS=--experimental-sqlite node scripts/dev-instance.js 2",
+    "dev:3": "cross-env NODE_OPTIONS=--experimental-sqlite node scripts/dev-instance.js 3",
     "build": "tsc -b && bun run build:daemon && electron-vite build",
     "typecheck": "tsc -b --noEmit",
     "start": "cross-env NODE_OPTIONS=--experimental-sqlite electron-vite preview",
