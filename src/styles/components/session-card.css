@@ -1,3 +1,25 @@
+/* Session Card — base styles */
+.session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--color-session-bg);
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.session-card:hover {
+  background: #ffe8ec;
+}
+
+.session-card-active {
+  background: #ffe8ec;
+  border-color: var(--color-primary);
+}
+
 /* Drag-and-drop reordering styles */
 .session-card-wrapper {
   position: relative;
