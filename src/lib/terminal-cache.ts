@@ -374,7 +374,7 @@ class TerminalCache {
     const existing = this.cache.get(terminalId);
     if (existing) return existing;
 
-    const terminal = new Terminal(buildTerminalConfig(prefs ?? { fontSize: 14, fontFamily: "'Cascadia Code', monospace" }));
+    const terminal = new Terminal(buildTerminalConfig(prefs ?? { fontSize: 14, fontFamily: "'Maple Mono', monospace" }));
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
