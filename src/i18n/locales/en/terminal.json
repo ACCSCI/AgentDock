@@ -6,5 +6,7 @@
   "unknownError": "Unknown error",
   "fontSize": "Font Size",
   "decreaseFontSize": "Decrease font size",
-  "increaseFontSize": "Increase font size"
+  "increaseFontSize": "Increase font size",
+  "defaultAction": "Default action",
+  "setAsDefault": "Set as default"
 }

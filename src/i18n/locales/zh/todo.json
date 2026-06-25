@@ -1,10 +1,13 @@
 {
   "todo": "待办",
   "addTask": "添加任务...",
+  "openProjectFirst": "请先打开项目",
+  "openProjectToAddTasks": "请先打开项目再添加任务",
   "noTasks": "暂无任务",
   "dragToReorder": "拖拽排序",
   "doubleClickToEdit": "双击编辑",
   "rightClickToCopy": "右键复制",
   "delete": "删除",
-  "copied": "已复制!"
+  "copied": "已复制!",
+  "copyFailed": "复制失败"
 }

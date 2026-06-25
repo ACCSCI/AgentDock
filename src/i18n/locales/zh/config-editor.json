@@ -35,6 +35,7 @@
   "failAbort": "失败中断",
   "executionMode": "执行模式",
   "asyncExecution": "异步执行",
+  "syncExecution": "同步执行",
   "addHook": "+ 添加钩子",
   "portAllocation": "端口分配 (env.ports)",
   "portCount": "{{count}} 个端口",

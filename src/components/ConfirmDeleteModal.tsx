@@ -48,8 +48,9 @@ export function ConfirmDeleteModal({
 
         <div className="git-init-description">
           <p>
-            {t("confirmDelete.message")}
+            {t("confirmDelete.message", { name: sessionName })}
           </p>
+          <p>{t("confirmDelete.consequence")}</p>
         </div>
 
         <div className="dir-modal-actions">

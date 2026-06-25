@@ -6,5 +6,7 @@
   "unknownError": "未知错误",
   "fontSize": "字体大小",
   "decreaseFontSize": "减小字体",
-  "increaseFontSize": "增大字体"
+  "increaseFontSize": "增大字体",
+  "defaultAction": "默认操作",
+  "setAsDefault": "设为默认"
 }

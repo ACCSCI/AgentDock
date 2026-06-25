@@ -3,21 +3,6 @@ import { FileText, ClipboardList, Wrench, Send, CircleHelp, CheckCircle2 } from 
 import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionListItem, type SessionStep, type SessionUserStatus } from "../lib/queries";
 import { useTranslation } from "../i18n/react";
 
-const CREATE_STEP_LABELS: Record<string, string> = {
-  beforeCreateSession: "前置检查",
-  createWorktree: "创建工作区",
-  syncResources: "同步资源",
-  allocatePorts: "分配端口",
-  afterCreateSession: "初始化环境",
-};
-
-const DELETE_STEP_LABELS: Record<string, string> = {
-  beforeDeleteSession: "前置检查",
-  releasePorts: "释放端口",
-  removeWorktree: "清理工作区",
-  afterDeleteSession: "后置清理",
-};
-
 // ── Session user-status definitions ────────────────────────────────
 import type { LucideIcon } from "lucide-react";
 
@@ -137,6 +122,19 @@ export function SessionCard({
     { key: "verifying" as SessionUserStatus, Icon: CircleHelp, label: t("status.verifying"), color: "#F97316" },
     { key: "done" as SessionUserStatus, Icon: CheckCircle2, label: t("status.done"), color: "#6B7280" },
   ], [t]);
+  const createStepLabels = useMemo(() => ({
+    beforeCreateSession: t("step.beforeCreateSession"),
+    createWorktree: t("step.createWorktree"),
+    syncResources: t("step.syncResources"),
+    allocatePorts: t("step.allocatePorts"),
+    afterCreateSession: t("step.afterCreateSession"),
+  }), [t]);
+  const deleteStepLabels = useMemo(() => ({
+    beforeDeleteSession: t("step.beforeDeleteSession"),
+    releasePorts: t("step.releasePorts"),
+    removeWorktree: t("step.removeWorktree"),
+    afterDeleteSession: t("step.afterDeleteSession"),
+  }), [t]);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -345,7 +343,7 @@ export function SessionCard({
           <span className="step-spinner" />
           <span className="session-name">{creating.name}</span>
         </div>
-        <LifecycleSteps steps={creating.steps} stepOrder={["beforeCreateSession", "createWorktree", "syncResources", "allocatePorts", "afterCreateSession"]} labels={CREATE_STEP_LABELS} />
+        <LifecycleSteps steps={creating.steps} stepOrder={["beforeCreateSession", "createWorktree", "syncResources", "allocatePorts", "afterCreateSession"]} labels={createStepLabels} />
       </div>
     );
   }
@@ -359,7 +357,7 @@ export function SessionCard({
           <span className="step-spinner" />
           <span className="session-name">{deleting.name}</span>
         </div>
-        <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={DELETE_STEP_LABELS} />
+        <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={deleteStepLabels} />
       </div>
     );
   }

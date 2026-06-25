@@ -418,7 +418,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                           }
                         }}
                       >
-                        {t("asyncExecution")}
+                        {t("syncExecution")}
                       </button>
                       <button
                         type="button"

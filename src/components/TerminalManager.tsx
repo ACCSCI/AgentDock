@@ -423,7 +423,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
                     type="button"
                     className={`terminal-add-dropdown-pin ${isDefault(item.key) ? "terminal-add-dropdown-pin-active" : ""}`}
                     onClick={(e) => handlePin(item.key, e)}
-                    title={isDefault(item.key) ? t("terminal") : t("terminal")}
+                    title={isDefault(item.key) ? t("defaultAction") : t("setAsDefault")}
                   >
                     <span className="pin-icon" />
                   </button>

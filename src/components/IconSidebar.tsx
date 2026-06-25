@@ -46,7 +46,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title={t("expandSidebar")}
+            title={t("cleanOrphans")}
             onClick={openOrphanModal}
             data-testid="open-orphan-modal"
           >
@@ -55,7 +55,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title={t("viewPullRequests")}
+            title={t("copyCompatPrompt")}
             onClick={handleCopyPrompt}
             data-testid="copy-compat-prompt"
           >
@@ -66,7 +66,7 @@ export function IconSidebar() {
           <button
             type="button"
             className="icon-sidebar-btn"
-            title={t("newSession")}
+            title={t("settings")}
             onClick={() => navigate({ to: "/settings" })}
             data-testid="open-settings"
           >

@@ -161,7 +161,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       await navigator.clipboard.writeText(content);
       showToast(t("copied"));
     } catch {
-      showToast("Copy failed");
+      showToast(t("copyFailed"));
     }
   }, [showToast]);
 
@@ -239,7 +239,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
           ref={inputRef}
           type="text"
           className="todo-dropdown-input"
-          placeholder={projectId ? t("addTask") : "Open a project first"}
+          placeholder={projectId ? t("addTask") : t("openProjectFirst")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -260,7 +260,7 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
       <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
         {todos.length === 0 && (
           <div className="todo-dropdown-empty">
-            {projectId ? t("noTasks") : "Open a project to add tasks"}
+            {projectId ? t("noTasks") : t("openProjectToAddTasks")}
           </div>
         )}
         {todos.map((todo) => (

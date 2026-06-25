@@ -1,7 +1,8 @@
 {
   "confirmDelete": {
     "title": "Confirm Delete",
-    "message": "Are you sure you want to delete this? This action cannot be undone.",
+    "message": "Are you sure you want to delete {{name}}?",
+    "consequence": "After deletion, this session's worktree and ports will be released.",
     "delete": "Delete",
     "cancel": "Cancel"
   },
