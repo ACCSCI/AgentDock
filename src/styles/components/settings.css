@@ -162,3 +162,117 @@
   color: var(--color-text);
 }
 
+/* Language switcher */
+.settings-language-options {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-language-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.settings-language-btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-primary);
+}
+
+.settings-language-btn.active {
+  background: var(--color-primary-bg, var(--color-bg-secondary));
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Version & update block */
+.settings-version-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.settings-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-version-label {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.settings-version-value {
+  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+.settings-version-status {
+  font-size: 13px;
+}
+
+.settings-version-hint {
+  color: var(--color-text-secondary);
+}
+
+.settings-version-ok {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.settings-version-error {
+  color: #ef4444;
+}
+
+.settings-version-progress {
+  color: var(--color-text);
+}
+
+.settings-version-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.settings-version-check-btn,
+.settings-version-install-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  color: var(--color-text);
+}
+
+.settings-version-check-btn:hover:not(:disabled),
+.settings-version-install-btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-primary);
+}
+
+.settings-version-install-btn {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.settings-version-check-btn:disabled,
+.settings-version-install-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
