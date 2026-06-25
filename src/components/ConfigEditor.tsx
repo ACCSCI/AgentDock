@@ -1,26 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { stringify as yamlStringify, Scalar } from "yaml";
 import { useProjectConfig, useSaveConfig, type ProjectConfigData } from "../lib/queries";
+import { useTranslation } from "../i18n/react";
 import { FilePicker } from "./FilePicker";
-
-// Field help descriptions
-const HELP = {
-  source: "相对项目根目录的文件或目录路径，如 .env、config/、uploads/",
-  strategy: "同步策略：overwrite=每次覆盖目标、skip=目标存在时跳过、merge=.env 逐 key 合并，目录递归叠加",
-  skipIfMissing: "true=源不存在时静默跳过、false=源不存在时触发 rollback",
-  run: "要执行的 shell 命令，如 bun install、npm run build",
-  required: "true=失败时中断 pipeline 并 rollback",
-  timeout: "超时毫秒数，超时后 SIGTERM 终止进程",
-  cwd: "worktree=新工作目录、project=项目根目录",
-  async: "true=不等待完成即返回，后台执行",
-};
-
-const LIFECYCLE_EVENTS = [
-  { key: "beforeCreateSession", label: "创建前", desc: "Worktree 创建前触发" },
-  { key: "afterCreateSession", label: "创建后", desc: "端口分配 + .env 写入后触发" },
-  { key: "beforeDeleteSession", label: "删除前", desc: "Worktree 删除前触发" },
-  { key: "afterDeleteSession", label: "删除后", desc: "Worktree 删除后触发" },
-] as const;
 
 type Config = ProjectConfigData["config"];
 
@@ -32,6 +14,7 @@ interface ConfigEditorProps {
 export function ConfigEditor({ projectId }: ConfigEditorProps) {
   const { data, isLoading } = useProjectConfig(projectId);
   const saveMutation = useSaveConfig(projectId);
+  const { t } = useTranslation("config-editor");
 
   const [config, setConfig] = useState<Config | null>(null);
   const [showYamlPreview, setShowYamlPreview] = useState(false);
@@ -42,6 +25,25 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [filePickerTarget, setFilePickerTarget] = useState<number | null>(null);
   const [newPortKey, setNewPortKey] = useState("");
+
+  // Field help descriptions
+  const help = useMemo(() => ({
+    source: t("help.source"),
+    strategy: t("help.strategy"),
+    skipIfMissing: t("help.skipIfMissing"),
+    run: t("help.run"),
+    required: t("help.required"),
+    timeout: t("help.timeout"),
+    cwd: t("help.cwd"),
+    async: t("help.async"),
+  }), [t]);
+
+  const lifecycleEvents = useMemo(() => [
+    { key: "beforeCreateSession", label: t("lifecycle.beforeCreateSession"), desc: t("lifecycle.beforeCreateSessionDesc") },
+    { key: "afterCreateSession", label: t("lifecycle.afterCreateSession"), desc: t("lifecycle.afterCreateSessionDesc") },
+    { key: "beforeDeleteSession", label: t("lifecycle.beforeDeleteSession"), desc: t("lifecycle.beforeDeleteSessionDesc") },
+    { key: "afterDeleteSession", label: t("lifecycle.afterDeleteSession"), desc: t("lifecycle.afterDeleteSessionDesc") },
+  ], [t]);
 
   // Reset config when projectId changes
   useEffect(() => {
@@ -202,14 +204,14 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
       setTimeout(() => setSaveStatus("idle"), 3000);
     } catch (err) {
       setSaveStatus("error");
-      setSaveError(err instanceof Error ? err.message : "保存失败");
+      setSaveError(err instanceof Error ? err.message : t("saveFailed"));
     }
   }, [config, saveMutation]);
 
   if (isLoading || !config) {
     return (
       <div className="config-editor">
-        <div className="config-loading">加载配置中...</div>
+        <div className="config-loading">{t("loadingConfig")}</div>
       </div>
     );
   }
@@ -217,9 +219,9 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
   return (
     <div className="config-editor">
       <div className="config-editor-header">
-        <h2>项目配置</h2>
+        <h2>{t("projectConfig")}</h2>
         <span className="config-file-status">
-          {data?.exists ? "📄 agentdock.config.yaml" : "⚠️ 配置文件不存在，保存后将创建"}
+          {data?.exists ? "📄 agentdock.config.yaml" : t("configFileNotFound")}
         </span>
       </div>
 
@@ -231,11 +233,11 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           onClick={() => setExpandedSections((s) => ({ ...s, resources: !s.resources }))}
         >
           <span className={`config-section-arrow ${expandedSections.resources ? "expanded" : ""}`}>▶</span>
-          <h3>资源同步 (resources.sync)</h3>
-          <span className="config-section-count">{config.resources.sync.length} 项</span>
+          <h3>{t("resourceSync")}</h3>
+          <span className="config-section-count">{t("itemsCount", { count: config.resources.sync.length })}</span>
         </button>
         <p className="config-section-desc">
-          在 Worktree 创建后、端口分配前，将指定文件从项目根目录同步到新工作目录
+          {t("resourceSyncDesc")}
         </p>
 
         {expandedSections.resources && (
@@ -246,7 +248,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <div className="config-field config-field-source">
                     <label>
                       source
-                      <span className="config-field-help" title={HELP.source}>?</span>
+                      <span className="config-field-help" title={help.source}>?</span>
                     </label>
                     <div className="config-field-input-group">
                       <input
@@ -260,7 +262,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                         className="config-btn-browse"
                         onClick={() => { setFilePickerTarget(i); setFilePickerOpen(true); }}
                       >
-                        浏览...
+                        {t("browse")}
                       </button>
                     </div>
                   </div>
@@ -270,18 +272,18 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <div className="config-field">
                     <label>
                       strategy
-                      <span className="config-field-help" title={HELP.strategy}>?</span>
+                      <span className="config-field-help" title={help.strategy}>?</span>
                     </label>
                     <select value={res.strategy} onChange={(e) => updateResource(i, "strategy", e.target.value)}>
-                      <option value="overwrite">overwrite（覆盖）</option>
-                      <option value="skip">skip（跳过）</option>
-                      <option value="merge">merge（合并）</option>
+                      <option value="overwrite">{t("strategyOverwrite")}</option>
+                      <option value="skip">{t("strategySkip")}</option>
+                      <option value="merge">{t("strategyMerge")}</option>
                     </select>
                   </div>
                   <div className="config-field">
                     <label>
                       skipIfMissing
-                      <span className="config-field-help" title={HELP.skipIfMissing}>?</span>
+                      <span className="config-field-help" title={help.skipIfMissing}>?</span>
                     </label>
                     <label className="config-checkbox">
                       <input
@@ -289,14 +291,14 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                         checked={res.skipIfMissing}
                         onChange={(e) => updateResource(i, "skipIfMissing", e.target.checked)}
                       />
-                      <span>源不存在时跳过</span>
+                      <span>{t("skipIfMissingLabel")}</span>
                     </label>
                   </div>
                 </div>
               </div>
             ))}
             <button type="button" className="config-btn-add" onClick={addResource}>
-              + 添加资源
+              {t("addResource")}
             </button>
           </div>
         )}
@@ -310,17 +312,17 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           onClick={() => setExpandedSections((s) => ({ ...s, hooks: !s.hooks }))}
         >
           <span className={`config-section-arrow ${expandedSections.hooks ? "expanded" : ""}`}>▶</span>
-          <h3>生命周期钩子 (hooks)</h3>
+          <h3>{t("hooks")}</h3>
         </button>
         <p className="config-section-desc">
-          在 Session 生命周期的特定阶段执行 shell 命令
+          {t("hooksDesc")}
         </p>
 
         {expandedSections.hooks && (
           <div className="config-section-body">
             {/* Hook event tabs */}
             <div className="config-hook-tabs">
-              {LIFECYCLE_EVENTS.map((evt) => (
+              {lifecycleEvents.map((evt) => (
                 <button
                   key={evt.key}
                   type="button"
@@ -335,7 +337,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
 
             {/* Active hook event description */}
             <p className="config-hook-desc">
-              {LIFECYCLE_EVENTS.find((e) => e.key === activeHookTab)?.desc}
+              {lifecycleEvents.find((e) => e.key === activeHookTab)?.desc}
             </p>
 
             {/* Hook entries */}
@@ -345,7 +347,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <div className="config-field config-field-run">
                     <label>
                       run
-                      <span className="config-field-help" title={HELP.run}>?</span>
+                      <span className="config-field-help" title={help.run}>?</span>
                     </label>
                     <input
                       type="text"
@@ -361,7 +363,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                     <div className="config-field">
                       <label>
                         required
-                        <span className="config-field-help" title={HELP.required}>?</span>
+                        <span className="config-field-help" title={help.required}>?</span>
                       </label>
                       <label className="config-checkbox">
                         <input
@@ -374,14 +376,14 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                             }
                           }}
                         />
-                        <span>失败中断</span>
+                        <span>{t("failAbort")}</span>
                       </label>
                     </div>
                   )}
                   <div className="config-field">
                     <label>
                       timeout (ms)
-                      <span className="config-field-help" title={HELP.timeout}>?</span>
+                      <span className="config-field-help" title={help.timeout}>?</span>
                     </label>
                     <input
                       type="number"
@@ -394,7 +396,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   <div className="config-field">
                     <label>
                       cwd
-                      <span className="config-field-help" title={HELP.cwd}>?</span>
+                      <span className="config-field-help" title={help.cwd}>?</span>
                     </label>
                     <select value={hook.cwd} onChange={(e) => updateHook(activeHookTab, i, "cwd", e.target.value)}>
                       <option value="worktree">worktree</option>
@@ -403,8 +405,8 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   </div>
                   <div className="config-field config-field-async-mode">
                     <label>
-                      执行模式
-                      <span className="config-field-help" title={HELP.async}>?</span>
+                      {t("executionMode")}
+                      <span className="config-field-help" title={help.async}>?</span>
                     </label>
                     <div className="config-hook-mode-tabs">
                       <button
@@ -416,7 +418,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                           }
                         }}
                       >
-                        同步执行
+                        {t("asyncExecution")}
                       </button>
                       <button
                         type="button"
@@ -431,7 +433,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                           }
                         }}
                       >
-                        异步执行
+                        {t("asyncExecution")}
                       </button>
                     </div>
                   </div>
@@ -439,7 +441,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
               </div>
             ))}
             <button type="button" className="config-btn-add" onClick={() => addHook(activeHookTab)}>
-              + 添加钩子
+              {t("addHook")}
             </button>
           </div>
         )}
@@ -453,16 +455,16 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           onClick={() => setExpandedSections((s) => ({ ...s, ports: !s.ports }))}
         >
           <span className={`config-section-arrow ${expandedSections.ports ? "expanded" : ""}`}>▶</span>
-          <h3>端口分配 (env.ports)</h3>
+          <h3>{t("portAllocation")}</h3>
           <span className="config-section-count">
             {(config.env?.ports && config.env.ports.length > 0)
-              ? `${config.env.ports.length} 个端口`
-              : "默认 5 端口"}
+              ? t("portCount", { count: config.env.ports.length })
+              : t("defaultPortCount")}
           </span>
         </button>
         <p className="config-section-desc">
-          定义此项目需要分配哪些端口变量。分配到 worktree 后写入 .env 文件。
-          不配置时默认分配 FRONTEND_PORT、BACKEND_PORT、WS_PORT、DEBUG_PORT、PREVIEW_PORT。
+          {t("portAllocationDesc")}
+          {t("portAllocationFallback")}
         </p>
 
         {expandedSections.ports && (
@@ -483,7 +485,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
               ))}
               {!config.env?.ports?.length && (
                 <div className="config-port-empty">
-                  未配置自定义端口变量，将使用默认 5 端口
+                  {t("noPortsConfigured")}
                 </div>
               )}
             </div>
@@ -493,7 +495,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
               <input
                 type="text"
                 value={newPortKey}
-                placeholder="输入端口变量名如 METRICS_PORT，按 Enter 添加"
+                placeholder={t("portKeyPlaceholder")}
                 onChange={(e) => setNewPortKey(e.target.value)}
                 onKeyDown={handlePortKeyInputKeyDown}
                 className="config-port-input"
@@ -504,14 +506,14 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                 onClick={() => addPortKey(newPortKey)}
                 disabled={!newPortKey.trim() || !/^[A-Z][A-Z0-9_]*$/i.test(newPortKey.trim())}
               >
-                + 添加
+                {t("add")}
               </button>
             </div>
 
             {/* .env hints */}
             {data?.envPorts && data.envPorts.length > 0 && (
               <div className="config-port-hints">
-                <span className="config-port-hints-label">📋 当前 .env 中的端口变量：</span>
+                <span className="config-port-hints-label">{t("currentEnvPorts")}</span>
                 <div className="config-port-hint-tags">
                   {data.envPorts.map((key) => {
                     const alreadyAdded = (config.env?.ports ?? []).includes(key);
@@ -526,9 +528,9 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                             type="button"
                             className="config-port-hint-add"
                             onClick={() => addPortKey(key)}
-                            title="添加到配置"
+                            title={t("addToConfig")}
                           >
-                            + 添加
+                            {t("add")}
                           </button>
                         )}
                       </span>
@@ -545,8 +547,8 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
       {showYamlPreview && (
         <div className="config-yaml-preview">
           <div className="config-yaml-preview-header">
-            <h3>YAML 预览</h3>
-            <button type="button" onClick={() => setShowYamlPreview(false)}>关闭</button>
+            <h3>{t("yamlPreview")}</h3>
+            <button type="button" onClick={() => setShowYamlPreview(false)}>{t("close")}</button>
           </div>
           <pre><code>{yamlPreview}</code></pre>
         </div>
@@ -555,10 +557,10 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
       {/* Action bar */}
       <div className="config-actions">
         <button type="button" className="config-btn config-btn-preview" onClick={handlePreview}>
-          预览 YAML
+          {t("previewYaml")}
         </button>
         <div className="config-actions-right">
-          {saveStatus === "success" && <span className="config-save-status config-save-success">✓ 已保存</span>}
+          {saveStatus === "success" && <span className="config-save-status config-save-success">✓ {t("saved")}</span>}
           {saveStatus === "error" && <span className="config-save-status config-save-error">✗ {saveError}</span>}
           <button
             type="button"
@@ -566,7 +568,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
             onClick={handleSave}
             disabled={saveMutation.isPending}
           >
-            {saveMutation.isPending ? "保存中..." : data?.exists ? "保存配置" : "生成配置文件"}
+            {saveMutation.isPending ? t("saving") : data?.exists ? t("saveConfig") : t("generateConfigFile")}
           </button>
         </div>
       </div>

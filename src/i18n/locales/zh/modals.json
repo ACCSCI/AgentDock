@@ -1,0 +1,30 @@
+{
+  "confirmDelete": {
+    "title": "确认删除",
+    "message": "确定要删除吗？此操作无法撤销。",
+    "delete": "删除",
+    "cancel": "取消"
+  },
+  "orphanClean": {
+    "title": "清理孤儿 Worktree",
+    "description": "这些 worktree 不再关联任何 Session，可以安全删除。",
+    "clean": "清理",
+    "cancel": "取消",
+    "deleteFailed": "删除失败",
+    "unknownError": "未知错误"
+  },
+  "dirBrowser": {
+    "title": "选择目录",
+    "goUp": "返回上一级",
+    "searchPlaceholder": "搜索文件夹名称...",
+    "enterDirectory": "进入目录",
+    "select": "选择",
+    "cancel": "取消"
+  },
+  "filePicker": {
+    "title": "选择文件",
+    "searchPlaceholder": "搜索文件...",
+    "select": "选择",
+    "cancel": "取消"
+  }
+}

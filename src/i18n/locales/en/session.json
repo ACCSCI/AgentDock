@@ -1,0 +1,31 @@
+{
+  "status": {
+    "draft": "Draft",
+    "plan": "Planning",
+    "working": "In Progress",
+    "pr": "PR Pending",
+    "verifying": "Verifying",
+    "done": "Done"
+  },
+  "step": {
+    "beforeCreateSession": "Pre-check",
+    "createWorktree": "Create Worktree",
+    "syncResources": "Sync Resources",
+    "allocatePorts": "Allocate Ports",
+    "afterCreateSession": "Init Environment",
+    "beforeDeleteSession": "Pre-check",
+    "releasePorts": "Release Ports",
+    "removeWorktree": "Remove Worktree",
+    "afterDeleteSession": "Post-cleanup"
+  },
+  "envInitFailed": "Environment init failed",
+  "viewFailureLogs": "View failure logs",
+  "delete": "Delete",
+  "retry": "Retry",
+  "rename": "Rename",
+  "setStatus": "Set Status",
+  "clearStatus": "Clear Status",
+  "openInExplorer": "Open in Explorer",
+  "openInTerminal": "Open in Terminal",
+  "reassignPorts": "Reassign Ports"
+}

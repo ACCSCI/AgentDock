@@ -4,6 +4,8 @@ import { MAX_BINDINGS_PER_ACTION } from "../lib/store";
 import type { ShortcutAction } from "../lib/store";
 import { useStore } from "../lib/store";
 import { useKeyCapture } from "../hooks/useKeyCapture";
+import { useTranslation } from "../i18n/react";
+import { setLanguage, SUPPORTED_LANGUAGES, type SupportedLanguage } from "../i18n";
 
 // Surface for window.api (exposed by preload.ts via contextBridge).
 // Mirrors the inline declarations in components/CustomTitleBar.tsx and
@@ -51,6 +53,7 @@ interface ShortcutRowProps {
 }
 
 function ShortcutRow({ action, label }: ShortcutRowProps) {
+  const { t } = useTranslation("settings");
   const { shortcuts, updateShortcut } = useStore();
   const bindings = shortcuts[action] ?? [];
 
@@ -76,7 +79,7 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
               className="settings-shortcut-badge-remove"
               onClick={() => removeKey(key)}
               disabled={bindings.length <= 1}
-              title="移除此快捷键"
+              title={t("removeShortcut")}
             >
               ×
             </button>
@@ -89,7 +92,7 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
             onClick={startCapture}
             disabled={isCapturing}
           >
-            {isCapturing ? "请按下快捷键…" : "+ 添加"}
+            {isCapturing ? t("capturePrompt") : t("addShortcut")}
           </button>
         )}
       </div>
@@ -118,6 +121,7 @@ interface VersionInfo {
 }
 
 function VersionSection() {
+  const { t } = useTranslation("settings");
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   // Keep the latest "available" version separate from state — the
   // state machine can transition available → available with a higher
@@ -227,13 +231,13 @@ function VersionSection() {
     }
   }, []);
 
-  const versionLabel = versionInfo ? `v${versionInfo.version}` : "未知";
+  const versionLabel = versionInfo ? `v${versionInfo.version}` : t("versionUnknown");
   const isPackaged = versionInfo?.isPackaged ?? false;
 
   return (
     <div className="settings-version-block" data-testid="settings-version-block">
       <div className="settings-version-row">
-        <span className="settings-version-label">当前版本</span>
+        <span className="settings-version-label">{t("currentVersion")}</span>
         <span className="settings-version-value">{versionLabel}</span>
       </div>
       <div className="settings-version-status" data-testid="settings-version-status">
@@ -247,7 +251,7 @@ function VersionSection() {
           disabled={!isPackaged || state.kind === "checking"}
           data-testid="settings-version-check-btn"
         >
-          {state.kind === "checking" ? "检查中…" : "检查更新"}
+          {state.kind === "checking" ? t("checkingButton") : t("checkForUpdates")}
         </button>
         {state.kind === "downloaded" && isPackaged && (
           <button
@@ -256,7 +260,7 @@ function VersionSection() {
             onClick={triggerInstall}
             data-testid="settings-version-install-btn"
           >
-            立即重启并安装
+            {t("installNow")}
           </button>
         )}
       </div>
@@ -273,36 +277,43 @@ function UpdateStatusText({
   versionLabel: string;
   isPackaged: boolean;
 }) {
+  const { t } = useTranslation("settings");
   if (!isPackaged) {
-    return <span className="settings-version-hint">开发模式 — 自动更新已禁用</span>;
+    return <span className="settings-version-hint">{t("devModeHint")}</span>;
   }
   switch (state.kind) {
     case "idle":
-      return <span className="settings-version-hint">点击检查以查看是否有新版本</span>;
+      return <span className="settings-version-hint">{t("idleHint")}</span>;
     case "checking":
-      return <span className="settings-version-hint">正在检查更新…</span>;
+      return <span className="settings-version-hint">{t("checkingHint")}</span>;
     case "dev-mode":
-      return <span className="settings-version-hint">开发模式 — 自动更新已禁用</span>;
+      return <span className="settings-version-hint">{t("devModeHint")}</span>;
     case "up-to-date":
-      return <span className="settings-version-ok">已是最新版本 {versionLabel}</span>;
+      return <span className="settings-version-ok">{t("upToDateLabel", { version: versionLabel })}</span>;
     case "available": {
       const pct = Math.max(0, Math.min(100, Math.round(state.percent)));
       return (
         <span className="settings-version-progress">
-          正在下载 {state.version}… {pct}%
+          {t("downloadingLabel", { version: state.version, percent: pct })}
         </span>
       );
     }
     case "downloaded":
-      return <span className="settings-version-ok">新版本 {state.version} 已就绪</span>;
+      return <span className="settings-version-ok">{t("downloadedLabel", { version: state.version })}</span>;
     case "error":
-      return <span className="settings-version-error">检查失败：{state.message}</span>;
+      return <span className="settings-version-error">{t("errorLabel", { message: state.message })}</span>;
   }
 }
 
 function SettingsPage() {
+  const { t, i18n } = useTranslation("settings");
   const router = useRouter();
   const { resetShortcuts } = useStore();
+  const currentLang = i18n.language as SupportedLanguage;
+
+  const handleLanguageChange = async (lang: SupportedLanguage) => {
+    await setLanguage(lang);
+  };
 
   return (
     <div className="settings-page" data-testid="settings-page">
@@ -311,21 +322,37 @@ function SettingsPage() {
           type="button"
           className="settings-back-btn"
           onClick={() => router.history.back()}
-          title="返回"
+          title={t("back", { ns: "common" })}
         >
-          ← 返回
+          ← {t("back", { ns: "common" })}
         </button>
-        <h2 className="settings-title">设置</h2>
+        <h2 className="settings-title">{t("language")}</h2>
       </div>
 
       <div className="settings-section">
-        <h3 className="settings-section-title">版本与更新</h3>
+        <h3 className="settings-section-title">{t("language")}</h3>
+        <div className="settings-language-options">
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <button
+              key={lang.value}
+              type="button"
+              className={`settings-language-btn ${currentLang === lang.value ? "active" : ""}`}
+              onClick={() => handleLanguageChange(lang.value)}
+            >
+              {lang.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">{t("version")}</h3>
         <VersionSection />
       </div>
 
       <div className="settings-section">
-        <h3 className="settings-section-title">快捷键</h3>
-        <ShortcutRow action="dirSearchFocus" label="聚焦目录搜索栏" />
+        <h3 className="settings-section-title">{t("shortcuts", { ns: "settings" })}</h3>
+        <ShortcutRow action="dirSearchFocus" label={t("focusDirSearch", { ns: "settings" })} />
       </div>
 
       <div className="settings-footer">
@@ -334,7 +361,7 @@ function SettingsPage() {
           className="settings-reset-btn"
           onClick={resetShortcuts}
         >
-          恢复默认
+          {t("resetDefault", { ns: "settings" })}
         </button>
       </div>
     </div>

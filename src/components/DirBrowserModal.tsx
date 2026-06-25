@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShortcutAction } from "../hooks/useShortcuts";
+import { useTranslation } from "../i18n/react";
 
 export interface DirEntry {
   name: string;
@@ -13,6 +14,7 @@ interface DirBrowserModalProps {
 }
 
 export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalProps) {
+  const { t } = useTranslation("modals");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string>("");
@@ -170,11 +172,11 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
               className="dir-modal-back"
               onClick={goToParent}
               disabled={!currentPath}
-              title="返回上一级"
+              title={t("dirBrowser.goUp")}
             >
               ←
             </button>
-            <h3>选择项目目录</h3>
+            <h3>{t("dirBrowser.title")}</h3>
           </div>
           <button type="button" className="dir-modal-close" onClick={onCancel}>
             ✕
@@ -209,7 +211,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
           <input
             type="text"
             className="dir-search-input"
-            placeholder="搜索文件夹名称..."
+            placeholder={t("dirBrowser.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             data-testid="dir-search-input"
@@ -219,11 +221,11 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
         {/* Directory list */}
         <div className="dir-modal-list" ref={listRef} onScroll={handleScroll}>
-          {loading && <div className="dir-modal-status">加载中...</div>}
+          {loading && <div className="dir-modal-status">{t("loading", { ns: "common" })}</div>}
           {error && <div className="dir-modal-status dir-modal-error">{error}</div>}
           {!loading && !error && displayEntries.length === 0 && (
             <div className="dir-modal-status">
-              {search.trim() ? "没有匹配的文件夹" : "空目录"}
+              {search.trim() ? t("noMatch", { ns: "common" }) : t("loading", { ns: "common" })}
             </div>
           )}
           {!loading &&
@@ -249,7 +251,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
                       e.stopPropagation();
                       fetchDirs(entry.path);
                     }}
-                    title="进入目录"
+                    title={t("dirBrowser.enterDirectory")}
                   >
                     ▶
                   </button>
@@ -276,7 +278,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
             onClick={onCancel}
             data-testid="dir-cancel"
           >
-            取消
+            {t("dirBrowser.cancel")}
           </button>
           <button
             type="button"
@@ -285,7 +287,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
             onClick={handleConfirm}
             data-testid="dir-confirm"
           >
-            选择此目录
+            {t("dirBrowser.select")}
           </button>
         </div>
       </div>

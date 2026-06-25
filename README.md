@@ -1,5 +1,7 @@
 # AgentDock
 
+[English](#english-version) | 中文
+
 > 开箱即用的 Git Worktree Session 管理系统 —— 为 AI Agent 并行开发量身打造。
 
 [![Electron](https://img.shields.io/badge/Electron-42.4-blue?logo=electron)](https://www.electronjs.org/)
@@ -563,5 +565,134 @@ agent-dock/
 - 新功能需添加测试
 
 ## 许可证
+
+[MIT License](LICENSE)
+
+---
+
+# English Version
+
+<a id="english-version"></a>
+
+> Out-of-the-box Git Worktree Session management system — purpose-built for parallel AI Agent development.
+
+[![Electron](https://img.shields.io/badge/Electron-42.4-blue?logo=electron)](https://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-19.1-61dafb?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+---
+
+## What is AgentDock?
+
+AgentDock is an **Electron desktop application** that lets you create multiple **fully isolated Git Worktree Sessions** from a single project. Each session has its own Git branch, port, environment variables, and built-in terminal. All sessions can **run in parallel without interfering with each other**, and when paired with AI tools like Claude Code, they enable large-scale parallel development.
+
+## Session Management Features at a Glance
+
+### Session States
+
+Each session has 6 user states to help you track development progress:
+
+| State | Icon | Description |
+|------|------|------|
+| Draft | 📝 | Draft |
+| Plan | 📋 | Planning |
+| Working | 🔨 | In development |
+| PR | 🔗 | PR created |
+| Verifying | ✅ | Verifying |
+| Done | ✔️ | Completed |
+
+### Other Features
+
+| Feature | Action |
+|------|------|
+| **Drag-and-drop sorting** | Drag session cards to reorder |
+| **Rename** | Double-click the session name |
+| **Open in Explorer** | Right-click → Open in Explorer |
+| **Open in Terminal** | Right-click → Open in Terminal |
+| **Reassign Ports** | Right-click → Reassign Ports |
+
+## Architecture Overview
+
+### Core Components
+
+| Component | Responsibility |
+|------|------|
+| **Daemon** | Machine-level singleton HTTP server that manages port allocation and session state |
+| **Session Lifecycle** | Orchestrates the 5-step session creation/deletion workflow |
+| **Terminal Manager** | Manages terminal lifecycle with PTY and MessagePort transports |
+| **Port Allocator** | Atomic port allocation with file locking and expiration detection |
+| **Hook Engine** | Executes session lifecycle hooks (before/after create/delete) |
+| **Resource Sync** | Syncs resource files to the Worktree (overwrite/skip/merge strategies) |
+
+### Tech Stack
+
+| Technology | Purpose |
+|------|------|
+| [Electron](https://www.electronjs.org/) 42.4 | Desktop application framework |
+| [React](https://react.dev/) 19.1 | UI framework |
+| [TanStack Router](https://tanstack.com/router) | File-based routing |
+| [TanStack Query](https://tanstack.com/query) | Server state management |
+| [xterm.js](https://xtermjs.org/) | Terminal emulator |
+| [Hono](https://hono.dev/) | HTTP server (Daemon) |
+| [Drizzle ORM](https://orm.drizzle.team/) | SQLite ORM |
+| [Zod](https://zod.dev/) 4.4 | Schema validation |
+| [electron-vite](https://electron-vite.org/) | Build toolchain |
+
+## Development
+
+```bash
+# Development mode
+bun run dev
+
+# Build for production
+bun run build
+
+# Run tests
+bun run test
+
+# Run E2E tests
+bun run test:e2e
+
+# Lint + Format
+bun run check
+```
+
+### Project Structure
+
+```
+agent-dock/
+├── electron/              # Electron main process + preload
+│   ├── main.ts            # Main process entry
+│   ├── preload.ts         # Context Bridge
+│   └── main/ipc/          # IPC handlers
+├── plugins/               # Core business logic (shared between main process and Daemon)
+│   ├── daemon/            # Hono HTTP server
+│   ├── session-lifecycle.ts
+│   ├── hook-engine.ts
+│   └── ...
+├── src/                   # React renderer process
+│   ├── components/        # UI components
+│   ├── constants/         # Prompt templates and other constants
+│   ├── lib/               # Utility functions, state management
+│   └── routes/            # File-based routes
+├── e2e/                   # Playwright E2E tests
+├── scripts/               # Build scripts
+└── docs/                  # Internal documentation
+```
+
+## Contributing
+
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Create a Pull Request
+
+- Use [Biome](https://biomejs.dev/) for code formatting
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+- New features require tests
+
+## License
 
 [MIT License](LICENSE)

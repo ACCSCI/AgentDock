@@ -1,0 +1,10 @@
+{
+  "terminal": "Terminal",
+  "rename": "Rename",
+  "closeTerminal": "Close terminal",
+  "createFailed": "Failed to create terminal",
+  "unknownError": "Unknown error",
+  "fontSize": "Font Size",
+  "decreaseFontSize": "Decrease font size",
+  "increaseFontSize": "Increase font size"
+}

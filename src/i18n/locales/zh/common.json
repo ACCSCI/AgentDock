@@ -1,0 +1,13 @@
+{
+  "cancel": "取消",
+  "confirm": "确定",
+  "close": "关闭",
+  "save": "保存",
+  "delete": "删除",
+  "loading": "加载中...",
+  "retry": "重试",
+  "back": "返回",
+  "search": "搜索...",
+  "unknownError": "未知错误",
+  "noMatch": "没有匹配的文件夹"
+}

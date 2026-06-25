@@ -1,0 +1,5 @@
+{
+  "daemonRunning": "Daemon 运行中",
+  "daemonStopped": "Daemon 已停止",
+  "port": "端口: {{port}}"
+}

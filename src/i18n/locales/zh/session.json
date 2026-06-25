@@ -1,0 +1,31 @@
+{
+  "status": {
+    "draft": "草稿",
+    "plan": "规划中",
+    "working": "开发中",
+    "pr": "待合并",
+    "verifying": "待验证",
+    "done": "已完成"
+  },
+  "step": {
+    "beforeCreateSession": "创建前",
+    "createWorktree": "创建 Worktree",
+    "syncResources": "同步资源",
+    "allocatePorts": "分配端口",
+    "afterCreateSession": "初始化环境",
+    "beforeDeleteSession": "删除前",
+    "releasePorts": "释放端口",
+    "removeWorktree": "删除 Worktree",
+    "afterDeleteSession": "清理完成"
+  },
+  "envInitFailed": "环境初始化失败",
+  "viewFailureLogs": "查看失败日志",
+  "delete": "删除",
+  "retry": "重试",
+  "rename": "重命名",
+  "setStatus": "设置状态",
+  "clearStatus": "清除状态",
+  "openInExplorer": "在资源管理器中打开",
+  "openInTerminal": "在终端中打开",
+  "reassignPorts": "重新分配端口"
+}

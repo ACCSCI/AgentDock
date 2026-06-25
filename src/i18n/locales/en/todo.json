@@ -1,0 +1,10 @@
+{
+  "todo": "Todo",
+  "addTask": "Add a task...",
+  "noTasks": "No tasks yet",
+  "dragToReorder": "Drag to reorder",
+  "doubleClickToEdit": "Double-click: edit",
+  "rightClickToCopy": "Right-click: copy",
+  "delete": "Delete",
+  "copied": "Copied!"
+}

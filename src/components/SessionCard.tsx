@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { FileText, ClipboardList, Wrench, Send, CircleHelp, CheckCircle2 } from "lucide-react";
 import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionListItem, type SessionStep, type SessionUserStatus } from "../lib/queries";
+import { useTranslation } from "../i18n/react";
 
 const CREATE_STEP_LABELS: Record<string, string> = {
   beforeCreateSession: "前置检查",
@@ -127,6 +128,15 @@ export function SessionCard({
   onDragStart,
   onDragEnd,
 }: SessionCardProps) {
+  const { t } = useTranslation("session");
+  const USER_STATUS_OPTIONS = useMemo(() => [
+    { key: "draft" as SessionUserStatus, Icon: FileText, label: t("status.draft"), color: "#8B5CF6" },
+    { key: "plan" as SessionUserStatus, Icon: ClipboardList, label: t("status.plan"), color: "#3B82F6" },
+    { key: "working" as SessionUserStatus, Icon: Wrench, label: t("status.working"), color: "#F59E0B" },
+    { key: "pr" as SessionUserStatus, Icon: Send, label: t("status.pr"), color: "#10B981" },
+    { key: "verifying" as SessionUserStatus, Icon: CircleHelp, label: t("status.verifying"), color: "#F97316" },
+    { key: "done" as SessionUserStatus, Icon: CheckCircle2, label: t("status.done"), color: "#6B7280" },
+  ], [t]);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);

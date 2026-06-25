@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "../i18n/react";
 
 interface ConfirmDeleteModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ export function ConfirmDeleteModal({
   onConfirm,
   onCancel,
 }: ConfirmDeleteModalProps) {
+  const { t } = useTranslation("modals");
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -33,7 +35,7 @@ export function ConfirmDeleteModal({
       >
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
-            <h3>删除确认</h3>
+            <h3>{t("confirmDelete.title")}</h3>
           </div>
           <button
             type="button"
@@ -46,9 +48,8 @@ export function ConfirmDeleteModal({
 
         <div className="git-init-description">
           <p>
-            确定要删除 <strong>{sessionName}</strong> 吗？
+            {t("confirmDelete.message")}
           </p>
-          <p>删除后，该 session 的 worktree 和端口将被释放。</p>
         </div>
 
         <div className="dir-modal-actions">
@@ -58,7 +59,7 @@ export function ConfirmDeleteModal({
             onClick={onCancel}
             data-testid="confirm-delete-cancel"
           >
-            取消
+            {t("confirmDelete.cancel")}
           </button>
           <button
             type="button"
@@ -66,7 +67,7 @@ export function ConfirmDeleteModal({
             onClick={onConfirm}
             data-testid="confirm-delete-ok"
           >
-            删除
+            {t("confirmDelete.delete")}
           </button>
         </div>
       </div>

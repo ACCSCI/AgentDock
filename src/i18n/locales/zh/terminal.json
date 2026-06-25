@@ -1,0 +1,10 @@
+{
+  "terminal": "终端",
+  "rename": "重命名",
+  "closeTerminal": "关闭终端",
+  "createFailed": "创建终端失败",
+  "unknownError": "未知错误",
+  "fontSize": "字体大小",
+  "decreaseFontSize": "减小字体",
+  "increaseFontSize": "增大字体"
+}

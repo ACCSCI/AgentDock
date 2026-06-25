@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { snapshot, subscribe, dismiss, type Toast as T } from "../lib/toast";
+import { useTranslation } from "../i18n/react";
 
 const ICON: Record<T["kind"], string> = {
   info: "ℹ",
@@ -9,6 +10,7 @@ const ICON: Record<T["kind"], string> = {
 };
 
 function ToastItem({ toast }: { toast: T }) {
+  const { t } = useTranslation("common");
   return (
     <div className={`toast-item toast-${toast.kind}`}>
       <span className="toast-icon">{ICON[toast.kind]}</span>
@@ -17,7 +19,7 @@ function ToastItem({ toast }: { toast: T }) {
         type="button"
         className="toast-close"
         onClick={() => dismiss(toast.id)}
-        aria-label="关闭"
+        aria-label={t("close")}
       >
         ×
       </button>

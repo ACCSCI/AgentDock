@@ -1,0 +1,30 @@
+{
+  "confirmDelete": {
+    "title": "Confirm Delete",
+    "message": "Are you sure you want to delete this? This action cannot be undone.",
+    "delete": "Delete",
+    "cancel": "Cancel"
+  },
+  "orphanClean": {
+    "title": "Clean Up Orphaned Worktrees",
+    "description": "These worktrees are no longer associated with any session. They can be safely deleted.",
+    "clean": "Clean Up",
+    "cancel": "Cancel",
+    "deleteFailed": "Delete failed",
+    "unknownError": "Unknown error"
+  },
+  "dirBrowser": {
+    "title": "Select Directory",
+    "goUp": "Go up",
+    "searchPlaceholder": "Search folder name...",
+    "enterDirectory": "Enter directory",
+    "select": "Select",
+    "cancel": "Cancel"
+  },
+  "filePicker": {
+    "title": "Select File",
+    "searchPlaceholder": "Search files...",
+    "select": "Select",
+    "cancel": "Cancel"
+  }
+}

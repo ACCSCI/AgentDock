@@ -1,0 +1,13 @@
+{
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+  "close": "Close",
+  "save": "Save",
+  "delete": "Delete",
+  "loading": "Loading...",
+  "retry": "Retry",
+  "back": "Back",
+  "search": "Search...",
+  "unknownError": "Unknown error",
+  "noMatch": "No matches found"
+}
