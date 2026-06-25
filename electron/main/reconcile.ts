@@ -72,6 +72,8 @@ export async function reconcileAndDeclareSessions(
   }
   if (rows.length === 0) return;
 
+  const rowsBySessionId = new Map(rows.map((r) => [r.id, r]));
+
   // Build a set of sessionIds known to the v2PortService's local cache,
   // so we can match daemon sessions to DB rows by unified sessionId.
   const knownBySid = new Map<string, { sessionId: string }>();
@@ -113,14 +115,17 @@ export async function reconcileAndDeclareSessions(
     // (it belongs to another Electron instance).
     const known = knownBySid.get(ds.sessionId);
     if (!known) continue;
-    const row = rows.find((r) => r.id === known.sessionId);
+    const row = rowsBySessionId.get(known.sessionId);
     if (!row) continue;
     if (ds.status !== "active") continue; // Only reconcile active sessions.
     const oldPorts = row.ports
       ? (JSON.parse(row.ports) as Record<string, number>)
       : {};
     const newPorts = ds.ports;
-    if (JSON.stringify(oldPorts) === JSON.stringify(newPorts)) continue;
+    const keys1 = Object.keys(oldPorts);
+    const keys2 = Object.keys(newPorts);
+    const portsEqual = keys1.length === keys2.length && keys1.every((k) => oldPorts[k] === newPorts[k]);
+    if (portsEqual) continue;
 
     ctx.reallocatedQueue.push({
       sessionId: row.id,

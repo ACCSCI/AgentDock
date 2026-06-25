@@ -10,6 +10,9 @@ import { isCreatingSession, isDeletingSession } from "./types.js";
 import { useV2State, isV2StateAvailable } from "../../hooks/useV2State.js";
 import { useProjects } from "./projects.js";
 
+/** Normalize path for consistent map keys across platforms. */
+const normalizeKey = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+
 /**
  * F11b: Hook that combines v2State SSE push with old polling fallback.
  *
@@ -53,7 +56,7 @@ export function useV2Projects() {
     const oldProjects = oldQuery.data ?? [];
     const pathToDbId = new Map<string, string>();
     for (const p of oldProjects) {
-      if (p.path) pathToDbId.set(p.path, p.id);
+      if (p.path) pathToDbId.set(normalizeKey(p.path), p.id);
     }
 
     // Group sessions by projectRoot
@@ -73,6 +76,7 @@ export function useV2Projects() {
       if (session.status !== "active") continue;
 
       const projectRoot = session.projectRoot || "";
+      const projectKey = normalizeKey(projectRoot);
 
       // §4.3: 判定有主/无主
       const ownerClientId = v2State.owners.get(sessionId)?.clientId;
@@ -81,11 +85,11 @@ export function useV2Projects() {
       // 无主 session 不进 sidebar（由 OrphanCleanModal 处理）
       if (!hasOwner) continue;
 
-      if (!projectMap.has(projectRoot)) {
+      if (!projectMap.has(projectKey)) {
         // Prefer the nanoid id from the DB query when available, so
         // activeProjectId (which stores the nanoid) resolves correctly.
-        const dbId = pathToDbId.get(projectRoot);
-        projectMap.set(projectRoot, {
+        const dbId = pathToDbId.get(projectKey);
+        projectMap.set(projectKey, {
           id: dbId ?? projectRoot,
           name: projectRoot.split("/").pop() || projectRoot,
           path: projectRoot,
@@ -97,7 +101,7 @@ export function useV2Projects() {
       // §4.3: 有主 → 判定"我的"还是"别人的"
       const isForeign = myClientId != null && ownerClientId !== myClientId;
 
-      const project = projectMap.get(projectRoot)!;
+      const project = projectMap.get(projectKey)!;
       project.sessions.push({
         id: session.sessionId,
         projectId: projectRoot,
@@ -125,13 +129,14 @@ export function useV2Projects() {
       for (const cachedProj of cachedProjects) {
         const projectRoot = cachedProj.path;
         if (!projectRoot) continue;
+        const projectKey = normalizeKey(projectRoot);
         const optimisticSessions = cachedProj.sessions.filter(
           (s) => isCreatingSession(s) || isDeletingSession(s),
         );
         if (optimisticSessions.length === 0) continue;
 
-        if (!projectMap.has(projectRoot)) {
-          projectMap.set(projectRoot, {
+        if (!projectMap.has(projectKey)) {
+          projectMap.set(projectKey, {
             id: cachedProj.id,
             name: cachedProj.name,
             path: projectRoot,
@@ -139,7 +144,7 @@ export function useV2Projects() {
             sessions: [],
           });
         }
-        const project = projectMap.get(projectRoot)!;
+        const project = projectMap.get(projectKey)!;
         const existingIds = new Set(project.sessions.map((s) => s.id));
         for (const optSession of optimisticSessions) {
           if (!existingIds.has(optSession.id)) {
@@ -157,16 +162,11 @@ export function useV2Projects() {
     // path 比较前规范化 (separators → /, lowercase, 去尾部 /), 否则
     // v2 projectMap key 跟 DB p.path 格式不同会导致查不到已有 project,
     // 出现重复条目.
-    const normalizeKey = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     for (const p of oldProjects) {
       if (!p.path) continue;
       const pKey = normalizeKey(p.path);
-      // 找 v2 projectMap 里同 path 的已有 project (规范化比较)
-      let target = projectMap.get(p.path);
-      if (!target) {
-        const existingKey = Array.from(projectMap.keys()).find((k) => normalizeKey(k) === pKey);
-        target = existingKey ? projectMap.get(existingKey) : undefined;
-      }
+      // 找 v2 projectMap 里同 path 的已有 project (规范化比较, O(1))
+      let target = projectMap.get(pKey);
       if (!target) {
         target = {
           id: p.id,
@@ -175,7 +175,7 @@ export function useV2Projects() {
           createdAt: p.createdAt,
           sessions: [],
         };
-        projectMap.set(p.path, target);
+        projectMap.set(pKey, target);
       }
       const existingIds = new Set(target.sessions.map((s) => s.id));
       for (const s of p.sessions) {
@@ -235,13 +235,18 @@ export function useV2ProjectSessions(projectId: string | null) {
   const sessions = useMemo(() => {
     if (!projectId) return [];
 
+    // Resolve projectId (may be nanoid) to actual project path
+    const projectPath = oldQuery.data?.find(
+      (p) => p.id === projectId || p.path === projectId,
+    )?.path || projectId;
+
     // Try v2State first
     if (v2State?.ready) {
       const myClientId = v2State.clientId;
       const activeSessions = Array.from(v2State.sessions.values())
         .filter((s) => {
           // Only include active sessions owned by someone
-          if (s.projectRoot !== projectId) return false;
+          if (normalizeKey(s.projectRoot) !== normalizeKey(projectPath)) return false;
           if (s.status !== "active") return false;
           const ownerClientId = v2State.owners.get(s.sessionId)?.clientId;
           return ownerClientId != null && ownerClientId !== "";

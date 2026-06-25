@@ -247,7 +247,7 @@ export function createWorktree(
 
 let _rimraf: ((p: string) => Promise<void>) | null = null;
 const _rmFallback = (p: string) => rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-async function rimrafOrFallback(dirPath: string): Promise<void> {
+export async function rimrafOrFallback(dirPath: string): Promise<void> {
   if (!_rimraf) {
     try {
       const mod = await import("rimraf") as any;

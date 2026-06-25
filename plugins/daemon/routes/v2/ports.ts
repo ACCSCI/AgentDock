@@ -141,7 +141,7 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
           // 锁内做完, 锁外异步 close. 不 await closeServer: 不阻塞
           // 响应; OS 层 close 与 claimPort 在 await 切换间仍有窗口, 但
           // bindFailed 路径专门兜底.
-          void closeServer();
+          void closeServer().catch(() => {});
           return { port: picked, picked: true };
         });
         return c.json({ success: true, ...result });
@@ -217,7 +217,7 @@ export function registerClaim(app: Hono, ctx: DaemonContext): void {
         });
         // §3.3 — 锁内 claim 完毕, 锁外 close 所有 open servers.
         // 不 await: 不阻塞响应; bindFailed 路径兜底.
-        for (const cs of result.openServers) void cs();
+        for (const cs of result.openServers) void cs().catch(() => {});
         // P5: publish per-port reassigned events (paired by port name)
         for (const [name, oldP] of result.oldPortsByName) {
           const newP = result.ports[name];

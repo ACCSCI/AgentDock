@@ -11,7 +11,6 @@
  */
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -19,6 +18,7 @@ import {
   listWorktrees,
   killProcessesUnderPath,
   validateBranchName,
+  rimrafOrFallback,
 } from "./worktree.js";
 import { log } from "./logger.js";
 
@@ -69,32 +69,6 @@ export function scanOrphanWorktrees(projectPath: string): OrphanDir[] {
   }
 
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// rimraf / rm fallback helper
-// ---------------------------------------------------------------------------
-
-let _rimraf: ((p: string) => Promise<void>) | null = null;
-const _rmFallback = (p: string) => rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-async function rimrafOrFallback(dirPath: string): Promise<void> {
-  if (!_rimraf) {
-    try {
-      const mod = await import("rimraf") as any;
-      const candidate = mod.rimraf ?? mod.default ?? null;
-      // Guard: rimraf v6 exports an async function with arity 2 (path, opt).
-      // fs-extra bundles a callback-based rimraf with arity 3 (p, options, cb)
-      // that throws "callback function required" when called without a callback.
-      // If the candidate looks callback-based, skip it and fall through to rm.
-      _rimraf = (typeof candidate === "function" && candidate.length <= 2)
-        ? candidate
-        : _rmFallback;
-    } catch {
-      _rimraf = _rmFallback;
-    }
-  }
-
-  await _rimraf!(dirPath);
 }
 
 /**
