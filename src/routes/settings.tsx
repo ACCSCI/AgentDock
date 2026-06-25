@@ -53,6 +53,7 @@ interface ShortcutRowProps {
 }
 
 function ShortcutRow({ action, label }: ShortcutRowProps) {
+  const { t } = useTranslation("settings");
   const { shortcuts, updateShortcut } = useStore();
   const bindings = shortcuts[action] ?? [];
 
@@ -78,7 +79,7 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
               className="settings-shortcut-badge-remove"
               onClick={() => removeKey(key)}
               disabled={bindings.length <= 1}
-              title="移除此快捷键"
+              title={t("removeShortcut")}
             >
               ×
             </button>
@@ -91,7 +92,7 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
             onClick={startCapture}
             disabled={isCapturing}
           >
-            {isCapturing ? "请按下快捷键…" : "+ 添加"}
+            {isCapturing ? t("capturePrompt") : t("addShortcut")}
           </button>
         )}
       </div>
@@ -120,6 +121,7 @@ interface VersionInfo {
 }
 
 function VersionSection() {
+  const { t } = useTranslation("settings");
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   // Keep the latest "available" version separate from state — the
   // state machine can transition available → available with a higher
@@ -229,13 +231,13 @@ function VersionSection() {
     }
   }, []);
 
-  const versionLabel = versionInfo ? `v${versionInfo.version}` : "未知";
+  const versionLabel = versionInfo ? `v${versionInfo.version}` : t("versionUnknown");
   const isPackaged = versionInfo?.isPackaged ?? false;
 
   return (
     <div className="settings-version-block" data-testid="settings-version-block">
       <div className="settings-version-row">
-        <span className="settings-version-label">当前版本</span>
+        <span className="settings-version-label">{t("currentVersion")}</span>
         <span className="settings-version-value">{versionLabel}</span>
       </div>
       <div className="settings-version-status" data-testid="settings-version-status">
@@ -249,7 +251,7 @@ function VersionSection() {
           disabled={!isPackaged || state.kind === "checking"}
           data-testid="settings-version-check-btn"
         >
-          {state.kind === "checking" ? "检查中…" : "检查更新"}
+          {state.kind === "checking" ? t("checkingButton") : t("checkForUpdates")}
         </button>
         {state.kind === "downloaded" && isPackaged && (
           <button
@@ -258,7 +260,7 @@ function VersionSection() {
             onClick={triggerInstall}
             data-testid="settings-version-install-btn"
           >
-            立即重启并安装
+            {t("installNow")}
           </button>
         )}
       </div>
@@ -275,30 +277,31 @@ function UpdateStatusText({
   versionLabel: string;
   isPackaged: boolean;
 }) {
+  const { t } = useTranslation("settings");
   if (!isPackaged) {
-    return <span className="settings-version-hint">开发模式 — 自动更新已禁用</span>;
+    return <span className="settings-version-hint">{t("devModeHint")}</span>;
   }
   switch (state.kind) {
     case "idle":
-      return <span className="settings-version-hint">点击检查以查看是否有新版本</span>;
+      return <span className="settings-version-hint">{t("idleHint")}</span>;
     case "checking":
-      return <span className="settings-version-hint">正在检查更新…</span>;
+      return <span className="settings-version-hint">{t("checkingHint")}</span>;
     case "dev-mode":
-      return <span className="settings-version-hint">开发模式 — 自动更新已禁用</span>;
+      return <span className="settings-version-hint">{t("devModeHint")}</span>;
     case "up-to-date":
-      return <span className="settings-version-ok">已是最新版本 {versionLabel}</span>;
+      return <span className="settings-version-ok">{t("upToDateLabel", { version: versionLabel })}</span>;
     case "available": {
       const pct = Math.max(0, Math.min(100, Math.round(state.percent)));
       return (
         <span className="settings-version-progress">
-          正在下载 {state.version}… {pct}%
+          {t("downloadingLabel", { version: state.version, percent: pct })}
         </span>
       );
     }
     case "downloaded":
-      return <span className="settings-version-ok">新版本 {state.version} 已就绪</span>;
+      return <span className="settings-version-ok">{t("downloadedLabel", { version: state.version })}</span>;
     case "error":
-      return <span className="settings-version-error">检查失败：{state.message}</span>;
+      return <span className="settings-version-error">{t("errorLabel", { message: state.message })}</span>;
   }
 }
 
