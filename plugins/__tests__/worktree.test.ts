@@ -5,19 +5,21 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import {
-  classifyOrphans,
   createWorktree,
-  dispatchOrphanCleanup,
   getWorktreePath,
   isRegisteredWorktree,
   listWorktrees,
-  removeOrphanBranch,
-  removeOrphanDir,
   removeWorktree,
   renameWorktree,
-  scanOrphanBranches,
   validateBranchName,
 } from "../worktree.js";
+import {
+  classifyOrphans,
+  dispatchOrphanCleanup,
+  removeOrphanBranch,
+  removeOrphanDir,
+  scanOrphanBranches,
+} from "../orphan.js";
 
 let projectDir: string;
 

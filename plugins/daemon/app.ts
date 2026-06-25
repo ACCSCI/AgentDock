@@ -22,7 +22,7 @@ import { originGuard } from "./middleware/origin.js";
 import { registerClients } from "./routes/clients.js";
 import { registerDebug } from "./routes/debug.js";
 import { registerRegistry } from "./routes/registry.js";
-import { registerV2 } from "./routes/v2.js";
+import { registerV2 } from "./routes/v2/index.js";
 import { registerFaultEndpoints } from "../fault-injector.js";
 
 export function createApp(ctx: DaemonContext): Hono {

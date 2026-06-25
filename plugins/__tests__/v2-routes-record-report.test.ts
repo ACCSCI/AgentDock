@@ -15,7 +15,7 @@ import { SseBus } from "../sse-bus.js";
 import {
   registerSessionsV2,
   registerClaim,
-} from "../daemon/routes/v2.js";
+} from "../daemon/routes/v2/index.js";
 
 function makeMockCtx(overrides?: {
   recovering?: { recordReport: ReturnType<typeof vi.fn>; isRecovering: () => boolean };
