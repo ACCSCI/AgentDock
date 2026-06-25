@@ -5,7 +5,7 @@
  * matching the existing plugins/db/schema.ts shape.
  */
 
-import type { ProjectData, SessionData } from "../src/lib/queries.js";
+import type { ProjectData, SessionData } from "../src/lib/queries/index.js";
 
 export const sampleProject: ProjectData = {
   id: "test-project-1",

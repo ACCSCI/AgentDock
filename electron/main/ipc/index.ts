@@ -46,6 +46,8 @@ export interface AllIpcDeps {
   getSseConsumer: () => SseConsumer | null;
   /** P9: true when AGENTDOCK_V2=1. */
   isV2Enabled: () => boolean;
+  /** P0+ (二审修): 返回 sseConsumer 维护的真实 lastSeq. 用于 /sync body. */
+  getSseLastSeq: () => number;
   /** Global projects DB (machine-level, not per-project). */
   getGlobalDb: () => DrizzleDb | null;
 }

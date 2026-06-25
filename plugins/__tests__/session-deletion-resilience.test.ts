@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
-import { removeOrphanDir } from "../worktree.js";
+import { removeOrphanDir } from "../orphan.js";
 import type { AgentDockConfig } from "../config.js";
 
 let projectDir: string;

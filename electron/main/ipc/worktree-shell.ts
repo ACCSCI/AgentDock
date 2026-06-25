@@ -18,15 +18,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import {
-  classifyOrphans,
-  dispatchOrphanCleanup,
   getWorktreeBase,
   listWorktrees,
-  removeOrphanBranch,
-  removeOrphanDir,
+} from "../../../plugins/worktree.js";
+import {
+  classifyOrphans,
+  dispatchOrphanCleanup,
   scanOrphanBranches,
   scanOrphanWorktrees,
-} from "../../../plugins/worktree.js";
+} from "../../../plugins/orphan.js";
 import * as schema from "../../../plugins/db/schema.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import { openInFileManager } from "../../../plugins/open-explorer.js";

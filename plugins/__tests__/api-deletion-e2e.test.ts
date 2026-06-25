@@ -163,7 +163,7 @@ beforeEach(async () => {
           json(res, 400, { error: "paths array is required" });
           return;
         }
-        const { removeOrphanDir } = await import("../worktree.js");
+        const { removeOrphanDir } = await import("../orphan.js");
         const deleted: string[] = [];
         const failed: Array<{ path: string; error: string }> = [];
         for (const p of paths) {

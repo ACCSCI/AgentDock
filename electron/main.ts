@@ -19,32 +19,31 @@ import { app, BrowserWindow, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { generateClientId } from "./main/client-id.js";
 import { DaemonManager } from "../plugins/daemon-manager.js";
 import { createDaemonClient, type DaemonHonoClient } from "./main/hono-client.js";
-import { IPC_CHANNELS, IPC_CHANNEL_COUNT } from "./shared/api-types.js";
+import { IPC_CHANNEL_COUNT } from "./shared/api-types.js";
 import { registerAllIpc, type AllIpcDeps } from "./main/ipc/index.js";
 import { syncProject } from "./main/ipc/db.js";
 import { log } from "../plugins/logger.js";
-import { terminalManager } from "../plugins/terminal-manager.js";
-import { writePortsToEnv } from "../plugins/port-write-env.js";
-import {
-  ensureActiveDb,
-  getActiveDb,
-} from "../plugins/db/index.js";
 import { getDbPath } from "../plugins/db/index.js";
 import { openGlobalDb, migrateProjectsToGlobal } from "../plugins/db/global.js";
 import * as schema from "../plugins/db/schema.js";
 import { createV2PortService, type V2PortServiceHandle } from "../plugins/v2-port-service.js";
 import { AGENTDOCK_DEFAULT_V2 } from "../plugins/constants.js";
 import { SseConsumer } from "./main/v2-sse-consumer.js";
-import { emptyState, applySnapshot, dispatchEvent, type AppliedState, type V2SyncSnapshot } from "./main/sync-applier.js";
+import { emptyState, dispatchEvent, type AppliedState } from "./main/sync-applier.js";
 import { serializeForPush } from "./main/v2-state-bridge.js";
 import { registerE2eReset } from "./main/e2e-reset.js";
 import { registerFontProtocol, ensureFontsReady } from "./main/fonts.js";
-import electronUpdater from "electron-updater";
-const { autoUpdater } = electronUpdater;
+
+// --- New sub-module imports ---
+import { registerClientWithDaemon, startHeartbeatLoop, startV2SyncLoop, unregisterClientWithDaemon, HEARTBEAT_INTERVAL_MS } from "./main/daemon-lifecycle.js";
+import { reconcileAndDeclareSessions } from "./main/reconcile.js";
+import { initAutoUpdater } from "./main/auto-updater.js";
+import { createWindow } from "./main/window.js";
+import { fullResyncAfterDisconnect } from "./main/v2-wiring.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -114,215 +113,9 @@ let activeProjectPath: string | null = null;
 // 详见 electron/main/client-id.ts.
 const clientId = generateClientId();
 
-// Heartbeat: every 30 s. Daemon's HEARTBEAT_TIMEOUT_MS is 90 s, so
-// missing two heartbeats marks us stale and the daemon releases our
-// sessions on the next cleanup tick. 30 s aligns with daemon's
-// HEARTBEAT_PERSIST_INTERVAL_MS so every successful beat persists.
-const HEARTBEAT_INTERVAL_MS = 30_000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-
-async function registerClientWithDaemon(): Promise<void> {
-  if (!daemonClient) return;
-  // projectPaths starts as just cwd — auto-init below will set it. The
-  // daemon stores this for diagnostic / future routing; it doesn't
-  // enforce anything off it today.
-  try {
-    const res = await daemonClient.client.register.$post({
-      json: { clientId, pid: process.pid, projectPaths: [process.cwd()] },
-    });
-    if (!res.ok) {
-      log.warn({ status: res.status }, "client/register non-2xx");
-    }
-  } catch (err) {
-    log.warn({ err }, "client/register failed");
-  }
-}
-
-function startHeartbeatLoop(): void {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  heartbeatTimer = setInterval(() => {
-    if (!daemonClient) return;
-    void daemonClient.client.heartbeat
-      .$post({ json: { clientId } })
-      .catch((err) => log.warn({ err }, "heartbeat failed"));
-  }, HEARTBEAT_INTERVAL_MS);
-  // Don't keep the event loop alive just for heartbeats during shutdown.
-  if (typeof heartbeatTimer.unref === "function") heartbeatTimer.unref();
-}
-
-// §7 — v2 path 30s 全量 sync 循环 (兼 heartbeat). SSE 推送增量, /sync
-// 提供全量兜底 + 维持 daemon 端 client 活性 (HEARTBEAT_TIMEOUT 90s).
-// v2 路径不走 v1 /client/heartbeat, 因此**必须**有自己的周期调用.
-//
-// P0+ (二审修): lastSeq 改为从 sseConsumer.getLastSeq() 读取真实水位,
-// 避免 daemon 端 replaySince(0) 在重启后回放大量历史事件。
-// 用 accessor 函数而非快照值, 让 SSE 重连 resetSeq() 后下一 tick 自动生效.
 let v2SyncTimer: ReturnType<typeof setInterval> | null = null;
 let periodicSyncTimer: ReturnType<typeof setInterval> | null = null;
-function startV2SyncLoop(
-  daemonPort: number,
-  getLastSeq: () => number,
-): void {
-  if (v2SyncTimer) clearInterval(v2SyncTimer);
-  const tick = async (): Promise<void> => {
-    try {
-      const res = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId,
-          pid: process.pid,
-          lastSeq: getLastSeq(),
-        }),
-      });
-      if (!res.ok) {
-        log.debug({ status: res.status }, "v2 /sync non-2xx");
-      }
-    } catch (err) {
-      // 网络错: 静默 — SSE 还在跑, 30s 后重试
-      log.debug({ err }, "v2 /sync failed");
-    }
-  };
-  v2SyncTimer = setInterval(() => void tick(), HEARTBEAT_INTERVAL_MS);
-  if (typeof v2SyncTimer.unref === "function") v2SyncTimer.unref();
-  // 立即跑一次, 不等 30s
-  void tick();
-}
-
-async function unregisterClientWithDaemon(): Promise<void> {
-  if (!daemonClient) return;
-  try {
-    await daemonClient.client.unregister.$post({ json: { clientId } });
-  } catch (err) {
-    log.warn({ err }, "client/unregister failed (non-fatal at shutdown)");
-  }
-}
-
-/**
- * Walk every session in the active project's DB and compare its ports
- * against the daemon's v2 state. If the daemon's ports differ from
- * what the DB has (e.g. an external process reclaimed them between
- * shutdowns), persist the new ports, rewrite the worktree `.env`,
- * and stash an entry in `reallocatedQueue` for the renderer's
- * `bootstrap:reallocated` IPC to pick up.
- *
- * v2 replaces the v1 `/sync/declare` endpoint with the `/sync` snapshot
- * + SSE. This reconciliation runs once per boot, after daemon connect
- * + register. Quietly no-ops when the DB doesn't exist yet (fresh
- * install) or when v2 is not available.
- */
-async function reconcileAndDeclareSessions(): Promise<void> {
-  if (!activeProjectPath) return;
-  if (!v2PortService || cachedDaemonPort <= 0) {
-    log.info("reconcile: v2 not available, skipping (v1 routes removed in F10-2a)");
-    return;
-  }
-  let db: ReturnType<typeof ensureActiveDb>;
-  try {
-    db = ensureActiveDb(activeProjectPath);
-  } catch (err) {
-    log.warn({ err }, "reconcile: DB unavailable, skipping");
-    return;
-  }
-
-  let rows: Array<{
-    id: string;
-    projectId: string;
-    worktreePath: string;
-    ports: string | null;
-  }>;
-  try {
-    rows = db
-      .select({
-        id: schema.sessions.id,
-        projectId: schema.sessions.projectId,
-        worktreePath: schema.sessions.worktreePath,
-        ports: schema.sessions.ports,
-      })
-      .from(schema.sessions)
-      .all();
-  } catch (err) {
-    log.warn({ err }, "reconcile: failed to read sessions");
-    return;
-  }
-  if (rows.length === 0) return;
-
-  // Build a set of sessionIds known to the v2PortService's local cache,
-  // so we can match daemon sessions to DB rows by unified sessionId.
-  const knownBySid = new Map<string, { sessionId: string }>();
-  for (const known of v2PortService.listKnownSessions()) {
-    knownBySid.set(known.sessionId, { sessionId: known.sessionId });
-  }
-
-  // Fetch daemon state via v2 /sync (raw fetch — matches the pattern
-  // used by db.ts and v2-port-service.ts).
-  let daemonSessions: Array<{
-    sessionId: string;
-    projectRoot: string;
-    displayName: string;
-    status: string;
-    ports: Record<string, number>;
-  }> = [];
-  try {
-    const res = await fetch(`http://127.0.0.1:${cachedDaemonPort}/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId, pid: process.pid, lastSeq: 0 }),
-    });
-    if (!res.ok) {
-      log.warn({ status: res.status }, "reconcile: v2 /sync non-2xx");
-      return;
-    }
-    const body = (await res.json()) as {
-      sessions?: typeof daemonSessions;
-    };
-    daemonSessions = body?.sessions ?? [];
-  } catch (err) {
-    log.warn({ err }, "reconcile: v2 /sync failed");
-    return;
-  }
-
-  for (const ds of daemonSessions) {
-    // Match daemon session → DB row by unified sessionId.
-    // If we don't have a local mapping for this sessionId, skip
-    // (it belongs to another Electron instance).
-    const known = knownBySid.get(ds.sessionId);
-    if (!known) continue;
-    const row = rows.find((r) => r.id === known.sessionId);
-    if (!row) continue;
-    if (ds.status !== "active") continue; // Only reconcile active sessions.
-    const oldPorts = row.ports
-      ? (JSON.parse(row.ports) as Record<string, number>)
-      : {};
-    const newPorts = ds.ports;
-    if (JSON.stringify(oldPorts) === JSON.stringify(newPorts)) continue;
-
-    reallocatedQueue.push({
-      sessionId: row.id,
-      oldPorts,
-      newPorts,
-    });
-    try {
-      const project = globalDbHandle?.db
-        .select()
-        .from(schema.projects)
-        .where(eq(schema.projects.id, row.projectId))
-        .get();
-      db.update(schema.sessions)
-        .set({ ports: JSON.stringify(newPorts) })
-        .where(eq(schema.sessions.id, row.id))
-        .run();
-      if (project) {
-        writePortsToEnv(row.worktreePath, newPorts, project.path);
-      }
-    } catch (err) {
-      log.warn(
-        { err, sessionId: row.id },
-        "reconcile: persist reallocated ports failed",
-      );
-    }
-  }
-}
 
 async function waitForViteReady(url: string, timeoutMs = 10_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -360,9 +153,6 @@ async function isDaemonReady(): Promise<boolean> {
 }
 
 function countHandlers(): number {
-  // ipcMain has no public count API, but we know exactly how many we
-  // registered. Phase 4+ will register the rest; this is the canonical
-  // count that bootstrap:health reports.
   return IPC_CHANNEL_COUNT;
 }
 
@@ -372,192 +162,16 @@ function drainReallocated() {
   return list;
 }
 
-function createWindow(): BrowserWindow {
-  // e2e/debug knob — when AGENTDOCK_E2E_DEVTOOLS=1 the test runner (or a
-  // developer reproducing a failure) gets a detached DevTools window so
-  // they can inspect React state / network / storage from outside the
-  // automated Playwright session.
-  const wantDevTools = process.env.AGENTDOCK_E2E_DEVTOOLS === "1";
-
-  // devTools enabled unless app is packaged (electron-builder).
-  // NODE_ENV is unreliable — electron-vite preview sets it to "production"
-  // even though the app is not packaged. app.isPackaged is false in
-  // electron-vite dev/preview and true only in a built/distributed app.
-  const devToolsEnabled = wantDevTools || !app.isPackaged;
-
-  const isMac = process.platform === "darwin";
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    title: "AgentDock",
-    show: false, // Show after ready-to-show to avoid white flash
-    frame: isMac, // macOS uses native frame (traffic lights); Windows/Linux use custom titlebar
-    titleBarStyle: isMac ? "hiddenInset" : undefined, // macOS: hide title text, keep traffic lights
-    webPreferences: {
-      // electron-vite emits main → out/main/main.js, preload → out/preload/preload.mjs.
-      // Walk up one dir to find the sibling preload bundle.
-      preload: resolve(__dirname, "../preload/preload.mjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false, // preload needs node-pty access via main IPC
-      devTools: devToolsEnabled,
-    },
-  });
-
-  if (wantDevTools) {
-    mainWindow.webContents.once("did-finish-load", () => {
-      mainWindow?.webContents.openDevTools({ mode: "detach" });
-    });
-  }
-
-  // Allow F12 to toggle DevTools in development
-  if (devToolsEnabled) {
-    mainWindow.webContents.on("before-input-event", (event, input) => {
-      if (input.key === "F12" && input.type === "keyDown") {
-        if (event.sender.isDevToolsOpened()) {
-          event.sender.closeDevTools();
-        } else {
-          event.sender.openDevTools({ mode: "detach" });
-        }
-      }
-    });
-  }
-
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-  });
-
-  // Notify renderer when maximize state changes (for toggle button icon).
-  mainWindow.on("maximize", () => {
-    mainWindow?.webContents.send("window:maximize-change", true);
-  });
-  mainWindow.on("unmaximize", () => {
-    mainWindow?.webContents.send("window:maximize-change", false);
-  });
-
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-
-  return mainWindow;
-}
-
-// ============================================================
-// 自动更新 (electron-updater + GitHub Releases)
-// ============================================================
-
-// 模块级定时器引用，避免重复创建（macOS 重新 activate 时会多次调用 initAutoUpdater）
-let autoUpdateTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * 配置并启动自动更新检查。
- *
- * - 开发模式 (app.isPackaged === false): NO-OP。
- * - 生产模式: 启动时检查更新，之后每 4 小时检查一次。
- * - 更新源: GitHub Releases（由 electron-builder.yml 的 publish 段配置）。
- * - 事件通知渲染进程以展示更新状态 UI。
- * - 实际安装在下次退出时进行。
- *
- * 注意: 不接收 BrowserWindow 参数。直接通过模块级 mainWindow 读取最新窗口，
- * 避免闭包持有已销毁的窗口引用。
- */
-function initAutoUpdater(): void {
-  // 开发模式不检查更新
-  if (!app.isPackaged) {
-    log.info("autoUpdater: skipped (not packaged)");
-    return;
-  }
-
-  autoUpdater.logger = log;
-
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-
-  // 避免重复注册监听器（macOS activate 等场景）
-  autoUpdater.removeAllListeners();
-
-  const sendToRenderer = (channel: string, payload?: unknown): void => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(channel, payload);
-    }
-  };
-
-  // 转发事件到渲染进程
-  autoUpdater.on("checking-for-update", () => {
-    log.info("autoUpdater: checking for update");
-    sendToRenderer("update:checking");
-  });
-
-  autoUpdater.on("update-available", (info) => {
-    log.info({ version: info.version }, "autoUpdater: update available");
-    sendToRenderer("update:available", info);
-  });
-
-  autoUpdater.on("update-not-available", (info) => {
-    log.info({ version: info.version }, "autoUpdater: update not available");
-    sendToRenderer("update:not-available", info);
-  });
-
-  autoUpdater.on("download-progress", (progress) => {
-    log.info({ percent: progress.percent }, "autoUpdater: download progress");
-    sendToRenderer("update:download-progress", progress);
-  });
-
-  autoUpdater.on("update-downloaded", (info) => {
-    log.info({ version: info.version }, "autoUpdater: update downloaded");
-    sendToRenderer("update:downloaded", info);
-  });
-
-  autoUpdater.on("error", (err) => {
-    log.error({ err }, "autoUpdater: error");
-    sendToRenderer("update:error", { message: err.message });
-  });
-
-  // 启动时检查
-  void autoUpdater.checkForUpdatesAndNotify().then((result) => {
-    log.info({ result }, "autoUpdater: initial check complete");
-  }).catch((err) => {
-    log.warn({ err }, "autoUpdater: initial check failed");
-  });
-
-  // 每 4 小时定期检查（先清理已有定时器避免累积）
-  if (autoUpdateTimer) clearInterval(autoUpdateTimer);
-  const FOUR_HOURS = 4 * 60 * 60 * 1000;
-  autoUpdateTimer = setInterval(() => {
-    void autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-      log.warn({ err }, "autoUpdater: periodic check failed");
-    });
-  }, FOUR_HOURS);
-
-  if (typeof autoUpdateTimer.unref === "function") autoUpdateTimer.unref();
-}
-
 async function bootstrap() {
   log.info({ pid: process.pid }, "AgentDock main starting");
 
   // 1. Spawn the daemon (Phase 1: Hono server)
-  // Tell daemon-manager to use non-detached spawn (Electron's process
-  // tree cleanup can kill detached children on Windows).
   process.env.AGENTDOCK_ELECTRON = "1";
-  // Daemon is a machine-level singleton at ~/.agentdock/ — all Electron
-  // instances on this machine share it. No env override; the path is
-  // hardcoded so there's exactly one daemon per developer machine.
   daemonManager = new DaemonManager();
-  // Phase 3: when running from the bundled main.js, the original
-  // __dirname-relative lookup for `daemon.js` / `daemon.ts` doesn't work
-  // (main is at out/main/main.js, daemon is at plugins/daemon.ts).
-  // Tell the manager to spawn an explicit entry point.
-  //
-  // 打包后：daemon 已预编译为 out/daemon/daemon.cjs，通过 Electron
-  // 的 Node 模式（ELECTRON_RUN_AS_NODE=1）运行，无需 bun。
-  // 开发环境：通过 bun 运行 plugins/daemon.ts。
+
   if (app.isPackaged) {
     daemonManager.daemonEntry = resolve(__dirname, "../daemon/daemon.cjs");
-    // 打包后不使用 bun（用户机器上没有 bun）
     delete process.env.AGENTDOCK_USE_BUN;
-    // 注意：不要在主进程设置 ELECTRON_RUN_AS_NODE，否则 Electron 的
-    // 渲染器/GPU 进程会退化为 Node 模式，导致 loadFile 失败。
-    // ELECTRON_RUN_AS_NODE 由 daemon-manager.ts 在 spawn daemon 时单独注入。
     log.info({ entry: daemonManager.daemonEntry }, "packaged mode: using compiled daemon");
   } else {
     daemonManager.daemonEntry = resolve(__dirname, "../../plugins/daemon.ts");
@@ -571,34 +185,21 @@ async function bootstrap() {
     log.info({ port: client.port }, "daemon connected");
   } catch (err) {
     log.error({ err, msg: String(err) }, "failed to start daemon");
-    // Surface the failure to stderr but guard against EPIPE (Electron's
-    // error dialog tries to forward to DevTools; if no renderer is
-    // listening, the write fails with EPIPE and an uncaught-exception
-    // dialog appears on top of our own).
     try {
       process.stderr.write(`[agentdock] daemon start failed: ${String(err)}\n`);
     } catch {
       // stderr already closed; nothing to do.
     }
-    // Phase 4+ will degrade gracefully (show a UI banner); for now, exit.
     app.exit(1);
     return;
   }
 
-  // v1 client registration + heartbeat — needed for /debug/clients and
-  // daemon-client-lifecycle E2E. v2 path uses /sync for liveness, but v1
-  // routes still exist and some tests depend on them.
-  await registerClientWithDaemon();
-  startHeartbeatLoop();
+  // v1 client registration + heartbeat
+  await registerClientWithDaemon(daemonClient, clientId);
+  heartbeatTimer = startHeartbeatLoop(daemonClient, clientId, heartbeatTimer);
 
   // 2. Register ALL IPC handlers (Phase 4: 29 channels + 3 daemon channels)
 
-  // Global projects DB — production default is ~/.agentdock/projects.db.
-  // In dev mode (AGENTDOCK_DEV_INSTANCE set by scripts/dev-instance.ts, the
-  // PR-2 follow-up), the DB follows the per-instance userData so multiple dev
-  // AgentDock instances do not collide on the same SQLite file. Today, the
-  // override is wired through unconditionally so any caller can opt in by
-  // setting the env var; the dev script itself lands in PR-2.
   const isDevInstance =
     typeof process.env.AGENTDOCK_DEV_INSTANCE === "string" &&
     process.env.AGENTDOCK_DEV_INSTANCE !== "";
@@ -655,13 +256,8 @@ async function bootstrap() {
     getGlobalDb: () => globalDbHandle?.db ?? null,
   };
 
-  // Cache the v2 flag for this boot — env is static after process start.
   const v2Enabled = resolveV2Enabled();
 
-  // P9: when v2 is enabled (default in Stage 1), build the v2 PortService
-  // and SSE consumer. v2 service handles /session/create → /claim × N →
-  // /session/activate with fencingToken caching and lease renewal. SSE
-  // consumer forwards /events to renderer via daemon:events:push.
   if (v2Enabled) {
     if (cachedDaemonPort <= 0) {
       log.warn("v2 enabled but daemon port not bound — v2 service will not start");
@@ -682,12 +278,9 @@ async function bootstrap() {
       sseConsumer = new SseConsumer({
         baseUrl: `http://127.0.0.1:${cachedDaemonPort}`,
         onEvent: (e) => {
-          // Filter heartbeats — too noisy for the renderer.
           if (e.event === "heartbeat") return;
           log.debug({ event: e.event, seq: e.seq }, "sse event");
-          // §7.3, §11.3 #8: Apply event to SyncApplier state
           v2State = dispatchEvent(v2State, e);
-          // Push serialized state to renderer
           const serialized = serializeForPush(v2State, clientId);
           if (mainWindow?.webContents) {
             mainWindow.webContents.send("daemon:v2State", serialized);
@@ -696,33 +289,31 @@ async function bootstrap() {
         onReconnect: () => {
           log.info("sse reconnected");
         },
-        // §5.3 — 断线立即触发: 拉一次 /sync 全量同步, 比对本地 v2 sessions
-        // 与 daemon 状态, 对缺失/漂移的 session 走重注册(经过 RECOVERING 闸门).
         onDisconnect: () => {
           log.warn("sse disconnected — triggering §5.3 full re-sync");
-          void fullResyncAfterDisconnect(cachedDaemonPort, v2PortService);
+          void fullResyncAfterDisconnect(
+            cachedDaemonPort, v2PortService, clientId,
+            () => sseConsumer?.getLastSeq() ?? 0,
+            () => v2State, (s) => { v2State = s; },
+          );
         },
-        // §7.3 — daemon 显式要求重同步 (环形缓冲溢出 / 进程重启): 立即走
-        // §5.3 全量重同步, 不等 30s 兜底轮询, 否则增量事件会丢失.
         onResyncRequired: () => {
           log.warn("sse resync-required — triggering §7.3 full re-sync");
-          void fullResyncAfterDisconnect(cachedDaemonPort, v2PortService);
+          void fullResyncAfterDisconnect(
+            cachedDaemonPort, v2PortService, clientId,
+            () => sseConsumer?.getLastSeq() ?? 0,
+            () => v2State, (s) => { v2State = s; },
+          );
         },
         onClose: () => {
           log.warn("sse closed");
         },
       });
       sseConsumer.start();
-      // §7 — 30s 全量 sync 循环 (兼 heartbeat). v2 path 走 /sync, 兼
-      // 维持 daemon 端 client 活性 (否则 HEARTBEAT_TIMEOUT 90s 会把
-      // 我们的 session 整批释放). SSE 推送的是增量, /sync 提供 fallback
-      // 兜底 + 全量状态修正. lastSeq 从 sseConsumer.getLastSeq() 读真实水位.
-      startV2SyncLoop(cachedDaemonPort, () => sseConsumer?.getLastSeq() ?? 0);
+      v2SyncTimer = startV2SyncLoop(cachedDaemonPort, () => sseConsumer?.getLastSeq() ?? 0, clientId, v2SyncTimer);
       log.info({ port: cachedDaemonPort }, "AGENTDOCK_V2 enabled");
 
-      // §4.3.2 — 30s 周期性磁盘扫描. daemon 不主动扫盘, 人工 cp 建出来的
-      // worktree 只能靠 syncProject 兜底. syncProject 自带 5s 节流, 30s
-      // 周期不会过频. 用最小 DbContext (syncProject 只读 6 个 getter).
+      // §4.3.2 — 30s periodic disk scan.
       const periodicSyncCtx = {
         getProjectPath: () => activeProjectPath,
         setProjectPath: (p: string) => { activeProjectPath = p; },
@@ -740,7 +331,7 @@ async function bootstrap() {
           .catch((err) => log.debug({ err }, "periodic syncProject failed"));
       }, HEARTBEAT_INTERVAL_MS);
       if (typeof periodicSyncTimer!.unref === "function") periodicSyncTimer!.unref();
-      // 立即跑一次, 不等 30s
+      // Run once immediately.
       if (activeProjectPath) {
         void syncProject(activeProjectPath, periodicSyncCtx as Parameters<typeof syncProject>[1])
           .catch((err) => log.debug({ err }, "periodic syncProject (initial) failed"));
@@ -773,9 +364,7 @@ async function bootstrap() {
     return process.platform;
   });
 
-  // E2E reset handler — exposes __e2eResetMainState() on globalThis so
-  // Playwright tests can reset main process state between tests in REUSE
-  // mode. Only active when NODE_ENV=test. See electron/main/e2e-reset.ts.
+  // E2E reset handler
   registerE2eReset({
     getProjectPath: () => activeProjectPath,
     setProjectPath: (p) => { activeProjectPath = p; },
@@ -805,10 +394,7 @@ async function bootstrap() {
     },
   });
 
-  // Auto-init the active project to the current working directory so the
-  // renderer's useProjects hook (which calls db:projects:list on mount)
-  // works without an explicit db:init round-trip. Matches the original
-  // api.ts behavior where the cwd was treated as the implicit project.
+  // Auto-init the active project to the current working directory.
   try {
     activeProjectPath = process.cwd();
     log.info({ projectPath: activeProjectPath }, "auto-set active project to cwd");
@@ -818,13 +404,19 @@ async function bootstrap() {
 
   log.info({ ipcChannels: IPC_CHANNEL_COUNT }, "IPC handlers registered");
 
-  // Now that activeProjectPath is set + DB module knows where to look,
-  // run the deferred reconcile. (registerClient + heartbeat happened
-  // earlier; reconcile needs activeProjectPath so we do it here.)
-  await reconcileAndDeclareSessions();
+  // Run the deferred reconcile.
+  await reconcileAndDeclareSessions({
+    activeProjectPath,
+    v2PortService,
+    cachedDaemonPort,
+    globalDbHandle,
+    reallocatedQueue,
+    clientId,
+  });
 
   // 3. Create the window and load the renderer
-  const win = createWindow();
+  const win = createWindow((w) => { mainWindow = w; });
+  win.on("closed", () => { mainWindow = null; });
 
   // Kick off background font download — non-blocking, notifies renderer when done.
   void ensureFontsReady(win);
@@ -849,19 +441,11 @@ async function bootstrap() {
   log.info("window loaded");
 
   // 4. 初始化自动更新（开发模式为 NO-OP）
-  initAutoUpdater();
+  initAutoUpdater(() => mainWindow);
 }
 
-// Register the custom font protocol after the app is ready — required by
-// Electron 42+ where protocol.handle implicitly accesses app.defaultSession
-// which is only available after app.whenReady(). Must still be called before
-// createWindow() so the protocol resolves in the renderer.
+// Register the custom font protocol after the app is ready.
 // In dev mode Vite serves fonts from public/fonts/, so the protocol is a no-op.
-
-// Register the scheme BEFORE app.ready so Chromium grants CORS / fetch
-// permissions — without this, @font-face requests from a file:// origin
-// are blocked by CORS policy ("Cross origin requests are only supported
-// for protocol schemes: chrome, chrome-extension, ...").
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "agentdock-fonts",
@@ -874,19 +458,13 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// Dev mode userData isolation: when AGENTDOCK_USER_DATA_DIR is set, redirect
-// Electron's userData path before anything else reads it. This must run
-// before app.whenReady() since some Electron APIs (localStorage, GPU cache)
-// resolve userData at ready time.
-// In production this env var is never set, so the default %APPDATA%/AgentDock
-// path applies.
+// Dev mode userData isolation.
 if (process.env.AGENTDOCK_USER_DATA_DIR) {
   const devUserData = resolve(process.env.AGENTDOCK_USER_DATA_DIR);
   app.setPath("userData", devUserData);
 }
 
-// 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock，
-// 避免 GPU 缓存/IndexedDB 写入只读的安装目录导致渲染进程崩溃。
+// 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock.
 if (app.isPackaged) {
   app.setPath("userData", resolve(app.getPath("appData"), "AgentDock"));
   app.setPath("sessionData", resolve(app.getPath("appData"), "AgentDock"));
@@ -901,9 +479,6 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", (e) => {
-  // Synchronous cleanup of PTYs (Phase 4+), unregister client, then exit.
-  // Currently Phase 3 has no PTYs to clean; just shut down the daemon
-  // child so we don't leak it.
   e.preventDefault();
   log.info("AgentDock shutting down");
 
@@ -916,8 +491,7 @@ app.on("before-quit", (e) => {
     periodicSyncTimer = null;
   }
 
-  // P9: stop the SSE consumer + dispose v2 service so their timers
-  // don't keep the event loop alive past app exit.
+  // P9: stop the SSE consumer + dispose v2 service.
   if (sseConsumer) {
     sseConsumer.stop();
     sseConsumer = null;
@@ -930,10 +504,8 @@ app.on("before-quit", (e) => {
   // Close the global projects DB handle.
   globalDbHandle?.close();
 
-  // Unregister BEFORE killing the daemon child. If we're the leader,
-  // the daemon dies in daemonManager.shutdown() and the unregister
-  // call would race; we fire-and-forget with a short timeout.
-  const unregister = unregisterClientWithDaemon();
+  // Unregister BEFORE killing the daemon child.
+  const unregister = unregisterClientWithDaemon(daemonClient, clientId);
   const timeout = new Promise((r) => setTimeout(r, 500));
   Promise.race([unregister, timeout]).finally(() => {
     if (daemonManager) {
@@ -948,32 +520,18 @@ app.on("before-quit", (e) => {
 });
 
 app.on("window-all-closed", () => {
-  // macOS keeps apps alive without windows; everywhere else we quit.
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {
-  // macOS dock-click reopens a window when none are open.
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    const win = createWindow((w) => { mainWindow = w; });
+    win.on("closed", () => { mainWindow = null; });
   }
 });
 
 /**
  * Swallow EPIPE / ERR_IPC_CHANNEL_CLOSED during shutdown.
- *
- * Symptom (real, reported): user creates a session and closes the window
- * mid-lifecycle. The fire-and-forget `runLifecycle` keeps running; it
- * hits a `console.log` (from session-lifecycle's tracing) whose
- * underlying stdout pipe has been closed by Electron's window-teardown
- * → EPIPE → Node sees an uncaught exception → Electron pops a "A
- * JavaScript error occurred in the main process" dialog.
- *
- * The two error families are both shutdown noise:
- *   - EPIPE: stdout/stderr pipe gone (console.log, pino, etc.)
- *   - ERR_IPC_CHANNEL_CLOSED: `event.sender.send` on a destroyed WebContents
- *
- * Anything else still surfaces — those are real bugs we want to see.
  */
 function isShutdownNoise(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -983,112 +541,8 @@ function isShutdownNoise(err: unknown): boolean {
   return false;
 }
 
-/**
- * §5.3 — 断线立即全量重注册.
- *
- * 触发: SseConsumer.onDisconnect (TCP 断开但 reconnect 未完成).
- * 步骤:
- *   1. POST /sync — 拿到 daemon 当前三表权威快照 (含 ports 数组).
- *   2. 对**所有**本地 active/creating session 调 /claim 重新注册
- *      (走 RECOVERING 闸门, expected 集合放行), 携带**当前端口作
- *      preferredPort** (从 /sync 响应的 ports 字段按 (sessionId, name)
- *      查找). 这样 daemon 端已知端口的 session 不会被换掉, RECOVERING
- *      窗口收不齐的场景 (daemon WAL 滞后) 也能让 client 主动重建.
- *   3. /claim 失败 (RECOVERING 期陌生 sessionId) 仅打 warn, 不抛 —
- *      SSE 重连后由后续增量 + onResyncRequired 继续收敛.
- *
- * 错误处理: 任何步骤失败仅打 warn, 不抛.
- */
-async function fullResyncAfterDisconnect(
-  daemonPort: number,
-  v2: V2PortServiceHandle | null,
-): Promise<void> {
-  if (!v2) return; // v1 模式或未启用 — 留给 v1 sync/declare 自己处理
-  try {
-    // P0+ — lastSeq 用 sseConsumer 真实水位, 避免 daemon replaySince(0)
-    // 在长会话后回放数百条历史事件. SSE 重连时 resetSeq() 自动归零,
-    // 下次断线重连会自然 fall back 到完整重同步.
-    const syncRes = await fetch(`http://127.0.0.1:${daemonPort}/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        pid: process.pid,
-        lastSeq: sseConsumer?.getLastSeq() ?? 0,
-      }),
-    });
-    if (!syncRes.ok) {
-      log.warn({ status: syncRes.status }, "§5.3 resync /sync non-OK");
-      return;
-    }
-    const body = (await syncRes.json()) as {
-      sessions: Array<{ sessionId: string; status: string }>;
-      ports?: Array<{ port: number; sessionId: string; name: string }>;
-      snapshotSeq?: number;
-      owners?: Array<{ sessionId: string; clientId: string; pid: number; fencingToken: number }>;
-    };
-    // §7.3, §11.3 #8: Apply snapshot to SyncApplier state
-    if (typeof body.snapshotSeq === "number") {
-      v2State = applySnapshot(v2State, body as V2SyncSnapshot);
-      log.debug({ snapshotSeq: body.snapshotSeq }, "§7.3 applied snapshot to v2State");
-    }
-    // 索引: sessionId → (name → port). 给 /claim 携带 preferredPort 用.
-    const portsBySid = new Map<string, Map<string, number>>();
-    for (const p of body.ports ?? []) {
-      let inner = portsBySid.get(p.sessionId);
-      if (!inner) {
-        inner = new Map();
-        portsBySid.set(p.sessionId, inner);
-      }
-      inner.set(p.name, p.port);
-    }
-    // §5.3 — 对**所有**本地 active/creating session 走 /claim 重注册.
-    // 不只针对 daemon 缺失的 session — 哪怕 daemon 端还在, RECOVERING
-    // 闸门放行时 client 端再 claim 一次可让 daemon 三表确认 owner 身份
-    // (有助 §5.2 收齐 reported 集合, 缩短 RECOVERING 窗口).
-    const known = v2.listKnownSessions();
-    for (const ks of known) {
-      const portMap = portsBySid.get(ks.sessionId);
-      log.info(
-        {
-          sessionId: ks.sessionId,
-          portKeys: ks.portKeys,
-          preferredPorts: portMap ? Object.fromEntries(portMap) : null,
-        },
-        "§5.3 re-claim session after disconnect",
-      );
-      for (const name of ks.portKeys) {
-        const requestedPort = portMap?.get(name); // undefined = daemon 无记录
-        try {
-          const res = await fetch(`http://127.0.0.1:${daemonPort}/claim`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: ks.sessionId,
-              fencingToken: ks.fencingToken,
-              name,
-              ...(requestedPort !== undefined ? { requestedPort } : {}),
-            }),
-          });
-          if (!res.ok) {
-            log.warn(
-              { status: res.status, name, sessionId: ks.sessionId },
-              "§5.3 re-claim failed (may be RECOVERING)",
-            );
-          }
-        } catch (err) {
-          log.warn({ err, name }, "§5.3 re-claim network failed");
-        }
-      }
-    }
-  } catch (err) {
-    log.warn({ err }, "§5.3 full resync failed");
-  }
-}
-
 process.on("uncaughtException", (err) => {
   if (isShutdownNoise(err)) {
-    // Best-effort log via stderr — if stderr itself is broken, swallow.
     try {
       process.stderr.write(`[main] swallowed shutdown noise: ${(err as Error).message}\n`);
     } catch {
