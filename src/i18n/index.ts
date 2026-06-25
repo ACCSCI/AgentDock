@@ -95,9 +95,18 @@ i18n.use(initReactI18next).init({
   },
 });
 
+// 初始化加载保存的非默认语言(英文同步加载,其他语言需异步)
+const initialLang = getSavedLanguage();
+if (initialLang !== "en") {
+  loadLanguage(initialLang as SupportedLanguage).catch((err) => {
+    console.error("Failed to load initial language:", err);
+  });
+}
+
 /**
  * 异步加载指定语言的所有 namespace 翻译文件。
  * 调用 i18n.addResourceBundle 逐个注入。
+ * 跳过已加载的 namespace,容错处理单文件加载失败。
  */
 export async function loadLanguage(lang: SupportedLanguage): Promise<void> {
   if (lang === "en") {
@@ -109,8 +118,15 @@ export async function loadLanguage(lang: SupportedLanguage): Promise<void> {
   const entries = Object.entries(zhNamespaceModules);
   await Promise.all(
     entries.map(async ([ns, loadFn]) => {
-      const mod = await loadFn();
-      i18n.addResourceBundle(lang, ns, mod.default, true, true);
+      if (i18n.hasResourceBundle(lang, ns)) {
+        return;
+      }
+      try {
+        const mod = await loadFn();
+        i18n.addResourceBundle(lang, ns, mod.default, true, true);
+      } catch (err) {
+        console.error(`Failed to load namespace ${ns} for ${lang}:`, err);
+      }
     }),
   );
 
