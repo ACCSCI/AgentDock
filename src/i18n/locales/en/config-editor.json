@@ -35,6 +35,7 @@
   "failAbort": "Fail & abort",
   "executionMode": "Execution mode",
   "asyncExecution": "Async",
+  "syncExecution": "Sync",
   "addHook": "+ Add Hook",
   "portAllocation": "Port Allocation (env.ports)",
   "portCount": "{{count}} ports",
