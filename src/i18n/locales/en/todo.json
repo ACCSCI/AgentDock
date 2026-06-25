@@ -1,10 +1,13 @@
 {
   "todo": "Todo",
   "addTask": "Add a task...",
+  "openProjectFirst": "Open a project first",
+  "openProjectToAddTasks": "Open a project to add tasks",
   "noTasks": "No tasks yet",
   "dragToReorder": "Drag to reorder",
   "doubleClickToEdit": "Double-click: edit",
   "rightClickToCopy": "Right-click: copy",
   "delete": "Delete",
-  "copied": "Copied!"
+  "copied": "Copied!",
+  "copyFailed": "Copy failed"
 }

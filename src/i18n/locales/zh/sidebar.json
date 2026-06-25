@@ -12,5 +12,8 @@
   "viewPullRequests": "查看 Pull Requests",
   "newSession": "新建 Session",
   "collapseSidebar": "收起侧栏",
-  "dragToResize": "拖拽调整宽度"
+  "dragToResize": "拖拽调整宽度",
+  "cleanOrphans": "清理孤儿目录",
+  "copyCompatPrompt": "复制 AgentDock 兼容提示词",
+  "settings": "设置"
 }

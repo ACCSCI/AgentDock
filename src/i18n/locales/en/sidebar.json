@@ -12,5 +12,8 @@
   "viewPullRequests": "View Pull Requests",
   "newSession": "New Session",
   "collapseSidebar": "Collapse sidebar",
-  "dragToResize": "Drag to resize"
+  "dragToResize": "Drag to resize",
+  "cleanOrphans": "Clean orphan directories",
+  "copyCompatPrompt": "Copy AgentDock compatibility prompt",
+  "settings": "Settings"
 }
