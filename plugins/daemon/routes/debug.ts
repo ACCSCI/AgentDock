@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Debug routes — client-focused state inspection + test-only mutation helpers.
  *

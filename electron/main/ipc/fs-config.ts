@@ -120,4 +120,17 @@ export function registerFsAndConfig(
       return { success: true, yaml };
     },
   );
+
+  // settings:get — read global app settings
+  ipcMain.handle(IPC_CHANNELS["settings:get"], async () => {
+    const { getAllSettings } = await import("../../../plugins/global-settings.js");
+    return getAllSettings();
+  });
+
+  // settings:update — update global app settings
+  ipcMain.handle(IPC_CHANNELS["settings:update"], async (_e, params: Record<string, unknown>) => {
+    const { updateSettings } = await import("../../../plugins/global-settings.js");
+    updateSettings(params as { portPoolStart?: number; portPoolEnd?: number });
+    return { success: true };
+  });
 }

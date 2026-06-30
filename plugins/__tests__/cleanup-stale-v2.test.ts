@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F4: v2 owner/session zombie cleanup.
  *

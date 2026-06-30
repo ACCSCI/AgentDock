@@ -8,9 +8,9 @@ import { useTranslation } from "../i18n/react";
 import { setLanguage, SUPPORTED_LANGUAGES, type SupportedLanguage } from "../i18n";
 
 // Surface for window.api (exposed by preload.ts via contextBridge).
-// Mirrors the inline declarations in components/CustomTitleBar.tsx and
-// components/DaemonStatusBar.tsx — each consumer file declares just the
-// slice it uses rather than pulling in the full ApiSurface.
+// Mirrors the inline declaration in components/CustomTitleBar.tsx — each
+// consumer file declares just the slice it uses rather than pulling in the
+// full ApiSurface.
 interface UpdateInfo {
   version?: string;
 }
@@ -23,25 +23,7 @@ type CheckForUpdatesResult =
   | { status: "downloaded"; info: { version: string } }
   | { status: "error"; message: string };
 
-declare global {
-  interface Window {
-    api: {
-      updates: {
-        onChecking: (cb: () => void) => () => void;
-        onAvailable: (cb: (info: UpdateInfo) => void) => () => void;
-        onNotAvailable: (cb: (info: UpdateInfo) => void) => () => void;
-        onDownloadProgress: (cb: (progress: { percent: number }) => void) => () => void;
-        onDownloaded: (cb: (info: UpdateInfo) => void) => () => void;
-        onError: (cb: (err: { message: string }) => void) => () => void;
-      };
-      app: {
-        version: () => Promise<{ version: string; isPackaged: boolean }>;
-        checkForUpdates: () => Promise<CheckForUpdatesResult>;
-        quitAndInstall: () => Promise<{ ok: boolean }>;
-      };
-    };
-  }
-}
+// window.api type is inferred from contextBridge in preload.ts
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -310,6 +292,28 @@ function SettingsPage() {
   const router = useRouter();
   const { resetShortcuts } = useStore();
   const currentLang = i18n.language as SupportedLanguage;
+  const [portPoolStart, setPortPoolStart] = useState(30000);
+  const [portPoolEnd, setPortPoolEnd] = useState(30100);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Load settings on mount
+  useEffect(() => {
+    const api = window.api;
+    if (!api?.settings?.get) return;
+    api.settings.get().then((settings) => {
+      setPortPoolStart(settings.portPoolStart);
+      setPortPoolEnd(settings.portPoolEnd);
+      setSettingsLoaded(true);
+    }).catch(() => setSettingsLoaded(true));
+  }, []);
+
+  const handlePortPoolChange = useCallback(async (start: number, end: number) => {
+    setPortPoolStart(start);
+    setPortPoolEnd(end);
+    const api = window.api;
+    if (!api?.settings?.update) return;
+    await api.settings.update({ portPoolStart: start, portPoolEnd: end });
+  }, []);
 
   const handleLanguageChange = async (lang: SupportedLanguage) => {
     await setLanguage(lang);
@@ -353,6 +357,45 @@ function SettingsPage() {
       <div className="settings-section">
         <h3 className="settings-section-title">{t("shortcuts", { ns: "settings" })}</h3>
         <ShortcutRow action="dirSearchFocus" label={t("focusDirSearch", { ns: "settings" })} />
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">端口池配置</h3>
+        <div className="settings-port-pool">
+          <div className="settings-port-pool-row">
+            <label className="settings-port-pool-label">端口范围:</label>
+            <input
+              type="number"
+              className="settings-port-pool-input"
+              value={portPoolStart}
+              min={1024}
+              max={65535}
+              onChange={(e) => {
+                const start = parseInt(e.target.value, 10);
+                if (Number.isFinite(start)) {
+                  handlePortPoolChange(start, portPoolEnd);
+                }
+              }}
+            />
+            <span className="settings-port-pool-separator">-</span>
+            <input
+              type="number"
+              className="settings-port-pool-input"
+              value={portPoolEnd}
+              min={1024}
+              max={65535}
+              onChange={(e) => {
+                const end = parseInt(e.target.value, 10);
+                if (Number.isFinite(end)) {
+                  handlePortPoolChange(portPoolStart, end);
+                }
+              }}
+            />
+          </div>
+          <p className="settings-port-pool-hint">
+            会话创建时将从该范围分配端口。每个会话需要 5 个端口。
+          </p>
+        </div>
       </div>
 
       <div className="settings-footer">

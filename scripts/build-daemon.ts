@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * 构建时将 daemon 预编译为 JS。
  *

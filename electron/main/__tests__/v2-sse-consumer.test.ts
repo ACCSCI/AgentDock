@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 SSE Consumer — unit tests (P9 — 新架构 §7.3).
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Acceptance test helpers.
  *

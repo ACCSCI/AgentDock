@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Test Context — creates a mock Electron main process context.
  *

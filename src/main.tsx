@@ -37,7 +37,7 @@ window.addEventListener("unhandledrejection", (event) => {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 3_000,
       refetchOnWindowFocus: false,
     },
   },

@@ -4,7 +4,16 @@ import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import * as schema from "./schema.js";
 
-const DB_DIR = ".data";
+/**
+ * Database location: <installDir>/data/db.sqlite
+ *
+ * In production (packaged): app.getPath("userData")/data/db.sqlite
+ * In dev mode: <cwd>/data/db.sqlite
+ *
+ * Single-instance architecture: one DB for all projects (projects + sessions + todos).
+ * The global DB at ~/.agentdock/projects.db is no longer used.
+ */
+const DB_DIR = "data";
 const DB_FILE = "db.sqlite";
 
 /**
@@ -138,6 +147,27 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
       PRAGMA foreign_keys = ON;
     `);
   },
+  // v10: Ensure projects table exists (single-DB merge).
+  // In the single-instance architecture, all tables coexist in one DB.
+  // The projects table was dropped in v9 (when it moved to global DB),
+  // but now we need it back in the unified database.
+  (sqlite) => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+  },
+  // v11: Add session lifecycle status and step progress columns.
+  // - status: "creating" | "active" | "deleting" (null = legacy row without status)
+  // - steps: JSON array of { step, status, duration?, error? } for lifecycle progress
+  (sqlite) => {
+    addColumnIfMissing(sqlite, "sessions", "status", "TEXT");
+    addColumnIfMissing(sqlite, "sessions", "steps", "TEXT");
+  },
 ];
 
 /** Target schema version after all migrations are applied. */
@@ -169,8 +199,25 @@ function getUserVersion(sqlite: DatabaseSync): number {
   return row?.user_version ?? 0;
 }
 
-export function getDbPath(projectPath: string): string {
-  return path.join(projectPath, DB_DIR, DB_FILE);
+/**
+ * Database base path — set by electron/main.ts at startup.
+ * In production: app.getPath("userData")
+ * In dev: process.cwd()
+ */
+let dbBasePath: string | null = null;
+
+/**
+ * Set the database base path. Called once at app startup from electron/main.ts.
+ * After this, all DB operations use <basePath>/data/db.sqlite.
+ */
+export function setDbBasePath(basePath: string): void {
+  dbBasePath = basePath;
+}
+
+export function getDbPath(_projectPath?: string): string {
+  // Single-DB architecture: always use the install directory
+  const base = dbBasePath ?? process.cwd();
+  return path.join(base, DB_DIR, DB_FILE);
 }
 
 /**
@@ -182,18 +229,17 @@ export function getDbPath(projectPath: string): string {
  * teardown. The legacy `createDb(projectPath)` helper below returns just
  * the Drizzle wrapper for backward compatibility with the unit tests.
  */
-export function openDb(projectPath: string): {
+export function openDb(_projectPath?: string): {
   db: ReturnType<typeof drizzle<typeof schema>>;
   sqlite: DatabaseSync;
 } {
-  const dbDir = path.join(projectPath, DB_DIR);
+  const dbPath = getDbPath();
+  const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
   }
 
-  const dbPath = getDbPath(projectPath);
   const sqlite = new DatabaseSync(dbPath);
-  // node:sqlite has no .pragma() shortcut — issue raw PRAGMA statements.
   sqlite.exec("PRAGMA journal_mode = WAL");
   sqlite.exec("PRAGMA foreign_keys = ON");
 
@@ -273,8 +319,10 @@ export function requireActiveDb(): DrizzleDb {
 }
 
 export function ensureActiveDb(projectPath: string): DrizzleDb {
-  if (activeProjectPath === projectPath && activeDb) return activeDb;
-  resetActiveDb();
+  // Single-DB architecture: database is at a fixed path, no need to close/reopen
+  // when switching projects. Just initialize if not yet done.
+  if (activeDb) return activeDb;
+
   const { db, sqlite } = openDb(projectPath);
   activeDb = db;
   activeSqlite = sqlite;

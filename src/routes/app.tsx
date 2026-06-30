@@ -1,7 +1,7 @@
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { IconSidebar } from "../components/IconSidebar";
 import { SessionSidebar } from "../components/SessionSidebar";
-import { useV2Projects } from "../lib/queries";
+import { useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 
 export const Route = createFileRoute("/app")({
@@ -10,16 +10,13 @@ export const Route = createFileRoute("/app")({
 
 function AppLayout() {
   const { activeProjectId } = useStore();
-  const { data: projects } = useV2Projects();
-  // Match by id first (nanoid from DB), then by path fallback (v2State
-  // path-based IDs when the project was opened by path rather than DB id).
-  const project = projects?.find((p) => p.id === activeProjectId)
-    ?? projects?.find((p) => p.path === activeProjectId);
+  const { data: projects } = useProjects();
+  const project = projects?.find((p) => p.id === activeProjectId);
 
   return (
     <div className="app-layout">
-      {project && <IconSidebar />}
-      <SessionSidebar />
+      <IconSidebar />
+      {project && <SessionSidebar />}
       <div className="app-workspace">
         <Outlet />
       </div>

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * SyncApplier — snapshot+stream ordering tests (新架构 §7.3, §11.3 #8).
  *

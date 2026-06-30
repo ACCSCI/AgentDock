@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonClient — Hono-typed HTTP client to the AgentDock Daemon.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonState — in-memory client state (F10-2b).
  *

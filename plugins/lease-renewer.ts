@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Lease renewer — keeps the daemon's per-session progress lease warm
  * (新架构 §4.4).

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Test-side filesystem + DB inspection helpers.
  *

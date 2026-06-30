@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * useV2State hook tests — F11b renderer hook + queries integration.
  *

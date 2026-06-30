@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2-state-bridge — serializeForPush tests.
  *

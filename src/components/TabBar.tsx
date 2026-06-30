@@ -4,7 +4,6 @@ import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
 import { GitInitConfirmModal } from "./GitInitConfirmModal";
-import { DaemonStatusBar } from "./DaemonStatusBar";
 
 export function TabBar() {
   const navigate = useNavigate();
@@ -69,7 +68,6 @@ export function TabBar() {
 
   return (
     <>
-      <DaemonStatusBar />
       <div className="tab-bar" data-testid="tab-bar">
       {openProjects.map((project) => (
         <div

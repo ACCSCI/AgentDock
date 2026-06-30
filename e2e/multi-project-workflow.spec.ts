@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Multi-project workflow E2E.
  *

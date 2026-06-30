@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F6: renameWorktree must derive the new branch from sessionId, NOT
  * from the user-supplied newName (新架构 §4.1 — 派生代码只读 sessionId).

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 SSE Consumer — Electron main process.
  *

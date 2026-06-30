@@ -44,13 +44,4 @@ export const TID = {
 
   // Settings page
   settingsPage: "settings-page",
-
-  // DaemonStatusBar (新架构 §2 + §11.1)
-  daemonStatusBar: "daemon-status-bar",
-  daemonState: "daemon-state",
-  daemonPid: "daemon-pid",
-  daemonPort: "daemon-port",
-  daemonProtocol: "daemon-protocol",
-  daemonCapabilities: "daemon-capabilities",
-  daemonError: "daemon-error",
 } as const;

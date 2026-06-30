@@ -34,84 +34,15 @@ function on<T = unknown>(channel: string, cb: (data: T, event: IpcRendererEvent)
 const api = {
   bootstrap: {
     health: () => invoke<{ daemon: string; vite: string; ipc: number }>("bootstrap:health"),
-    reallocated: () =>
-      invoke<
-        Array<{
-          sessionId: string;
-          oldPorts: Record<string, number>;
-          newPorts: Record<string, number>;
-        }>
-      >("bootstrap:reallocated"),
-    clientId: () => invoke<string>("bootstrap:clientId"),
-    /** P9: true when AGENTDOCK_V2=1 is set in the Electron main env. */
-    v2Enabled: () => invoke<boolean>("bootstrap:v2Enabled"),
+    // [OLD-DAEMON] reallocated: () => invoke<...>("bootstrap:reallocated"),
+    // [OLD-DAEMON] clientId: () => invoke<string>("bootstrap:clientId"),
+    // [OLD-DAEMON] v2Enabled: () => invoke<boolean>("bootstrap:v2Enabled"),
   },
 
-  // daemon (新架构 §13.1) — direct daemon API access for UI observability
-  // and E2E fault injection.
-  daemon: {
-    health: () =>
-      invoke<{
-        status: string;
-        protocolVersion: string;
-        schemaVersion: number;
-        state: string;
-        capabilities: string[];
-        pid: number;
-        port: number;
-        startedAt?: number;
-      }>("daemon:health"),
-    debugState: () => invoke<unknown>("daemon:debugState"),
-    // P6: v2 /sync full-snapshot. Returns the same v2 three-table shape
-    // (state, snapshotSeq, sessions, owners, ports) as a /sync response.
-    // Renderer applies this as the baseline, then only SSE events with
-    // seq > snapshotSeq — see SyncApplier in electron/main/sync-applier.ts.
-    sync: () =>
-      invoke<{
-        success: boolean;
-        state?: "RECOVERING" | "READY";
-        snapshotSeq?: number;
-        sessions?: Array<{
-          sessionId: string;
-          projectRoot: string;
-          displayName: string;
-          status: "creating" | "active" | "deleting";
-          createdAt: number;
-          ports: Record<string, number>;
-        }>;
-        owners?: Array<{
-          sessionId: string;
-          clientId: string;
-          pid: number;
-          fencingToken: number;
-        }>;
-        ports?: Array<{ port: number; sessionId: string; name: string }>;
-        serverTime?: number;
-        lastSeq?: number;
-        error?: string;
-      }>("daemon:sync"),
-    // F11b: Subscribe to daemon v2State push from main process.
-    // Main pushes serialized AppliedState via webContents.send("daemon:v2State", serialized).
-    // Renderer reconstructs Maps from the tuple format and applies to local state.
-    v2State: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      subscribe: (cb: (state: any) => void) => {
-        return on("daemon:v2State", cb);
-      },
-    },
-    faultInject: (path: string, body?: unknown) =>
-      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
-        "daemon:faultInject",
-        { path, body },
-      ),
-    // §3.5 末段 — 三态 net.connect 探测 (running/stopped/unknown).
-    // 纯展示用途, 不会反向影响端口归属.
-    probeRuntime: (port: number) =>
-      invoke<{ state: "running" | "stopped" | "unknown"; elapsedMs: number }>(
-        "daemon:probeRuntime",
-        { port },
-      ),
-  },
+  // [OLD-DAEMON] daemon channels — removed in single-instance architecture
+  // daemon: { health, debugState, sync, v2State, faultInject, probeRuntime, events:subscribe }
+
+  // [OLD-DAEMON] sessionsV2 channels — removed in single-instance architecture
 
   db: {
     init: (projectPath: string) => invoke<{ success: true }>("db:init", { projectPath }),
@@ -187,64 +118,11 @@ const api = {
       invoke<{ success: true }>("sessions:activate", { sessionId }),
   },
 
-  // P9: v2 daemon API — direct endpoints for renderer-driven lifecycle.
-  // Active when `bootstrap.v2Enabled()` returns true. The handler side
-  // forwards to /session/* /takeover /reassign on the daemon.
-  sessionsV2: {
-    create: (params: { projectId: string; name: string; baseBranch?: string }) =>
-      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
-        "sessions:v2:create",
-        params,
-      ),
-    delete: (params: { sessionId: string }) =>
-      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
-        "sessions:v2:delete",
-        params,
-      ),
-    rename: (params: { sessionId: string; name: string }) =>
-      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
-        "sessions:v2:rename",
-        params,
-      ),
-    reassign: (sessionId: string) =>
-      invoke<{ success: boolean; ports?: Record<string, number>; error?: string }>(
-        "sessions:v2:reassign",
-        { sessionId },
-      ),
-    status: (sessionId: string) =>
-      invoke<"creating" | "active" | "deleting" | null>("sessions:v2:status", { sessionId }),
-    takeover: (params: { sessionId: string; fromClientId?: string; fromPid?: number }) =>
-      invoke<{ success: boolean; status?: number; body?: unknown; error?: string }>(
-        "sessions:v2:takeover",
-        params,
-      ),
-  },
+  // [OLD-DAEMON] sessionsV2 channels — removed in single-instance architecture
+  // sessionsV2: { create, delete, rename, reassign, status, takeover }
 
-  /**
-   * P9 SSE event subscriber. Subscribes to the daemon's `/events` SSE
-   * stream via `daemon:events:subscribe`, then forwards every event on
-   * the `daemon:events:push` one-way channel to the supplied callback.
-   *
-   * Returns an unsubscribe function. Heartbeats are filtered server-side.
-   */
-  sse: {
-    subscribe: (cb: (e: { event: string; seq: number; data: unknown }) => void) => {
-      // Register the renderer-side listener first, then notify main to
-      // start forwarding. The order avoids losing events that arrive
-      // between subscribe() returning and the listener attaching.
-      const off = on<{ event: string; seq: number; data: unknown }>(
-        "daemon:events:push",
-        (payload) => cb(payload),
-      );
-      void invoke<{ success: boolean; error?: string }>("daemon:events:subscribe").catch(
-        (err) => {
-          // eslint-disable-next-line no-console
-          console.warn("[sse.subscribe] main refused:", err);
-        },
-      );
-      return off;
-    },
-  },
+  // [OLD-DAEMON] sse channels — removed in single-instance architecture
+  // sse: { subscribe }
 
   terminals: {
     create: (sessionId: string, shell?: string) =>
@@ -429,6 +307,13 @@ const api = {
         | { status: "error"; message: string }
       >("app:checkForUpdates"),
     quitAndInstall: () => invoke<{ ok: boolean }>("app:quitAndInstall"),
+  },
+
+  // Global app settings
+  settings: {
+    get: () => invoke<{ portPoolStart: number; portPoolEnd: number }>("settings:get"),
+    update: (updates: { portPoolStart?: number; portPoolEnd?: number }) =>
+      invoke<{ success: boolean }>("settings:update", updates),
   },
 
   // Per-project todo list

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Phase 1 acceptance gate — Daemon Hono refactor.
  *

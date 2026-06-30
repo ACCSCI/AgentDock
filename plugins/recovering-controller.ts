@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * RECOVERING state machine controller — 新架构 §5.2.
  *

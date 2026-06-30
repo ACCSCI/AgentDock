@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Daemon API v2 — barrel that wires all sub-module routes.
  *

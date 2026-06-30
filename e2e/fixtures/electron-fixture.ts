@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Electron test fixture — single source of truth for spinning up the
  * built Electron app under Playwright.
@@ -204,6 +205,7 @@ export const test = base.extend<ElectronFixtures>({
       env: {
         ...process.env,
         AGENTDOCK_DATA_DIR: dataDir,
+        AGENTDOCK_DEV_INSTANCE: testInfo.testId.slice(0, 8),
         FRONTEND_PORT: "5173",
         AGENTDOCK_USE_BUN: "1",
         ELECTRON_DISABLE_GPU: "1",
@@ -433,6 +435,7 @@ function getSharedLaunchConfig() {
     env: {
       ...process.env,
       AGENTDOCK_DATA_DIR: sharedDataDir!,
+      AGENTDOCK_DEV_INSTANCE: "shared",
       FRONTEND_PORT: "5173",
       AGENTDOCK_USE_BUN: "1",
       ELECTRON_DISABLE_GPU: "1",

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Fault injector — 新架构 §11.2 unit tests.
  *

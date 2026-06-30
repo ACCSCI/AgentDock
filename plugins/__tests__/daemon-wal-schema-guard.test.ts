@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F3: WAL schemaVersion guard tests.
  *

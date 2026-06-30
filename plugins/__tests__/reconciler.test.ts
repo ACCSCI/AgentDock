@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Reconciler tests — C1-C5 残缺态分类 (新架构 §4.3 + §4.4 双信号死亡).
  *

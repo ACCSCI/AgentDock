@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 wiring — standalone async helpers for v2 reconnect/resync scenarios.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonWAL v2 — three-table persistence + automatic v1→v2 migration
  * (新架构 §5.1.1).

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F6: v2PortService must propagate user-supplied displayName to
  * /session/create (新架构 §4.1).

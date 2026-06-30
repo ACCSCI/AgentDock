@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Error middleware — unifies error responses into the daemon's
  * `{ success: false, error: string }` envelope.

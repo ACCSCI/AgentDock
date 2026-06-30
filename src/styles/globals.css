@@ -2,7 +2,6 @@
 
 /* ── Component modules ─────────────────────────────────────────────── */
 @import "./components/tab-bar.css";
-@import "./components/daemon-status-bar.css";
 @import "./components/app-layout.css";
 @import "./components/session-card.css";
 @import "./components/session-status.css";

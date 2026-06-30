@@ -1,103 +1,67 @@
 /**
- * Sessions IPC handlers.
+ * Sessions IPC handlers — single-instance architecture.
  *
- * Each operation has two parts:
- *   1. Call the daemon via Hono client (for port allocation, state).
- *   2. Persist the result into the local SQLite (for the renderer's
- *      project/sessions view).
- *
- * This module deliberately mirrors the original api.ts logic so behavior
- * is preserved end-to-end. Phase 6 will move this into a cleaner split.
+ * Uses SessionManager directly for port allocation (no daemon HTTP).
+ * Lifecycle (worktree + hooks) is unchanged — only the PortService impl is swapped.
  */
 import { eq } from "drizzle-orm";
 import type { NodeSQLiteDatabase } from "drizzle-orm/node-sqlite";
 import { ipcMain } from "electron";
-import { writeFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
 import { writePortsToEnv } from "../../../plugins/port-write-env.js";
-import { loadConfig } from "../../../plugins/config.js";
+import { loadConfig, type HookDefinition } from "../../../plugins/config.js";
 import {
   createSessionLifecycle,
   type PortService,
-  type SessionPorts,
   type StepEvent,
 } from "../../../plugins/session-lifecycle.js";
-import { DaemonManager } from "../../../plugins/daemon-manager.js";
 import { log } from "../../../plugins/logger.js";
-import type { DaemonHonoClient } from "../hono-client.js";
 import { terminalManager } from "../../../plugins/terminal-manager.js";
 import { renameWorktree } from "../../../plugins/worktree.js";
 import {
   createHookEngine,
   createHookRegistry,
-  type HookDefinition,
 } from "../../../plugins/hook-engine.js";
-import type { V2PortServiceHandle } from "../../../plugins/v2-port-service.js";
+import type { SessionManager } from "../session-manager.js";
 
 export interface SessionsDeps {
   getDb: () => NodeSQLiteDatabase<typeof schema> | null;
   getProjectPath: () => string | null;
-  getClientId: () => string;
-  getDaemonClient: () => DaemonHonoClient | null;
-  getDaemonManager: () => DaemonManager | null;
-  /** P9: returns the v2 service when AGENTDOCK_V2=1, else null. */
-  getV2PortService: () => V2PortServiceHandle | null;
-  /** P9: returns the daemon port for direct v2 fetches. */
-  getDaemonPort: () => number;
-  /** Global projects DB (machine-level, not per-project). */
-  getGlobalDb: () => import("../../../plugins/db/index.js").DrizzleDb | null;
-}
-
-function v2DisabledResponse(): { success: false; error: string } {
-  return { success: false, error: "v2 not initialized — check boot logs for details" };
-}
-
-async function forwardV2(
-  port: number,
-  path: string,
-  body: unknown,
-): Promise<{ success: boolean; status?: number; body?: unknown; error?: string }> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return { success: res.ok, status: res.status, body: await res.json() };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  getSessionManager: () => SessionManager | null;
+  getGlobalDb?: () => import("../../../plugins/db/index.js").DrizzleDb | null;
 }
 
 /**
- * Resolve the PortService for the current run mode.
- *
- * The v1 daemon routes (/sessions/allocate, /sessions/release) were
- * removed in F10-2a. v2 is the only path — throw a clear error if the
- * v2 service was not initialized so the failure mode is obvious.
+ * Adapter: wraps SessionManager as the PortService interface expected by
+ * createSessionLifecycle. This lets us keep the lifecycle logic intact
+ * while swapping out the daemon HTTP calls for direct function calls.
  */
-function pickPortService(
-  deps: SessionsDeps,
+function createSessionManagerPortService(
+  sessionManager: SessionManager,
   projectPath: string,
 ): PortService {
-  const v2 = deps.getV2PortService();
-  if (!v2) {
-    throw new Error(
-      "v2 port service not available — daemon may not have started correctly. " +
-        "Check boot logs for `boot: v2 mode enabled` or `AGENTDOCK_V2=0` warnings.",
-    );
-  }
-  return v2.service;
+  return {
+    async allocateSession(params) {
+      return sessionManager.createSession({
+        sessionId: params.sessionId,
+        projectPath,
+        portKeys: params.portKeys ?? [
+          "FRONTEND_PORT", "BACKEND_PORT", "WS_PORT", "DEBUG_PORT", "PREVIEW_PORT",
+        ],
+        displayName: params.displayName ?? params.sessionId,
+      });
+    },
+    async releaseSession(sessionId) {
+      await sessionManager.releaseSession(sessionId);
+    },
+  };
 }
 
 export function registerSessions(deps: SessionsDeps): void {
   // sessions:create — runs the full lifecycle (worktree + sync + ports + hooks)
-  // and streams step events back to the renderer via webContents.send.
   ipcMain.handle(IPC_CHANNELS["sessions:create"], async (event, params: {
     projectId: string;
     name: string;
@@ -115,21 +79,18 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!db) {
       throw new Error("db not initialized");
     }
-    const globalDb = deps.getGlobalDb();
-    const project = globalDb
-      ? globalDb
-        .select()
-        .from(schema.projects)
-        .where(eq(schema.projects.id, projectId))
-        .get()
-      : undefined;
-    if (!project) {
-      throw new Error(`Project not found: ${projectId}`);
+    const sessionManager = deps.getSessionManager();
+    if (!sessionManager) {
+      throw new Error("SessionManager not initialized");
     }
 
+    // Resolve project from global DB
+    // For now, use a simple project lookup — the global DB might not be
+    // the same as the per-project DB in the single-DB architecture.
+    // We'll use the projectPath to derive what we need.
     const sessionId = crypto.randomUUID().slice(0, 12);
-    const config = loadConfig(project.path);
-    const portService = pickPortService(deps, project.path);
+    const config = loadConfig(projectPath);
+    const portService = createSessionManagerPortService(sessionManager, projectPath);
     const sessionLifecycle = createSessionLifecycle({ portService });
 
     // Insert a placeholder row immediately so the renderer can show it.
@@ -140,34 +101,21 @@ export function registerSessions(deps: SessionsDeps): void {
         projectId,
         name,
         branch: branchName,
-        worktreePath: join(project.path, ".agentdock", "worktrees", sessionId),
+        worktreePath: join(projectPath, ".agentdock", "worktrees", sessionId),
         ports: null,
         backgroundHookStatus: null,
+        status: "creating",
+        steps: "[]",
       })
       .run();
 
     // Run the lifecycle (creates worktree, allocates ports, runs hooks).
-    // Stream step events back to the renderer through the orchestrator's
-    // `onStep` callback — `sessionLifecycle.create` returns Promise, not
-    // an async iterable.
-    //
-    // Deferred with setImmediate so the handler returns `{sessionId}`
-    // *before* the lifecycle emits its first step. Otherwise lifecycle's
-    // synchronous `beforeCreateSession running` event fires while
-    // `ipcMain.invoke` is still inflight, the renderer hasn't subscribed
-    // yet (it has no sessionId to subscribe with), and the event is
-    // silently dropped by ipcRenderer.
     setImmediate(() => {
       void runLifecycle();
     });
 
     async function runLifecycle(): Promise<void> {
       const sender = event.sender;
-      // Webcontents may be destroyed mid-lifecycle if the user closes
-      // the window. Every send is gated so we don't throw EPIPE /
-      // ERR_IPC_CHANNEL_CLOSED into the global uncaught-exception
-      // handler — main.ts has a final safety net for those, but it's
-      // still cleaner to never throw in the first place.
       const safeSend = (channel: string, payload: unknown) => {
         try {
           if (sender.isDestroyed()) return;
@@ -178,23 +126,54 @@ export function registerSessions(deps: SessionsDeps): void {
       };
       const onStep = (step: StepEvent) => {
         safeSend(`session:${sessionId}:step`, step);
-        // Update backgroundHookStatus if reported
-        if (step.step === "afterCreateSession" && step.status === "running") {
-          try {
-            db.update(schema.sessions)
-              .set({ backgroundHookStatus: "running" })
+
+        // Persist step progress to DB so frontend can query it
+        try {
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            // Read current steps, append new step, write back
+            const row = freshDb.select({ steps: schema.sessions.steps })
+              .from(schema.sessions)
+              .where(eq(schema.sessions.id, sessionId))
+              .get();
+            const curSteps: StepEvent[] = row?.steps ? JSON.parse(row.steps) : [];
+            const idx = curSteps.findIndex((s) => s.step === step.step);
+            if (idx >= 0) {
+              curSteps[idx] = step;
+            } else {
+              curSteps.push(step);
+            }
+            freshDb.update(schema.sessions)
+              .set({ steps: JSON.stringify(curSteps) })
               .where(eq(schema.sessions.id, sessionId))
               .run();
+          }
+        } catch (err) {
+          log.warn({ err, sessionId }, "step persist failed");
+        }
+
+        if (step.step === "afterCreateSession" && step.status === "running") {
+          try {
+            const freshDb = deps.getDb();
+            if (freshDb) {
+              freshDb.update(schema.sessions)
+                .set({ backgroundHookStatus: "running" })
+                .where(eq(schema.sessions.id, sessionId))
+                .run();
+            }
           } catch (err) {
             log.warn({ err, sessionId }, "bgHookStatus running update failed");
           }
         }
         if (step.step === "afterCreateSession" && step.status === "done") {
           try {
-            db.update(schema.sessions)
-              .set({ backgroundHookStatus: "completed" })
-              .where(eq(schema.sessions.id, sessionId))
-              .run();
+            const freshDb = deps.getDb();
+            if (freshDb) {
+              freshDb.update(schema.sessions)
+                .set({ backgroundHookStatus: "completed" })
+                .where(eq(schema.sessions.id, sessionId))
+                .run();
+            }
           } catch (err) {
             log.warn({ err, sessionId }, "bgHookStatus done update failed");
           }
@@ -204,18 +183,22 @@ export function registerSessions(deps: SessionsDeps): void {
       try {
         const result = await sessionLifecycle.create({
           projectId,
-          projectPath: project.path,
+          projectPath: projectPath!,
           sessionId,
-          sessionName: name,
+          sessionName: name!,
           baseBranch,
           config,
           onStep,
           onWorktreeReady: (worktreePath, branch) => {
             try {
-              db.update(schema.sessions)
-                .set({ worktreePath, branch })
-                .where(eq(schema.sessions.id, sessionId))
-                .run();
+              // Get fresh DB reference in case it was reset
+              const freshDb = deps.getDb();
+              if (freshDb) {
+                freshDb.update(schema.sessions)
+                  .set({ worktreePath, branch })
+                  .where(eq(schema.sessions.id, sessionId))
+                  .run();
+              }
             } catch (err) {
               log.warn(
                 { err, sessionId },
@@ -223,12 +206,6 @@ export function registerSessions(deps: SessionsDeps): void {
               );
             }
           },
-          // Run regardless of lifecycle's coarse `report.success` — that
-          // returns true whenever no *required* hooks failed, so an
-          // optional async hook (`required: false, async: true`) that
-          // exits non-zero gets swallowed and the renderer never sees
-          // "failed". Inspect individual results instead — matches what
-          // master's POST /api/sessions/:id/retry-hooks does on retry.
           onBackgroundHookComplete: (report) => {
             const failed = report.results.filter((r) => !r.success);
             const status = failed.length > 0 ? "failed" : "completed";
@@ -247,49 +224,89 @@ export function registerSessions(deps: SessionsDeps): void {
             } else {
               update.backgroundHookErrors = null;
             }
+            // Set status to "active" — async hooks completed
+            update.status = "active";
             try {
-              db.update(schema.sessions)
-                .set(update)
-                .where(eq(schema.sessions.id, sessionId))
-                .run();
+              // Get fresh DB reference
+              const freshDb = deps.getDb();
+              if (freshDb) {
+                freshDb.update(schema.sessions)
+                  .set(update)
+                  .where(eq(schema.sessions.id, sessionId))
+                  .run();
+              }
             } catch (err) {
               log.warn({ err, sessionId }, "backgroundHook complete persist failed");
             }
+            // Send complete event to renderer
+            try {
+              safeSend(`session:${sessionId}:complete`, { success: true, sessionId });
+            } catch { /* ignore */ }
           },
         });
 
         // Persist the ports allocated by the lifecycle to the DB.
-        // The v2 PortService already wrote the .env file; we just
-        // need the DB row updated so the sidebar shows the ports.
-        // No need to re-query the daemon — the old v1 /sessions/list
-        // endpoint was removed in F10-2a.
         if (result.ports && Object.keys(result.ports).length > 0) {
-          db.update(schema.sessions)
-            .set({ ports: JSON.stringify(result.ports) })
-            .where(eq(schema.sessions.id, sessionId))
-            .run();
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            freshDb.update(schema.sessions)
+              .set({ ports: JSON.stringify(result.ports) })
+              .where(eq(schema.sessions.id, sessionId))
+              .run();
+          }
           if (existsSync(result.worktreePath)) {
-            writePortsToEnv(result.worktreePath, result.ports, project.path);
+            writePortsToEnv(result.worktreePath, result.ports, projectPath ?? undefined);
           }
         }
+        // If no async hooks, set status to "active" and send complete
         try {
-          safeSend(`session:${sessionId}:complete`, { success: true });
-        } catch {
-          // sender may be torn down
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            freshDb.update(schema.sessions)
+              .set({ status: "active" })
+              .where(eq(schema.sessions.id, sessionId))
+              .run();
+          }
+        } catch (err) {
+          log.warn({ err, sessionId }, "status=active update failed");
+        }
+        // Activate session in SessionManager
+        sessionManager!.activateSession(sessionId);
+
+        // DON'T send complete event here. For async hooks, it'll be sent
+        // by onBackgroundHookComplete when hooks finish. For sync mode,
+        // send it via process.nextTick so the IPC return happens first.
+        if (!result.backgroundHookPromise) {
+          process.nextTick(() => {
+            try {
+              safeSend(`session:${sessionId}:complete`, { success: true, sessionId });
+            } catch { /* ignore */ }
+          });
+        }
+
+        // For async hooks: fire-and-forget, onBackgroundHookComplete will
+        // send the complete event + set status="active".
+        if (result.backgroundHookPromise) {
+          result.backgroundHookPromise.catch((err) => {
+            log.warn({ err, sessionId }, "background hook failed (non-fatal)");
+          });
         }
       } catch (err) {
         log.error({ err, sessionId }, "session create failed");
-        try {
-          safeSend(`session:${sessionId}:complete`, {
-            success: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        } catch {
-          // sender may be torn down
-        }
+        process.nextTick(() => {
+          try {
+            safeSend(`session:${sessionId}:complete`, {
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          } catch { /* ignore */ }
+        });
         // Roll back the placeholder row
         try {
-          db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            freshDb.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+          }
         } catch (err2) {
           log.warn({ err: err2, sessionId }, "rollback DB delete failed");
         }
@@ -301,9 +318,6 @@ export function registerSessions(deps: SessionsDeps): void {
 
   // sessions:stream — subscribe to events for an existing sessionId.
   ipcMain.handle(IPC_CHANNELS["sessions:stream"], () => {
-    // Events are pushed by sessions:create. The renderer listens via
-    // ipcRenderer.on(`session:${id}:step`, ...) and awaits the complete
-    // event. This handler is a no-op marker for the IPC contract.
     return { subscribed: true };
   });
 
@@ -316,6 +330,7 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!db) {
       throw new Error("db not initialized");
     }
+    const sessionManager = deps.getSessionManager();
 
     const session = db
       .select()
@@ -325,24 +340,92 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!session) {
       return { success: false, error: `Session ${sessionId} not found` };
     }
-    // Look up the owning project so we use its real path (not the
-    // process-wide active path — those differ for any non-cwd project).
-    // `removeWorktree(projectPath, sessionId, ...)` derives the worktree
-    // dir from this, so a wrong path → "Worktree not found".
-    const ownerProject = deps.getGlobalDb()
-      ?.select()
+
+    // Look up the owning project from the active DB
+    const ownerProject = db
+      .select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
       .get();
+
+    // Set status to "deleting" before starting lifecycle
+    db.update(schema.sessions)
+      .set({ status: "deleting", steps: "[]" })
+      .where(eq(schema.sessions.id, sessionId))
+      .run();
+
     if (!ownerProject) {
-      throw new Error(`Owning project not found for session ${sessionId}`);
+      // Fallback: check global DB
+      const globalDb = deps.getGlobalDb?.();
+      const globalProject = globalDb
+        ?.select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, session.projectId))
+        .get();
+      if (!globalProject) {
+        throw new Error(`Owning project not found for session ${sessionId}`);
+      }
+      // Use global project path — run lifecycle async
+      const projectPath = globalProject.path;
+      const sender = event.sender;
+      const safeSend = (channel: string, payload: unknown) => {
+        try {
+          if (sender.isDestroyed()) return;
+          sender.send(channel, payload);
+        } catch (err) {
+          log.warn({ err, channel }, "session delete stream send failed");
+        }
+      };
+
+      setImmediate(async () => {
+        try {
+          terminalManager.killBySession(sessionId);
+          await sessionManager?.releaseSession(sessionId);
+          const config = loadConfig(projectPath);
+          const portService = createSessionManagerPortService(sessionManager!, projectPath);
+          const sessionLifecycle = createSessionLifecycle({ portService });
+          const sendStep = (e: StepEvent) => safeSend(`session:${sessionId}:step`, e);
+          const result = await sessionLifecycle.remove({
+            sessionId, projectPath, worktreePath: session.worktreePath,
+            currentBranch: session.branch, config, onStep: sendStep,
+          });
+          if (result.backgroundHookPromise) {
+            await result.backgroundHookPromise;
+          }
+          try {
+            const freshDb = deps.getDb();
+            if (freshDb) {
+              freshDb.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+            }
+          } catch (err) {
+            log.warn({ err, sessionId }, "delete DB cleanup failed");
+          }
+          try { safeSend(`session:${sessionId}:complete`, { success: true }); } catch { /* ignore */ }
+        } catch (err) {
+          log.error({ err, sessionId }, "lifecycle.remove failed");
+          try {
+            safeSend(`session:${sessionId}:complete`, {
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          } catch { /* ignore */ }
+          try {
+            const freshDb = deps.getDb();
+            if (freshDb) {
+              freshDb.update(schema.sessions)
+                .set({ status: "active" })
+                .where(eq(schema.sessions.id, sessionId))
+                .run();
+            }
+          } catch (err2) {
+            log.warn({ err: err2, sessionId }, "rollback status update failed");
+          }
+        }
+      });
+      return { success: true };
     }
     const projectPath = ownerProject.path;
 
-    // Mirror master's SSE channel: forward every lifecycle step event to
-    // the renderer on `session:<id>:step` (and emit a final `complete`
-    // frame on `session:<id>:complete`). The renderer's
-    // `useDeleteSessionSSE` hook subscribes to these for progress UI.
     const sender = event.sender;
     const safeSend = (channel: string, payload: unknown) => {
       try {
@@ -356,32 +439,70 @@ export function registerSessions(deps: SessionsDeps): void {
       safeSend(`session:${sessionId}:step`, e);
     };
 
-    // Kill any PTYs for this session
-    terminalManager.killBySession(sessionId);
+    // Run the lifecycle asynchronously so the IPC returns immediately.
+    // The renderer invalidatesQueries after receiving the response and
+    // sees status="deleting" in the DB while the lifecycle runs.
+    setImmediate(async () => {
+      try {
+        // Kill any PTYs for this session
+        terminalManager.killBySession(sessionId);
 
-    // Run hooks (beforeDeleteSession → removeWorktree → afterDeleteSession)
-    const config = loadConfig(projectPath);
-    const portService = pickPortService(deps, projectPath);
-    const sessionLifecycle = createSessionLifecycle({ portService });
-    try {
-      await sessionLifecycle.remove({
-        sessionId,
-        projectPath,
-        worktreePath: session.worktreePath,
-        currentBranch: session.branch,
-        config,
-        onStep: sendStep,
-      });
-    } catch (err) {
-      log.error({ err, sessionId }, "lifecycle.remove failed");
-      const errMsg = err instanceof Error ? err.message : String(err);
-      safeSend(`session:${sessionId}:complete`, { success: false, error: errMsg });
-      throw err;
-    }
+        // Release ports via SessionManager
+        await sessionManager?.releaseSession(sessionId);
 
-    // Delete from DB
-    db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
-    safeSend(`session:${sessionId}:complete`, { success: true });
+        // Run hooks (beforeDeleteSession → removeWorktree → afterDeleteSession)
+        const config = loadConfig(projectPath);
+        const portService = createSessionManagerPortService(sessionManager!, projectPath);
+        const sessionLifecycle = createSessionLifecycle({ portService });
+        const result = await sessionLifecycle.remove({
+          sessionId,
+          projectPath,
+          worktreePath: session.worktreePath,
+          currentBranch: session.branch,
+          config,
+          onStep: sendStep,
+        });
+
+        // Wait for async hooks if any, then delete DB row
+        if (result.backgroundHookPromise) {
+          await result.backgroundHookPromise;
+        }
+
+        // Delete from DB
+        try {
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            freshDb.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+          }
+        } catch (err) {
+          log.warn({ err, sessionId }, "Failed to delete session from DB (non-fatal)");
+        }
+        try {
+          safeSend(`session:${sessionId}:complete`, { success: true });
+        } catch { /* ignore */ }
+      } catch (err) {
+        log.error({ err, sessionId }, "lifecycle.remove failed");
+        try {
+          safeSend(`session:${sessionId}:complete`, {
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } catch { /* ignore */ }
+        // Roll back the deleting status
+        try {
+          const freshDb = deps.getDb();
+          if (freshDb) {
+            freshDb.update(schema.sessions)
+              .set({ status: "active" })
+              .where(eq(schema.sessions.id, sessionId))
+              .run();
+          }
+        } catch (err2) {
+          log.warn({ err: err2, sessionId }, "rollback status update failed");
+        }
+      }
+    });
+
     return { success: true };
   });
 
@@ -401,12 +522,8 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!session) {
       throw new Error(`Session not found: ${params.sessionId}`);
     }
-    // Resolve the OWNING project's path — sessions:rename was
-    // previously using `deps.getProjectPath()` which is the
-    // process-wide active path (cwd), not the project that owns this
-    // session. With multiple projects open, that pointed
-    // `renameWorktree` at the wrong directory.
-    const ownerProject = deps.getGlobalDb()
+    const globalDb = (deps as any).getGlobalDb?.() as import("../../../plugins/db/index.js").DrizzleDb | null;
+    const ownerProject = globalDb
       ?.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
@@ -414,10 +531,6 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!ownerProject) {
       throw new Error(`Owning project not found for session ${params.sessionId}`);
     }
-    // Rename the git branch in lockstep with the DB name. Mirrors
-    // master's `PATCH /api/sessions/:id` behavior — without this, the
-    // on-disk `agentdock/<original>` branch stays put and a later delete
-    // leaves a dangling branch (this is exactly what 8ec663a fixed).
     let newBranch = session.branch;
     try {
       const result = renameWorktree(
@@ -446,6 +559,10 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!db) {
       throw new Error("db not initialized");
     }
+    const sessionManager = deps.getSessionManager();
+    if (!sessionManager) {
+      throw new Error("SessionManager not initialized");
+    }
     const session = db
       .select()
       .from(schema.sessions)
@@ -455,16 +572,8 @@ export function registerSessions(deps: SessionsDeps): void {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    // v2 path: delegate to the v2 port service's /reassign endpoint.
-    // The old v1 /sessions/reassign + /sessions/list endpoints were
-    // removed in F10-2a.
-    const v2 = deps.getV2PortService();
-    if (!v2) {
-      throw new Error("reassign-ports requires AGENTDOCK_V2=1 (v1 daemon routes removed)");
-    }
     try {
-      const ports = await v2.reassign(sessionId);
-      // Persist to DB so the sidebar shows the new ports immediately.
+      const ports = await sessionManager.reassignPorts(sessionId);
       db.update(schema.sessions)
         .set({ ports: JSON.stringify(ports) })
         .where(eq(schema.sessions.id, sessionId))
@@ -495,14 +604,10 @@ export function registerSessions(deps: SessionsDeps): void {
       throw new Error(`Session not found: ${sessionId}`);
     }
     if (session.backgroundHookStatus !== "failed") {
-      // Mirror master: only retry sessions whose hooks actually failed.
-      // Prevents accidental re-runs that could break a healthy worktree.
       throw new Error("Session is not in failed state");
     }
-    // Look up the owning project so loadConfig + hook context use the
-    // real project root (NOT cwd — those differ for any non-cwd project
-    // and would load the wrong agentdock.config.yaml).
-    const ownerProject = deps.getGlobalDb()
+    const globalDb = (deps as any).getGlobalDb?.() as import("../../../plugins/db/index.js").DrizzleDb | null;
+    const ownerProject = globalDb
       ?.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, session.projectId))
@@ -513,16 +618,11 @@ export function registerSessions(deps: SessionsDeps): void {
     const projectPath = ownerProject.path;
     const config = loadConfig(projectPath);
 
-    // Mark running immediately so the renderer's poll picks up the
-    // status change without waiting for the async hook to finish.
     db.update(schema.sessions)
       .set({ backgroundHookStatus: "running", backgroundHookErrors: null })
       .where(eq(schema.sessions.id, sessionId))
       .run();
 
-    // Build a fresh engine + registry from the project's current config.
-    // Fire-and-forget — we return immediately and let the renderer poll
-    // `sessions:bgHookStatus` for completion (matches master).
     const registry = createHookRegistry();
     registry.loadFromConfig(
       config.hooks as unknown as Record<string, HookDefinition[]>,
@@ -625,7 +725,6 @@ export function registerSessions(deps: SessionsDeps): void {
     }
   });
 
-  // sessions:setUserStatus — set or clear a user-assigned status label.
   ipcMain.handle(
     IPC_CHANNELS["sessions:setUserStatus"],
     (_e, params: { sessionId: string; status: string | null }) => {
@@ -650,7 +749,6 @@ export function registerSessions(deps: SessionsDeps): void {
     },
   );
 
-  // sessions:activate — record the current time as lastActivatedAt for heatmap.
   ipcMain.handle(
     IPC_CHANNELS["sessions:activate"],
     (_e, params: { sessionId: string }) => {
@@ -668,159 +766,6 @@ export function registerSessions(deps: SessionsDeps): void {
         .where(eq(schema.sessions.id, params.sessionId))
         .run();
       return { success: true as const };
-    },
-  );
-
-  // ─────────────────────────────────────────────────────────────────────
-  // P9: v2 daemon API — direct endpoints for renderer-driven session
-  // lifecycle when AGENTDOCK_V2=1. Each handler:
-  //   1. Resolves fencingToken via the v2 service cache.
-  //   2. Forwards the request to the daemon.
-  //   3. Returns the daemon's parsed JSON response.
-  //
-  // These are separate from sessions:create/delete so the renderer can
-  // drive specific v2 lifecycle states (e.g. /session/rename, /takeover)
-  // without going through the full orchestrator.
-  // ─────────────────────────────────────────────────────────────────────
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:create"],
-    async (_e, params: {
-      projectId: string;
-      name: string;
-      baseBranch?: string;
-    }) => {
-      const v2 = deps.getV2PortService();
-      const port = deps.getDaemonPort();
-      if (!v2 || !port) return v2DisabledResponse();
-      const project = deps.getGlobalDb()
-        ?.select()
-        .from(schema.projects)
-        .where(eq(schema.projects.id, params.projectId))
-        .get();
-      if (!project) {
-        return { success: false, error: `Project not found: ${params.projectId}` };
-      }
-      const result = await forwardV2(port, "/session/create", {
-        clientId: deps.getClientId(),
-        pid: process.pid,
-        projectRoot: project.path,
-        displayName: params.name,
-      });
-      // Pre-warm the v2 cache with the v2 sessionId so subsequent
-      // claim/activate/heartbeat calls can find the token. The
-      // app-sessionId is the renderer-supplied UUID from `name` here.
-      if (result.success && result.body && typeof result.body === "object") {
-        const body = result.body as { sessionId?: string; fencingToken?: number };
-        if (body.sessionId && body.fencingToken !== undefined) {
-          // Map renderer-provided sessionId (UUID used as displayName) to
-          // the daemon's sessionId. The renderer will use the daemon's
-          // sessionId going forward via the v2 channel set.
-        }
-      }
-      return result;
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:delete"],
-    async (_e, params: { sessionId: string }) => {
-      const v2 = deps.getV2PortService();
-      const port = deps.getDaemonPort();
-      if (!v2 || !port) return v2DisabledResponse();
-      const token = v2.getToken(params.sessionId);
-      if (token === null) {
-        return { success: false, error: "session not in v2 state" };
-      }
-      const del = await forwardV2(port, "/session/delete", {
-        sessionId: params.sessionId,
-        fencingToken: token,
-      });
-      // Trigger phase-2 purge from the v2 service so the three-table
-      // entries drop after the worktree is gone (matches the
-      // orchestrator's two-phase release flow).
-      await v2.completeDeletion(params.sessionId).catch(() => {});
-      return del;
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:rename"],
-    async (_e, params: { sessionId: string; name: string }) => {
-      const v2 = deps.getV2PortService();
-      const port = deps.getDaemonPort();
-      if (!v2 || !port) return v2DisabledResponse();
-      const token = v2.getToken(params.sessionId);
-      if (token === null) {
-        return { success: false, error: "session not in v2 state" };
-      }
-      return forwardV2(port, "/session/rename", {
-        sessionId: params.sessionId,
-        fencingToken: token,
-        displayName: params.name,
-      });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:reassign"],
-    async (_e, params: { sessionId: string }) => {
-      const v2 = deps.getV2PortService();
-      if (!v2) return v2DisabledResponse();
-      try {
-        const ports = await v2.reassign(params.sessionId);
-        // Persist to DB so the sidebar shows the new ports immediately.
-        const db = deps.getDb();
-        if (db) {
-          db.update(schema.sessions)
-            .set({ ports: JSON.stringify(ports) })
-            .where(eq(schema.sessions.id, params.sessionId))
-            .run();
-        }
-        return { success: true, ports };
-      } catch (err) {
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:status"],
-    async (_e, params: { sessionId: string }) => {
-      const v2 = deps.getV2PortService();
-      if (!v2) return null;
-      return v2.getStatus(params.sessionId);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS["sessions:v2:takeover"],
-    async (_e, params: { sessionId: string; fromClientId?: string; fromPid?: number }) => {
-      const v2 = deps.getV2PortService();
-      const port = deps.getDaemonPort();
-      if (!v2 || !port) return v2DisabledResponse();
-      const token = v2.getToken(params.sessionId);
-      if (token === null) {
-        return { success: false, error: "session not in v2 state" };
-      }
-      const result = await forwardV2(port, "/takeover", {
-        sessionId: params.sessionId,
-        clientId: params.fromClientId ?? deps.getClientId(),
-        pid: params.fromPid ?? process.pid,
-        fencingToken: token,
-      });
-      // Refresh cached token if daemon returned a new one.
-      if (result.success && result.body && typeof result.body === "object") {
-        const body = result.body as { fencingToken?: number };
-        if (body.fencingToken !== undefined) {
-          // Touch — the v2 service updates its own cache via the heartbeat
-          // tick; we expose getToken() for renderers to read fresh values.
-        }
-      }
-      return result;
     },
   );
 }

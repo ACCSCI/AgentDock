@@ -1,9 +1,13 @@
 /**
  * Project-related query and mutation hooks.
+ *
+ * The backend now provides session status (creating/active/deleting) and
+ * lifecycle step progress. The frontend uses these directly — no optimistic
+ * inserts or merge logic needed.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, queryKeys } from "./helpers.js";
-import type { ProjectData, SessionRuntimeStatus } from "./types.js";
+import type { ProjectData, SessionRuntimeStatus, SessionStep } from "./types.js";
 
 // GET projects
 export function useProjects() {
@@ -23,12 +27,27 @@ export function useProjects() {
           )
           .map((s: (typeof p.sessions)[number]) => ({
             ...s,
-            status: ((s as { runtimeStatus?: string }).runtimeStatus === "active" || (s as { runtimeStatus?: string }).runtimeStatus === "owned"
-              ? "existing"
-              : (s as { runtimeStatus?: string }).runtimeStatus) as SessionRuntimeStatus | undefined,
+            // Backend provides status directly: "creating" | "active" | "deleting" | null
+            // Map "active" to "existing" for backward compatibility
+            status: ((): SessionRuntimeStatus | undefined => {
+              const backendStatus = (s as { status?: string }).status;
+              if (backendStatus === "creating") return "creating";
+              if (backendStatus === "deleting") return "deleting";
+              if (backendStatus === "active") return "existing";
+              // Legacy rows without status field
+              return undefined;
+            })(),
+            // Backend (db:projects:list) already JSON.parses steps into an
+            // array, so DON'T parse again here. Double-parsing an array
+            // produces "JSON.parse([object Object])" → "Unexpected token 'o'".
+            steps: ((s as { steps?: unknown }).steps ?? undefined) as SessionStep[] | undefined,
           })),
       }));
     },
+    // staleTime: 0 — make sure newly created/updated projects are visible
+    // to consumers (TabBar, Sidebar) on the very next render. The 30s
+    // refetchInterval keeps the list reasonably fresh in the background.
+    staleTime: 0,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   });

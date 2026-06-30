@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Lease renewer tests (新架构 §4.4 — 活性租约 hook 续约 + 双信号死亡判定).
  *

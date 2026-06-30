@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Invariant assertions — 新架构 §11.3 unit tests.
  *

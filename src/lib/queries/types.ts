@@ -12,10 +12,8 @@ export interface ProjectData {
 
 export type SessionRuntimeStatus =
   | "existing"
-  | "foreign"
   | "creating"
-  | "deleting"
-  | "takeover";
+  | "deleting";
 
 export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "verifying" | "done";
 
@@ -39,6 +37,7 @@ export interface SessionData {
   createdAt: string;
   backgroundHookStatus?: string | null;
   status?: SessionRuntimeStatus;
+  steps?: SessionStep[] | null;  // lifecycle step progress from backend
   ownerClientId?: string | null;
   canSelect?: boolean;
   canDelete?: boolean;
@@ -55,26 +54,19 @@ export interface SessionStep {
   error?: string;
 }
 
-export interface CreatingSession extends Omit<SessionData, "status"> {
-  status: "creating";
-  steps: SessionStep[];
-  /** IPC 返回的真实 sessionId，用于 v2State 过滤防止竞态覆盖 */
-  realSessionId?: string;
-}
+// CreatingSession/DeletingSession are now just SessionData with specific status values.
+// The backend provides status and steps — no separate types needed.
+export type CreatingSession = SessionData & { status: "creating"; steps: SessionStep[] };
+export type DeletingSession = SessionData & { status: "deleting"; steps: SessionStep[] };
 
 export type SessionListItem = SessionData | CreatingSession | DeletingSession;
 
-export interface DeletingSession extends Omit<SessionData, "status"> {
-  status: "deleting";
-  steps: SessionStep[];
-}
-
 export function isCreatingSession(s: SessionListItem): s is CreatingSession {
-  return "status" in s && (s as CreatingSession).status === "creating";
+  return s.status === "creating";
 }
 
 export function isDeletingSession(s: SessionListItem): s is DeletingSession {
-  return "status" in s && (s as DeletingSession).status === "deleting";
+  return s.status === "deleting";
 }
 
 export interface TerminalData {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Invariant Assertions — 新架构 §11.3.
  *

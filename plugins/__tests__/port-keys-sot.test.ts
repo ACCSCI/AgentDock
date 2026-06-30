@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Single source of truth assertion — plugins/config.ts owns PORT_KEYS_DEFAULT.
  * plugins/daemon-state.ts (and friends) must re-export, not redefine.

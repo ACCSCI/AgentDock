@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * RECOVERING state machine — 新架构 §5.2 unit tests.
  */

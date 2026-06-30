@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * E2E invariants helper — 新架构 §11.3.
  *

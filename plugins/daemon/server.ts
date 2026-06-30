@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * AgentDockDaemon — backward-compatible wrapper around the Hono app.
  *

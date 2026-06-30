@@ -63,3 +63,16 @@ export const PROTOCOL_VERSION_MAJOR = 2;
  * 设 `AGENTDOCK_V2=0` 可显式禁用（v1 已移除，禁用后 session 创建将失败）。
  */
 export const AGENTDOCK_DEFAULT_V2 = true;
+
+// ============================================================
+// Port Pool — new single-instance architecture
+// ============================================================
+
+/** Default start of the port allocation pool. */
+export const DEFAULT_PORT_POOL_START = 30_000;
+
+/** Default end of the port allocation pool (inclusive). */
+export const DEFAULT_PORT_POOL_END = 30_100;
+
+/** Global singleton instance lock path (relative to userData). */
+export const INSTANCE_LOCK_PATH = ".agentdock/instance.lock";

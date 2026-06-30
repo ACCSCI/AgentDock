@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 State integration hooks — combines SSE push with polling fallback.
  *

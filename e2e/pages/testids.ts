@@ -50,15 +50,6 @@ export const TID = {
   // IconSidebar
   iconSidebar: "icon-sidebar",
   copyCompatPrompt: "copy-compat-prompt",
-
-  // DaemonStatusBar (新架构 §2 + §11.1)
-  daemonStatusBar: "daemon-status-bar",
-  daemonState: "daemon-state",
-  daemonPid: "daemon-pid",
-  daemonPort: "daemon-port",
-  daemonProtocol: "daemon-protocol",
-  daemonCapabilities: "daemon-capabilities",
-  daemonError: "daemon-error",
 } as const;
 
 export type Testid = (typeof TID)[keyof typeof TID];

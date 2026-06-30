@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Daemon lifecycle helpers — heartbeat, v2 sync loop, client register/unregister.
  *

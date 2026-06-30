@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "steps": [
+    {
+      "step": "冷启动后主页",
+      "status": "passed",
+      "detail": "应用冷启动完成，显示主页",
+      "screenshot": "01-home-cold-start.png"
+    },
+    {
+      "step": "验证打开项目按钮",
+      "status": "passed",
+      "detail": "home-open-project 按钮可见",
+      "screenshot": ""
+    },
+    {
+      "step": "打开项目对话框",
+      "status": "passed",
+      "detail": "dir-modal 可见",
+      "screenshot": "02-modal-open.png"
+    },
+    {
+      "step": "导航到目标项目",
+      "status": "passed",
+      "detail": "导航到 F:\\ProgramPlayground\\JavaScript\\Copilot-Switch",
+      "screenshot": ""
+    },
+    {
+      "step": "项目加载验证",
+      "status": "passed",
+      "detail": "Copilot-Switch 在 h2 中可见",
+      "screenshot": "03-project-loaded.png"
+    },
+    {
+      "step": "创建Session",
+      "status": "passed",
+      "detail": "新 session 已出现在 DB 中",
+      "screenshot": "04-session-created.png"
+    },
+    {
+      "step": "删除Session",
+      "status": "passed",
+      "detail": "Session 920edf1f-42a 已删除",
+      "screenshot": "05-session-deleted.png"
+    }
+  ],
+  "errors": [],
+  "summary": "所有步骤通过: 冷启动 -> 打开项目对话框 -> 导航到 Copilot-Switch -> 项目加载 -> 创建Session -> 删除Session"
+}

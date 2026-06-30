@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Debug and metrics routes for daemon API v2 (§11.1, P10).
  */

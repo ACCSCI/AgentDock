@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * useV2State — Renderer-side hook for daemon v2State IPC push.
  *

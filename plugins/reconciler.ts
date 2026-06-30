@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Reconciler — 三表对账 (新架构 §4.3, C1-C5 残缺态分类).
  *

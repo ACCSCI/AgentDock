@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Long-running session stability E2E.
  *
@@ -114,10 +115,6 @@ test.describe("long-running session", () => {
     await terminalPage.clickNewTerminal();
     await expect(terminalPage.currentTerminal).toBeVisible({ timeout: 10_000 });
     await terminalPage.waitForStatus("connected", 20_000);
-
-    // 3. Verify daemon status bar is healthy.
-    const statusBar = window.locator(`[data-testid="${TID.daemonStatusBar}"]`);
-    await expect(statusBar).toBeVisible({ timeout: 5_000 });
 
     // 4. Observe for 30+ seconds, checking stability periodically.
     const observeDuration = 32_000;

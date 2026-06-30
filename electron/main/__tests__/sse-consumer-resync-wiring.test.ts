@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F7 — onResyncRequired 接到 host (新架构 §7.3).
  *

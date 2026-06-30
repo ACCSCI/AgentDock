@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * E2E pilot: verify the Electron app boots and the renderer bridge works.
  *

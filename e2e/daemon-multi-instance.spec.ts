@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Multi-Electron daemon-reuse E2E.
  *

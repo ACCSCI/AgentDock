@@ -1,25 +1,12 @@
 /**
- * Shared API types — single source of truth for IPC channels and
- * Hono AppType across main / preload / renderer.
+ * Shared API types — single source of truth for IPC channels.
  *
- * Phase 3: this file centralizes:
- *   1. The IPC channel name constants (typed as `as const` for exhaustiveness)
- *   2. The Hono AppType re-export (so all three layers import from the
- *      same path, not directly from `plugins/daemon/app.js`)
- *   3. The ApiSurface type that preload exposes via `contextBridge`.
- *
- * Why a shared file:
- *   - main and preload both need to agree on channel names. A const map
- *     guarantees this — typos in one side surface as TS errors in the other.
- *   - When Phase 4 adds new IPC handlers, both sides update the same file
- *     and the test fixtures catch missing entries.
- *   - The renderer can import `ApiSurface` to get full typing for `window.api.*`
- *     without manually duplicating method signatures.
+ * Single-instance architecture: no daemon, no SSE, no v2 service.
+ * Removed channels are commented out with [OLD-DAEMON] markers.
  */
-import type { AppType } from "../../plugins/daemon/app.js";
-
-// Re-export so main/preload/renderer all import from a single place.
-export type { AppType };
+// [OLD-DAEMON] Hono AppType re-export — no longer needed
+// import type { AppType } from "../../plugins/daemon/app.js";
+// export type { AppType };
 
 /**
  * IPC channel names. Adding a new channel requires updating all three maps
@@ -84,34 +71,25 @@ export const IPC_CHANNELS = {
 
   // bootstrap (one-shot, used by renderer on startup)
   "bootstrap:health": "bootstrap:health",
-  "bootstrap:reallocated": "bootstrap:reallocated",
-  "bootstrap:clientId": "bootstrap:clientId",
-  "bootstrap:v2Enabled": "bootstrap:v2Enabled",
+  // [OLD-DAEMON] "bootstrap:reallocated": "bootstrap:reallocated",
+  // [OLD-DAEMON] "bootstrap:clientId": "bootstrap:clientId",
+  // [OLD-DAEMON] "bootstrap:v2Enabled": "bootstrap:v2Enabled",
 
-  // daemon (新架构 §13.1 — direct daemon API access for UI observability)
-  "daemon:health": "daemon:health",
-  "daemon:debugState": "daemon:debugState",
-  "daemon:faultInject": "daemon:faultInject",
-  // §3.5 末段 — UI 端口运行态三态探测 (in-running / stopped / unknown).
-  // 纯展示, 不影响端口归属.
-  "daemon:probeRuntime": "daemon:probeRuntime",
-  // P6: /sync full-snapshot endpoint. Used by renderer to rebuild local
-  // state after reconnect / daemon restart. Returns the v2 three-table
-  // shape (state, snapshotSeq, sessions, owners, ports) — see plugins/daemon/routes/v2.ts.
-  "daemon:sync": "daemon:sync",
-  // daemon:events:subscribe is a renderer→main invoke that returns an
-  // unsubscribe function; the matching one-way push channel is a const
-  // literal defined in electron/preload.ts ("daemon:events:push") since
-  // IPC_CHANNELS only models the invoke surface.
-  "daemon:events:subscribe": "daemon:events:subscribe",
+  // [OLD-DAEMON] daemon channels — removed in single-instance architecture
+  // "daemon:health": "daemon:health",
+  // "daemon:debugState": "daemon:debugState",
+  // "daemon:faultInject": "daemon:faultInject",
+  // "daemon:probeRuntime": "daemon:probeRuntime",
+  // "daemon:sync": "daemon:sync",
+  // "daemon:events:subscribe": "daemon:events:subscribe",
 
-  // sessions:v2 (P9 — v2 daemon API driven from renderer)
-  "sessions:v2:create": "sessions:v2:create",
-  "sessions:v2:delete": "sessions:v2:delete",
-  "sessions:v2:rename": "sessions:v2:rename",
-  "sessions:v2:reassign": "sessions:v2:reassign",
-  "sessions:v2:status": "sessions:v2:status",
-  "sessions:v2:takeover": "sessions:v2:takeover",
+  // [OLD-DAEMON] sessions:v2 channels — removed in single-instance architecture
+  // "sessions:v2:create": "sessions:v2:create",
+  // "sessions:v2:delete": "sessions:v2:delete",
+  // "sessions:v2:rename": "sessions:v2:rename",
+  // "sessions:v2:reassign": "sessions:v2:reassign",
+  // "sessions:v2:status": "sessions:v2:status",
+  // "sessions:v2:takeover": "sessions:v2:takeover",
 
   // window (custom titlebar controls — non-macOS)
   "window:minimize": "window:minimize",
@@ -137,6 +115,10 @@ export const IPC_CHANNELS = {
   "app:version": "app:version",
   "app:checkForUpdates": "app:checkForUpdates",
   "app:quitAndInstall": "app:quitAndInstall",
+
+  // settings (global app settings)
+  "settings:get": "settings:get",
+  "settings:update": "settings:update",
 } as const;
 
 export type IpcChannel = keyof typeof IPC_CHANNELS;

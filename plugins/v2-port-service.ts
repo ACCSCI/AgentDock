@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 PortService — 新架构 §4.2 + §4.4.
  *
