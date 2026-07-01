@@ -136,7 +136,16 @@ export function registerSessions(deps: SessionsDeps): void {
               .from(schema.sessions)
               .where(eq(schema.sessions.id, sessionId))
               .get();
-            const curSteps: StepEvent[] = row?.steps ? JSON.parse(row.steps) : [];
+            // Defensive parse — a corrupted steps blob shouldn't kill the
+            // step-update loop (matches db.ts:322 defensive parsing).
+            let curSteps: StepEvent[] = [];
+            if (row?.steps) {
+              try {
+                curSteps = JSON.parse(row.steps);
+              } catch (err) {
+                log.warn({ err, sessionId }, "failed to parse session steps from DB");
+              }
+            }
             const idx = curSteps.findIndex((s) => s.step === step.step);
             if (idx >= 0) {
               curSteps[idx] = step;

@@ -294,11 +294,15 @@ export function registerDb(ctx: DbContext): void {
     const allProjects = globalDb
       ? globalDb.select().from(schema.projects).all()
       : [];
+    // Per-project DB may be null if db:init hasn't been called yet — return
+    // an empty session list rather than crashing the renderer.
     const sessionRows = db
-      .select()
-      .from(schema.sessions)
-      .orderBy(asc(schema.sessions.sortOrder))
-      .all();
+      ? db
+          .select()
+          .from(schema.sessions)
+          .orderBy(asc(schema.sessions.sortOrder))
+          .all()
+      : [];
     return allProjects.map((p) => ({
       id: p.id,
       name: p.name,
@@ -376,6 +380,13 @@ steps: (() => {
     if (!project) return { deleted: 0, sessionIds: [], failed: [] };
     // Sessions from the per-project DB.
     const db = getDb(ctx);
+    if (!db) {
+      // Per-project DB isn't initialized — nothing to clean up locally.
+      // Still delete the global project record so the project doesn't
+      // reappear after the user reopens the app.
+      globalDb?.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+      return { deleted: 0, sessionIds: [], failed: [] };
+    }
     const sessionsForProject = db
       .select().from(schema.sessions).where(eq(schema.sessions.projectId, projectId)).all();
     const failed: Array<{ sessionId: string; stage: string; error: string }> = [];
