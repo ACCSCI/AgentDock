@@ -27,6 +27,7 @@
     "electron",
     "e2e",
     "scripts/acceptance",
-    "test-utils"
+    "test-utils",
+    ".flue"
   ]
 }

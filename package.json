@@ -74,6 +74,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@flue/cli": "^1.0.0-beta.9",
     "@playwright/test": "^1.60.0",
     "@tanstack/react-router-devtools": "^1.120.3",
     "@tanstack/router-plugin": "^1.120.3",

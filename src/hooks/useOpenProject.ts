@@ -87,12 +87,21 @@ export function useOpenProject() {
       const old = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
       const list = old ?? [];
       const idx = list.findIndex((p) => p.id === project.id);
+      // Normalize the project row so it matches the ProjectData shape returned
+      // by useProjects. The raw row from db:projects:create only has
+      // {id, name, path, createdAt}; consumers (e.g. ProjectWorkspace)
+      // assume the full shape with sessions[]. Fill missing arrays so we
+      // don't crash on partial cache state right after creating/opening.
+      const normalized: ProjectData = {
+        ...project,
+        sessions: project.sessions ?? [],
+      };
       let next: ProjectData[];
       if (idx >= 0) {
         next = list.slice();
-        next[idx] = project;
+        next[idx] = normalized;
       } else {
-        next = [...list, project];
+        next = [...list, normalized];
       }
       queryClient.setQueryData<ProjectData[]>(queryKeys.projects, next);
       return next;

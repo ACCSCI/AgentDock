@@ -19,7 +19,12 @@ function ProjectWorkspace() {
   const [showHookErrors, setShowHookErrors] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const project = projects?.find((p) => p.id === projectId);
-  const activeSession = project?.sessions.find((s) => s.id === activeSessionId);
+  // Note: `project?.sessions.find` parses as `(project?.sessions).find`, so
+  // the optional chain only guards `project`, not `project.sessions`. When
+  // useOpenProject inserts a freshly-created project into the cache, the row
+  // has no `sessions` field (it's not part of the `projects` schema row).
+  // Use `?.` on both sides so we don't crash on partial cache state.
+  const activeSession = project?.sessions?.find((s) => s.id === activeSessionId);
 
   // Cold-start race: project not in cache yet. Auto-refetch until found.
   useEffect(() => {
