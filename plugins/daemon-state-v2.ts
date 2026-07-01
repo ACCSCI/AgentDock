@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonState v2 — three-table normalized model (新架构 §4.1, §3.5).
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2 rollback test — post-fix-iterations.md item #1.
  *

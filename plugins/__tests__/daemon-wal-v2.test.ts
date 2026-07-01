@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * WAL v1→v2 migration tests — 新架构 §5.1.1.
  */

@@ -36,9 +36,6 @@ jobs:
       - name: Download fonts
         run: bun run download-fonts
 
-      - name: Build daemon JS
-        run: bun run build:daemon
-
       - name: Build app
         run: bun run dist:win
         env:

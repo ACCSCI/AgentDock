@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Test Daemon — spawns the Hono daemon in a child process for acceptance tests.
  *

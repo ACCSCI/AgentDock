@@ -14,7 +14,8 @@ scripts/e2e-*
 out/
 test-results/
 e2e-report.json
-e2e-report-html/
+e2e-report.html
+e2e/report-html/
 e2e-results.json
 e2e-run-output.json
 e2e-full-output.txt

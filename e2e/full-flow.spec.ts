@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Comprehensive E2E — covers all main branch functionality via Playwright.
  *

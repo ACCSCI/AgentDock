@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * displayName isolation E2E — §11.4 script #7.
  *

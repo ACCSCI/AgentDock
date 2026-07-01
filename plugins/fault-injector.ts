@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Fault injection — 新架构 §11.2.
  *

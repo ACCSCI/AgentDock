@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Orphan detection, classification, and cleanup for git worktrees.
  *

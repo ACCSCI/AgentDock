@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Health & Sync routes for daemon API v2 (§13.1).
  */

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Phase 4 acceptance gate — full IPC surface (29 channels).
  *

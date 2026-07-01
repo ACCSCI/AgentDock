@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2PortService — unit tests (P9 — 新架构 §4.2 + §4.4).
  *

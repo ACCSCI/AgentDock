@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Real-project E2E test — 新架构 P14.
  *

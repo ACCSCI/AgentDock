@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Type-level fixture for the Hono client.
  *

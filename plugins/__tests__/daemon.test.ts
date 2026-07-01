@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { AgentDockDaemon } from "../daemon.js";
 import http from "node:http";

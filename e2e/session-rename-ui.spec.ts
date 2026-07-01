@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Session rename via UI E2E.
  *

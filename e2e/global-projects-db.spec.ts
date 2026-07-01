@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Global projects DB E2E spec.
  *

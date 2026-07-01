@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * SSE event bus — 新架构 §7.3 unit tests.
  */

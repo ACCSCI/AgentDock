@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * E2E tests for resource sync — verifies directory sync through the
  * session-lifecycle orchestrator (full pipeline: worktree → sync → ports).

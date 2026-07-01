@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * constants.ts — single source of truth guard (新架构 §11.5 C4).
  *

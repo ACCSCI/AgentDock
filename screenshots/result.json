@@ -1,0 +1,46 @@
+{
+  "passed": false,
+  "steps": [
+    {
+      "step": "launch_electron",
+      "status": "passed",
+      "detail": "pid=2800"
+    },
+    {
+      "step": "first_window",
+      "status": "passed",
+      "detail": "url=file:///F:/ProgramPlayground/JavaScript/AgentDock/.agentdock/worktrees/bed4c452-74d/out/renderer/index.html"
+    },
+    {
+      "step": "home_loaded",
+      "status": "passed",
+      "detail": "看到了 home-open-project 按钮",
+      "screenshot": "01-home.png"
+    },
+    {
+      "step": "modal_opened",
+      "status": "passed",
+      "detail": "DirBrowserModal 出现",
+      "screenshot": "02-modal.png"
+    },
+    {
+      "step": "dir_nav",
+      "status": "passed",
+      "detail": "通过搜索 + 双击依次进入 F:\\ → ProgramPlayground → JavaScript → Copilot-Switch"
+    },
+    {
+      "step": "dir_select",
+      "status": "passed",
+      "detail": "选中 Copilot-Switch (selected=Copilot-Switch)"
+    },
+    {
+      "step": "dir_confirm",
+      "status": "passed",
+      "detail": "点击 dir-confirm (disabled=false)"
+    }
+  ],
+  "errors": [
+    "page.waitForFunction: Timeout 30000ms exceeded."
+  ],
+  "summary": "Failed: 0 step(s) failed, 1 error(s)."
+}

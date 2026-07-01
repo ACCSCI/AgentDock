@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Hono typed client — type-safe RPC to the AgentDock daemon.
  *

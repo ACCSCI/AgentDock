@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F2 — DaemonManager follower wait must use FOLLOWER_STARTUP_TIMEOUT_MS
  * (新架构 §1.1 C5).

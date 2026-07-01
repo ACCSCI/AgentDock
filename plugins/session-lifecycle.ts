@@ -278,6 +278,10 @@ export function createSessionLifecycle(deps?: {
 
       if (!afterReport.success) {
         log(sessionId, `afterCreateSession ✗ FAILED (${afterDuration}ms)`);
+        log(sessionId, `  exitCode: ${afterReport.exitCode}`);
+        log(sessionId, `  stdout: ${afterReport.stdout?.slice(0, 500)}`);
+        log(sessionId, `  stderr: ${afterReport.stderr?.slice(0, 500)}`);
+        log(sessionId, `  error: ${afterReport.error}`);
         emit(onStep, { step: "afterCreateSession", status: "error", duration: afterDuration, error: "hook failed (required)" });
         log(sessionId, "ROLLBACK: releasing ports + removing worktree");
         try {
@@ -297,7 +301,14 @@ export function createSessionLifecycle(deps?: {
       log(sessionId, `create complete ✓ ${totalDuration}ms`);
       return {
         sessionId, worktreePath: wt.worktreePath, branch: wt.branch, ports, syncReport,
-        hookReports, duration: totalDuration, backgroundHookPromise: Promise.resolve(afterReport),
+        hookReports, duration: totalDuration,
+        // Sync mode: the hook已经在上面 await 完成，没有后台任务在跑。
+        // 必须返回 undefined（而非 Promise.resolve(...)），否则
+        // sessions.ts 的 `if (!result.backgroundHookPromise)` 判定为 false，
+        // 既不会通过 process.nextTick 发送 complete 事件，也不会触发
+        // onBackgroundHookComplete（那个回调只在 async 分支调用）——
+        // 结果前端 mutationFn 的 Promise 永不 resolve，"+"号一直转圈。
+        backgroundHookPromise: undefined,
       };
     } catch (err) {
       log(sessionId, "ROLLBACK: releasing ports + removing worktree");
@@ -402,6 +413,36 @@ export function createSessionLifecycle(deps?: {
     emit(onStep, { step: "afterDeleteSession", status: "running" });
     const afterStepStart = Date.now();
     const afterCtx = buildHookContext("afterDeleteSession", { projectId: "", sessionId, projectPath, worktreePath });
+
+    // Determine if afterDeleteSession should run async (background)
+    const afterDeleteHooks = hookRegistry.getHooks("afterDeleteSession");
+    const hasAsyncDeleteHook = afterDeleteHooks.some((h) => h.async);
+
+    if (hasAsyncDeleteHook) {
+      // Async mode: fire-and-forget, don't block the response
+      log(sessionId, "afterDeleteSession → async (non-blocking)");
+      const backgroundDeletePromise = hookEngine.execute("afterDeleteSession", afterCtx).then((report) => {
+        const duration = Date.now() - afterStepStart;
+        hookReports.push(report);
+        if (report.success) {
+          log(sessionId, `afterDeleteSession ✓ ${duration}ms (background)`);
+          emit(onStep, { step: "afterDeleteSession", status: "done", duration });
+        } else {
+          log(sessionId, `afterDeleteSession ✗ FAILED (${duration}ms) (background)`);
+          emit(onStep, { step: "afterDeleteSession", status: "error", duration, error: "hook failed" });
+        }
+        return report;
+      });
+      // Don't await — return early so caller can proceed
+      const totalDuration = Date.now() - start;
+      log(sessionId, `remove complete ✓ ${totalDuration}ms (hooks running in background)`);
+      return {
+        sessionId, worktreePath, hookReports, duration: totalDuration,
+        backgroundHookPromise: backgroundDeletePromise,
+      };
+    }
+
+    // Sync mode: await the hook
     const afterReport = await hookEngine.execute("afterDeleteSession", afterCtx);
     hookReports.push(afterReport);
     const afterDuration = Date.now() - afterStepStart;

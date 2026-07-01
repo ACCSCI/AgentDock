@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, beforeEach } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

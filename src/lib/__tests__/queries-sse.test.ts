@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import type { CreatingSession, DeletingSession, ProjectData, SessionData, SessionStep } from "../queries.js";

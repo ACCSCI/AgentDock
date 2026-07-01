@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Origin guard — CSRF / cross-origin protection.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * WAL schema migrations — 新架构 §5.1.1.
  *

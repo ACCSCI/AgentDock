@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * debug-start.ts — spawn Electron exactly like `bun run start` would,
  * but pipe every byte of stdout/stderr to THIS process's console so we

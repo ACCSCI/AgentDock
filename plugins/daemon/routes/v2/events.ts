@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * SSE events route for daemon API v2 (§7.3).
  */

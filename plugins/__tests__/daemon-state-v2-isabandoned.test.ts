@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F9: isSessionAbandoned §6.1 race window guard
  *

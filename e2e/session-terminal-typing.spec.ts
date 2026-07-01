@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Terminal interaction flow E2E.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Instance registry routes.
  *

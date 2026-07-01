@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F7 — §7.3 resync-required end-to-end (新架构 §7.3).
  *

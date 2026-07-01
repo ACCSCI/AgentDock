@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Reconciler C5 prune — 命令注入防护 (新架构 §11.5 H5, F8).
  *

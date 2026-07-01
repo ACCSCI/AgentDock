@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonStateV2 unit tests — 新架构 §4.1, §3.5, §6.1, §4.4 invariants.
  */

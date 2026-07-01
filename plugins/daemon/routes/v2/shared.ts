@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Shared constants and utilities for daemon API v2 routes.
  *

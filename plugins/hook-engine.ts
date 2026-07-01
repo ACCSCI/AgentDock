@@ -4,6 +4,7 @@ import process from "node:process";
 import type { HookDefinition, HookLifecycleEvent } from "./config.js";
 import { buildScopedChildEnv } from "./env.js";
 import { killProcessesUnderPath } from "./worktree.js";
+import { log } from "./logger.js";
 
 const execAsync = promisify(exec);
 
@@ -201,6 +202,8 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
           }),
         },
         (error, stdout, stderr) => {
+          log.info({ hook: hook.run, cwd }, "hook exec callback fired");
+          log.info({ error: error?.message, exitCode: (error as any)?.code, stdoutLen: stdout?.length, stderrLen: stderr?.length }, "hook exec callback details");
           if (settled) return;
 
           if (timedOut) {

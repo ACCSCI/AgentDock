@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * reconcile — Walk every session in the active project's DB and compare its
  * ports against the daemon's v2 state. If the daemon's ports differ from

@@ -1,5 +1,13 @@
 /**
  * Session-related query and mutation hooks.
+ *
+ * NOTE: Several "compensation logic" blocks are commented out with
+ * [COMPENSATION-LOGIC] markers. These are frontend workarounds for
+ * backend state that doesn't exist yet (session creation/deletion
+ * progress, runtime status). Once the backend provides these states,
+ * the compensation logic can be permanently removed.
+ *
+ * See: docs/backend-state-refactor.md for the full plan.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, queryKeys } from "./helpers.js";
@@ -15,6 +23,34 @@ export function useCreateSessionSSE() {
     { projectId: string; name: string; baseBranch?: string; tempId: string },
     { prevProjects: ProjectData[] | undefined; tempId: string }
   >({
+    // [COMPENSATION-LOGIC] onMutate: optimistic insert of CreatingSession
+    // BEFORE the IPC call. This ensures the CreatingSession entry is in the
+    // cache even if the user switches tabs before mutationFn completes.
+    //
+    // WHY THIS EXISTS: The backend doesn't persist "creating" status in the DB.
+    // When the user switches tabs, invalidateQueries refetches from DB, which
+    // returns no "creating" session. This optimistic insert prevents that loss.
+    //
+    // WHAT SHOULD REPLACE IT: Backend should insert a session row with
+    // status="creating" immediately, and db:projects:list should return it.
+    // onMutate: async ({ projectId, name, tempId }) => {
+    //   await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+    //   const prevProjects = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
+    //   queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+    //     if (!old) return old;
+    //     return old.map((p) => {
+    //       if (p.id !== projectId) return p;
+    //       const temp: CreatingSession = {
+    //         id: tempId, projectId, name, branch: "", worktreePath: "",
+    //         ports: null, createdAt: new Date().toISOString(),
+    //         status: "creating", steps: [],
+    //       };
+    //       return { ...p, sessions: [...p.sessions, temp] };
+    //     });
+    //   });
+    //   return { prevProjects, tempId };
+    // },
+
     mutationFn: async ({ projectId, name, baseBranch, tempId }) => {
       const { sessionId } = await api().sessions.create({
         projectId,
@@ -22,55 +58,51 @@ export function useCreateSessionSSE() {
         baseBranch,
       });
 
-      // Optimistic insert: add a CreatingSession with the tempId.
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          const temp: CreatingSession = {
-            id: tempId,
-            projectId,
-            name,
-            branch: "",
-            worktreePath: "",
-            ports: null,
-            createdAt: new Date().toISOString(),
-            status: "creating",
-            steps: [],
-            realSessionId: sessionId,
-          };
-          return { ...p, sessions: [...p.sessions, temp] };
-        });
-      });
+      // Backend has inserted session with status="creating" + steps.
+      // Invalidate now so the UI refetches and shows the creating spinner.
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
-      // Subscribe to step + complete events.
+      // [COMPENSATION-LOGIC] Update optimistic entry with real sessionId
+      // WHY THIS EXISTS: The tempId→realSessionId indirection is needed so
+      // SSE step events can be matched to the correct cache entry.
+      // WHAT SHOULD REPLACE IT: Backend returns sessionId synchronously,
+      // no tempId needed.
+      // queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+      //   if (!old) return old;
+      //   return old.map((p) => {
+      //     if (p.id !== projectId) return p;
+      //     return {
+      //       ...p,
+      //       sessions: (p.sessions ?? []).map((s) => {
+      //         if (s.id !== tempId || !isCreatingSession(s)) return s;
+      //         return { ...s, realSessionId: sessionId };
+      //       }),
+      //     };
+      //   });
+      // });
+
+      // [COMPENSATION-LOGIC] SSE step events accumulate into frontend cache
+      // WHY THIS EXISTS: Backend doesn't persist lifecycle step progress.
+      // The frontend builds the steps array from IPC events in memory.
+      // WHAT SHOULD REPLACE IT: Backend persists steps in DB (or SessionManager).
+      // Frontend queries backend for current steps, doesn't accumulate.
+      // const stream = api().sessions.stream(sessionId);
+      // const offStep = stream.onStep((step) => {
+      //   queryClient.setQueryData(queryKeys.projects, (old) => {
+      //     // ... accumulate step into CreatingSession.steps
+      //   });
+      // });
+
+      // Subscribe to step events and refetch so the UI shows progress.
+      // Backend writes steps to DB; we invalidate on each step (throttled).
       const stream = api().sessions.stream(sessionId);
-      const offStep = stream.onStep((step: { step: string; status: string; duration?: number; error?: string }) => {
-        queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-          if (!old) return old;
-          return old.map((p) => {
-            if (p.id !== projectId) return p;
-            return {
-              ...p,
-              sessions: (p.sessions ?? []).map((s) => {
-                if (s.id !== tempId) return s;
-                if (!isCreatingSession(s)) return s;
-                const creating = s as CreatingSession;
-                const curSteps = creating.steps ?? [];
-                const existingIdx = curSteps.findIndex(
-                  (st) => st.step === step.step,
-                );
-                const newSteps = [...curSteps];
-                if (existingIdx >= 0) {
-                  newSteps[existingIdx] = step;
-                } else {
-                  newSteps.push(step);
-                }
-                return { ...creating, steps: newSteps };
-              }),
-            };
-          });
-        });
+      let lastInvalidateAt = 0;
+      const offStep = stream.onStep((_step: { step: string; status: string; duration?: number; error?: string }) => {
+        // Throttle: avoid hammering on rapid step events
+        const now = Date.now();
+        if (now - lastInvalidateAt < 200) return;
+        lastInvalidateAt = now;
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       });
 
       return new Promise<SessionData>((resolve, reject) => {
@@ -78,68 +110,51 @@ export function useCreateSessionSSE() {
           offStep();
           offComplete();
           if (!result.success) {
-            // Roll back the optimistic insert before the failure reaches
-            // the caller's catch — otherwise the temp card would linger
-            // alongside the rolled-back DB row and confuse the user
-            // (and break tests that count cards).
-            queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-              if (!old) return old;
-              return old.map((p) => {
-                if (p.id !== projectId) return p;
-                return {
-                  ...p,
-                  sessions: (p.sessions ?? []).filter((s) => s.id !== tempId),
-                };
-              });
-            });
+            // [COMPENSATION-LOGIC] Rollback optimistic insert on failure
+            // WHY THIS EXISTS: Without onMutate, there's no optimistic entry to roll back.
+            // This was the original rollback for the onMutate-based optimistic insert.
+            // queryClient.setQueryData(queryKeys.projects, (old) => {
+            //   if (!old) return old;
+            //   return old.map((p) => {
+            //     if (p.id !== projectId) return p;
+            //     return { ...p, sessions: (p.sessions ?? []).filter((s) => s.id !== tempId) };
+            //   });
+            // });
             reject(new Error(result.error ?? "session create failed"));
             return;
           }
-          // Replace the tempId placeholder with the real sessionId. The
-          // backend inserted a real DB row under the real sessionId, so
-          // we have to remove our temp placeholder before invalidating,
-          // otherwise the refetch returns BOTH the temp and the real
-          // card (same display name, different IDs) and the sidebar
-          // shows duplicates.
-          queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-            if (!old) return old;
-            return old.map((p) => {
-              if (p.id !== projectId) return p;
-              return {
-                ...p,
-                sessions: (p.sessions ?? []).filter((s) => s.id !== tempId),
-              };
-            });
-          });
-          // Now invalidate so the cache refetches with the real session
-          // (DB row) populated under the real sessionId.
+          // [COMPENSATION-LOGIC] In-place replacement of temp→real
+          // WHY THIS EXISTS: Prevents race condition where user switches tabs,
+          // refetch returns server data without temp entry, creation progress lost.
+          // WHAT SHOULD REPLACE IT: Backend provides status in DB, no temp entry needed.
+          // queryClient.setQueryData(queryKeys.projects, (old) => {
+          //   if (!old) return old;
+          //   return old.map((p) => {
+          //     if (p.id !== projectId) return p;
+          //     return {
+          //       ...p,
+          //       sessions: (p.sessions ?? []).map((s) => {
+          //         if (s.id !== tempId) return s;
+          //         return { id: sessionId, projectId, name, branch: "", worktreePath: "",
+          //                  ports: null, createdAt: new Date().toISOString(), status: "existing" };
+          //       }),
+          //     };
+          //   });
+          // });
           queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-          // For the return value, construct a minimal SessionData.
           resolve({
-            id: sessionId,
-            projectId,
-            name,
-            branch: "",
-            worktreePath: "",
-            ports: null,
-            createdAt: new Date().toISOString(),
-            status: "existing",
+            id: sessionId, projectId, name, branch: "", worktreePath: "",
+            ports: null, createdAt: new Date().toISOString(), status: "existing",
           });
         });
       });
     },
     onError: (_err, _variables, context) => {
+      // [COMPENSATION-LOGIC] Rollback to prevProjects snapshot
+      // WHY THIS EXISTS: Rolls back the onMutate optimistic insert.
+      // Without onMutate, this is a no-op.
       if (context?.prevProjects) {
         queryClient.setQueryData(queryKeys.projects, context.prevProjects);
-      } else {
-        // No onMutate snapshot available (e.g. mutationFn threw before
-        // it could set context). Fall back to removing any temp card
-        // we may have inserted for this mutation. We don't have the
-        // tempId here, so we rely on the more robust onSuccess-path
-        // cleanup to have already removed it. (Failure path: the
-        // stream's onComplete handler removes the temp card before
-        // rejecting, so by the time onError runs, the card is gone.)
-        // This branch is a no-op safety net.
       }
     },
   });
@@ -155,52 +170,27 @@ export function useDeleteSessionSSE() {
     { prevProjects: ProjectData[] | undefined }
   >({
     mutationFn: async ({ sessionId, projectId }) => {
-      // Optimistic mark: convert to DeletingSession.
-      queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== projectId) return p;
-          return {
-            ...p,
-            sessions: (p.sessions ?? []).map((s) => {
-              if (s.id !== sessionId) return s;
-              if (isCreatingSession(s) || isDeletingSession(s)) return s;
-              const deleting: DeletingSession = { ...s, status: "deleting", steps: [] };
-              return deleting;
-            }),
-          };
-        });
-      });
+      // [COMPENSATION-LOGIC] Optimistic mark: convert to DeletingSession
+      // Backend now sets status="deleting" in DB. Invalidate to refetch so
+      // the UI sees the deleting spinner immediately.
 
       // Subscribe to step + complete events BEFORE firing the delete
-      // IPC — otherwise main can emit `session:<id>:step` /
-      // `session:<id>:complete` before the renderer registers a
-      // listener and the events are silently dropped.
       const stream = api().sessions.stream(sessionId);
-      const offStep = stream.onStep((step: { step: string; status: string; duration?: number; error?: string }) => {
-        queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-          if (!old) return old;
-          return old.map((p) => {
-            if (p.id !== projectId) return p;
-            return {
-              ...p,
-              sessions: (p.sessions ?? []).map((s) => {
-                if (s.id !== sessionId) return s;
-                if (!isDeletingSession(s)) return s;
-                const deleting = s as DeletingSession;
-                const curSteps = deleting.steps ?? [];
-                const existingIdx = curSteps.findIndex(
-                  (st) => st.step === step.step,
-                );
-                const newSteps = [...curSteps];
-                if (existingIdx >= 0) newSteps[existingIdx] = step;
-                else newSteps.push(step);
-                return { ...deleting, steps: newSteps };
-              }),
-            };
-          });
-        });
+      let lastStepInvalidateAt = 0;
+      const offStep = stream.onStep((_step) => {
+        // Backend writes step progress to DB; invalidate so the UI
+        // refetches status + steps. Throttle: at most once per 200ms.
+        const now = Date.now();
+        if (now - lastStepInvalidateAt < 200) return;
+        lastStepInvalidateAt = now;
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       });
+
+      // Fire the IPC — returns immediately in async hook mode
+      await api().sessions.delete(sessionId);
+
+      // Backend has set status="deleting" — invalidate now to show spinner
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
       return new Promise<void>((resolve, reject) => {
         const offComplete = stream.onComplete((result: { success: boolean; error?: string; sessionId?: string }) => {

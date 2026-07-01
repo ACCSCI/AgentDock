@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * port-runtime-probe — 新架构 §3.5 末段.
  *

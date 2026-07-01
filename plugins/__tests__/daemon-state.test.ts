@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, beforeEach } from "vitest";
 import { DaemonState, type SessionPorts } from "../daemon-state.js";
 

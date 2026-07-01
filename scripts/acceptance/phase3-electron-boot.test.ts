@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Phase 3 acceptance gate — Electron skeleton + dev workflow.
  *

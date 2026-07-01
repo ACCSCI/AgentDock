@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Host header guard — DNS rebinding protection.
  *

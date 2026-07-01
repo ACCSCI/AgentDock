@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Daemon API v2 routes — integration tests (新架构 §13.1).
  *

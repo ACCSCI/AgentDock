@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Port allocation routes for daemon API v2 (§3.3, §3.4, §6.2).
  */

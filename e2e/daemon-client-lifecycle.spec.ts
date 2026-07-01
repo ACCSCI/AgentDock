@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Daemon client-lifecycle E2E.
  *

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useProjects } from "../lib/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { TerminalManager } from "../components/TerminalManager";
 import { ConfigEditor } from "../components/ConfigEditor";
@@ -13,15 +14,33 @@ export const Route = createFileRoute("/app/$projectId")({
 function ProjectWorkspace() {
   const { projectId } = Route.useParams();
   const { activeSessionId } = useStore();
-  const { data: projects } = useProjects();
+  const { data: projects, isLoading } = useProjects();
+  const queryClient = useQueryClient();
   const [showHookErrors, setShowHookErrors] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const project = projects?.find((p) => p.id === projectId);
-  const activeSession = project?.sessions.find((s) => s.id === activeSessionId);
+  // Note: `project?.sessions.find` parses as `(project?.sessions).find`, so
+  // the optional chain only guards `project`, not `project.sessions`. When
+  // useOpenProject inserts a freshly-created project into the cache, the row
+  // has no `sessions` field (it's not part of the `projects` schema row).
+  // Use `?.` on both sides so we don't crash on partial cache state.
+  const activeSession = project?.sessions?.find((s) => s.id === activeSessionId);
+
+  // Cold-start race: project not in cache yet. Auto-refetch until found.
+  useEffect(() => {
+    if (!project && !isLoading && retryCount < 5) {
+      const timer = setTimeout(async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+        setRetryCount((c) => c + 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [project, isLoading, retryCount, queryClient]);
 
   if (!project) {
     return (
       <div className="workspace-empty">
-        <p>Project not found</p>
+        <p>{isLoading || retryCount < 5 ? "Loading…" : "Project not found"}</p>
       </div>
     );
   }

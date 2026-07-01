@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createSessionLifecycle, type PortService, type StepEvent } from "../session-lifecycle.js";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

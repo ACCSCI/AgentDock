@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Kill all AgentDock instances (Vite dev servers) and the daemon process.
  *

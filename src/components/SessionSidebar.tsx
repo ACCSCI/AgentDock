@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitPullRequest, Plus, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useSyncProject, useV2Projects } from "../lib/queries";
+import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useSyncProject } from "../lib/queries";
 import type { SessionUserStatus } from "../lib/queries";
 import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
@@ -12,12 +12,8 @@ import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 export function SessionSidebar() {
   const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
 
-  // F11b: Use v2State hook with fallback to old polling
-  const { data: v2Projects, isV2: isV2Data } = useV2Projects();
-  const { data: oldProjects } = useProjects();
-
-  // Prefer v2State data if available, otherwise use old polling
-  const projects = isV2Data ? v2Projects : oldProjects;
+  // Single-instance: use only useProjects (no v2 state)
+  const { data: projects } = useProjects();
   const queryClient = useQueryClient();
   const createSession = useCreateSessionSSE();
   const deleteSession = useDeleteSessionSSE();
@@ -34,7 +30,6 @@ export function SessionSidebar() {
   const draggedIdRef = useRef<string | null>(null);
   const lastCreateAtRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
-  const [foreignOpen, setForeignOpen] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
   const sidebarWidthRef = useRef(sidebarWidth);
 
@@ -74,11 +69,9 @@ export function SessionSidebar() {
   const activeProject = projects?.find((p) => p.id === activeProjectId);
   const sessions = activeProject?.sessions ?? [];
 
-  // Memoize the ordered list of visible (non-foreign) session IDs for stable sorting
+  // Memoize the ordered list of visible session IDs for stable sorting
   const visibleSessionIds = useMemo(() => {
-    return sessions
-      .filter((s) => s.status !== "foreign")
-      .map((s) => s.id);
+    return sessions.map((s) => s.id);
   }, [sessions]);
 
   // Sorted sessions: maintain a local order array that follows the returned order
@@ -104,12 +97,8 @@ export function SessionSidebar() {
     const sessionMap = new Map(sessions.map((s) => [s.id, s]));
     return order
       .map((id) => sessionMap.get(id))
-      .filter((s): s is NonNullable<typeof s> => s != null && s.status !== "foreign");
+      .filter((s): s is NonNullable<typeof s> => s != null);
   }, [sessions, localOrder, visibleSessionIds]);
-
-  const foreignSessions = useMemo(() => {
-    return sessions.filter((s) => s.status === "foreign");
-  }, [sessions]);
 
   const handleDragStart = useCallback((sessionId: string) => {
     draggedIdRef.current = sessionId;
@@ -179,7 +168,11 @@ export function SessionSidebar() {
   const CREATE_COOLDOWN_MS = 1500;
 
   const handleNewSession = async () => {
-    if (!activeProject) return;
+    if (!activeProject) {
+      console.error("SessionSidebar: activeProject is null");
+      return;
+    }
+    console.log(`SessionSidebar: creating session for project ${activeProject.id} (${activeProject.name})`);
     const now = Date.now();
     if (now - lastCreateAtRef.current < CREATE_COOLDOWN_MS) return;
     lastCreateAtRef.current = now;
@@ -387,34 +380,6 @@ export function SessionSidebar() {
             {dragOverSessionId === session.id && dragPosition === "after" && <div className="session-drop-indicator" />}
           </div>
         ))}
-        {foreignSessions.length > 0 && (
-          <div className="session-foreign-group">
-            <button type="button" className="session-foreign-toggle" onClick={() => setForeignOpen((v) => !v)}>
-              {foreignOpen ? "▼" : "▶"} Foreign Sessions ({foreignSessions.length})
-            </button>
-            {foreignOpen && (
-              <div className="session-foreign-list">
-                {foreignSessions.map((session) => (
-                  <SessionCard
-                    key={session.id}
-                    session={session}
-                    isActive={false}
-                    onSelect={setActiveSession}
-                    onRequestDelete={handleRequestDelete}
-                    onRename={handleRenameSession}
-                    onOpenInExplorer={handleOpenInExplorer}
-                    onOpenInTerminal={handleOpenInTerminal}
-                    onReassignPorts={handleReassignPorts}
-                    onRetryHooks={handleRetryHooks}
-                    onSetUserStatus={handleSetUserStatus}
-                    onActivate={handleActivate}
-                    onHover={prefetchTerminals}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
       <div
         ref={handleRef}

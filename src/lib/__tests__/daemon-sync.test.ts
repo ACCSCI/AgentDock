@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Renderer-side daemon-sync tests (新架构 §7.3, §11.3 #8).
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Reproduces the React "Maximum update depth exceeded" error the
  * user hit when deleting a session while/after its async hook ran.

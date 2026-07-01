@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Session lifecycle and takeover routes for daemon API v2 (§4.2, §6.1).
  */

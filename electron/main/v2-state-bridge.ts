@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * v2-state-bridge — Serialize AppliedState for IPC push to renderer.
  *

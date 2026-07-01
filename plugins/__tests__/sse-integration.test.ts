@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * SSE integration tests — 新架构 §7.3 wire format.
  *

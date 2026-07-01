@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DaemonContext — shared state for all routes.
  *

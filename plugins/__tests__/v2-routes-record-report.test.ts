@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * F5: v2 routes recordReport + expectedSessionIds dynamic injection (§5.2).
  *

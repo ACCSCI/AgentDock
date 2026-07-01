@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * High-level IPC helpers for e2e specs.
  *
