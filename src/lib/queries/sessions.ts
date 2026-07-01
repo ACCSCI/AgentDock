@@ -176,10 +176,14 @@ export function useDeleteSessionSSE() {
 
       // Subscribe to step + complete events BEFORE firing the delete
       const stream = api().sessions.stream(sessionId);
+      let lastStepInvalidateAt = 0;
       const offStep = stream.onStep((_step) => {
-        // [COMPENSATION-LOGIC] step accumulation disabled — backend provides steps in DB.
-        // Instead, invalidate the cache so the UI refetches status + steps.
-        // Throttle: only invalidate on first step to avoid hammering.
+        // Backend writes step progress to DB; invalidate so the UI
+        // refetches status + steps. Throttle: at most once per 200ms.
+        const now = Date.now();
+        if (now - lastStepInvalidateAt < 200) return;
+        lastStepInvalidateAt = now;
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       });
 
       // Fire the IPC — returns immediately in async hook mode

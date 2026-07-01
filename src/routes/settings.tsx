@@ -294,7 +294,6 @@ function SettingsPage() {
   const currentLang = i18n.language as SupportedLanguage;
   const [portPoolStart, setPortPoolStart] = useState(30000);
   const [portPoolEnd, setPortPoolEnd] = useState(30100);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // Load settings on mount
   useEffect(() => {
@@ -303,8 +302,7 @@ function SettingsPage() {
     api.settings.get().then((settings) => {
       setPortPoolStart(settings.portPoolStart);
       setPortPoolEnd(settings.portPoolEnd);
-      setSettingsLoaded(true);
-    }).catch(() => setSettingsLoaded(true));
+    });
   }, []);
 
   const handlePortPoolChange = useCallback((start: number, end: number) => {

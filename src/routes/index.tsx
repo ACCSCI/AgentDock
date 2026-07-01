@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { DirBrowserModal } from "../components/DirBrowserModal";
 import { GitInitConfirmModal } from "../components/GitInitConfirmModal";
 import { useOpenProject } from "../hooks/useOpenProject";
