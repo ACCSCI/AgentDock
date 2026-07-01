@@ -39,11 +39,8 @@ jobs:
       - name: Download fonts
         run: bun run download-fonts
 
-      - name: Build daemon JS
-        run: bun run build:daemon
-
       - name: Build and publish to GitHub Releases
-        run: bun run build:daemon && npx electron-vite build && npx electron-builder --win --x64 --config electron-builder.yml --publish never
+        run: npx electron-vite build && npx electron-builder --win --x64 --config electron-builder.yml --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FRONTEND_PORT: 5173
