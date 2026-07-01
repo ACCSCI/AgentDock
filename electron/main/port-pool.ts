@@ -105,42 +105,57 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
   const sessionPorts = new Map<string, Set<number>>();
   /** All ports in use (union of sessionPorts values). */
   const allocated = new Set<number>();
+  // Serialize all allocate() calls through a single promise chain so two
+  // concurrent create-session requests can't both probe-and-pick the same
+  // ports before either one has reserved them in `allocated`. Without this,
+  // a second allocate() can race past the first's bind-probe and grab ports
+  // the first one is about to return.
+  let allocationQueue: Promise<unknown> = Promise.resolve();
 
   async function allocate(
     count: number,
     portKeys: string[],
   ): Promise<Record<string, number>> {
-    // 1. Build candidate list
-    const candidates = isPortStrict()
-      ? parseAvailablePortEnv()
-      : buildRangeCandidates(config.start, config.end);
+    return allocationQueue = allocationQueue.then(async () => {
+      // 1. Build candidate list
+      const candidates = isPortStrict()
+        ? parseAvailablePortEnv()
+        : buildRangeCandidates(config.start, config.end);
 
-    // 2. Filter out already-allocated ports
-    const free = candidates.filter((p) => !allocated.has(p));
+      // 2. Filter out already-allocated ports
+      const free = candidates.filter((p) => !allocated.has(p));
 
-    // 3. Bind-probe the first `count` free candidates
-    const result: Record<string, number> = {};
-    const picked: number[] = [];
+      // 3. Bind-probe the first `count` free candidates
+      const result: Record<string, number> = {};
+      const picked: number[] = [];
 
-    for (const port of free) {
-      if (picked.length >= count) break;
+      for (const port of free) {
+        if (picked.length >= count) break;
 
-      const available = await isPortAvailable(port);
-      if (!available) continue;
+        const available = await isPortAvailable(port);
+        if (!available) continue;
 
-      picked.push(port);
-      // Map port to the corresponding key by index
-      const keyIndex = picked.length - 1;
-      if (keyIndex < portKeys.length) {
-        result[portKeys[keyIndex]] = port;
+        picked.push(port);
+        // Map port to the corresponding key by index
+        const keyIndex = picked.length - 1;
+        if (keyIndex < portKeys.length) {
+          result[portKeys[keyIndex]] = port;
+        }
       }
-    }
 
-    if (picked.length < count) {
-      throw new PortPoolExhaustedError(count, picked.length);
-    }
+      if (picked.length < count) {
+        throw new PortPoolExhaustedError(count, picked.length);
+      }
 
-    return result;
+      // Reserve immediately, inside the serialized block, so any subsequent
+      // queued allocate() already sees these as in-use and won't race-pick
+      // them.
+      for (const port of picked) {
+        allocated.add(port);
+      }
+
+      return result;
+    });
   }
 
   function release(sessionId: string): void {

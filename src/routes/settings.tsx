@@ -307,9 +307,15 @@ function SettingsPage() {
     }).catch(() => setSettingsLoaded(true));
   }, []);
 
-  const handlePortPoolChange = useCallback(async (start: number, end: number) => {
+  const handlePortPoolChange = useCallback((start: number, end: number) => {
+    // Local-only state update — do NOT call IPC here. The IPC + disk write
+    // happens in saveSettings, triggered on input blur, so rapid keystrokes
+    // don't cause a flood of IPC calls and disk writes.
     setPortPoolStart(start);
     setPortPoolEnd(end);
+  }, []);
+
+  const saveSettings = useCallback(async (start: number, end: number) => {
     const api = window.api;
     if (!api?.settings?.update) return;
     await api.settings.update({ portPoolStart: start, portPoolEnd: end });
@@ -376,6 +382,7 @@ function SettingsPage() {
                   handlePortPoolChange(start, portPoolEnd);
                 }
               }}
+              onBlur={() => saveSettings(portPoolStart, portPoolEnd)}
             />
             <span className="settings-port-pool-separator">-</span>
             <input
@@ -390,6 +397,7 @@ function SettingsPage() {
                   handlePortPoolChange(portPoolStart, end);
                 }
               }}
+              onBlur={() => saveSettings(portPoolStart, portPoolEnd)}
             />
           </div>
           <p className="settings-port-pool-hint">

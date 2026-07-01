@@ -318,8 +318,18 @@ export function registerDb(ctx: DbContext): void {
         // Return real status from DB: "creating" | "active" | "deleting" | null
         // null = legacy row without status field
         status: s.status ?? null,
-        // Parse steps JSON for frontend consumption
-        steps: s.steps ? JSON.parse(s.steps) : null,
+        // Parse steps JSON for frontend consumption. Wrap defensively so a
+// corrupted row doesn't brick the entire db:projects:list handler and
+// prevent the app from loading any projects.
+steps: (() => {
+          if (!s.steps) return null;
+          try {
+            return JSON.parse(s.steps);
+          } catch (err) {
+            log.warn({ err, sessionId: s.id }, "failed to parse session steps");
+            return null;
+          }
+        })(),
       })),
     }));
   });

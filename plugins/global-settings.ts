@@ -89,27 +89,14 @@ export function getPortPoolEnd(): number {
  * Set the port pool start value.
  */
 export function setPortPoolStart(start: number): void {
-  const settings = loadSettings();
-  settings.portPoolStart = Math.max(1024, Math.min(65535, start));
-  // Ensure start < end
-  if (settings.portPoolStart >= settings.portPoolEnd) {
-    settings.portPoolEnd = settings.portPoolStart + 100;
-  }
-  saveSettings(settings);
+  updateSettings({ portPoolStart: start });
 }
 
 /**
  * Set the port pool end value.
  */
 export function setPortPoolEnd(end: number): void {
-  const settings = loadSettings();
-  settings.portPoolEnd = Math.max(1024, Math.min(65535, end));
-  // Ensure start < end
-  if (settings.portPoolEnd <= settings.portPoolStart) {
-    settings.portPoolStart = settings.portPoolEnd - 100;
-    if (settings.portPoolStart < 1024) settings.portPoolStart = 1024;
-  }
-  saveSettings(settings);
+  updateSettings({ portPoolEnd: end });
 }
 
 /**
@@ -120,19 +107,38 @@ export function getAllSettings(): GlobalSettings {
 }
 
 /**
- * Update multiple settings at once.
+ * Update multiple settings atomically with strict boundary checks.
+ *
+ * Why: clamping start/end independently in setPortPoolStart/setPortPoolEnd
+ * leaves the door open to invalid ranges (start=65535 → end=65635, or
+ * end=1024 → start=1024 with start>=end). updateSettings is the single
+ * place where the invariants `1024 <= start < end <= 65535` are enforced,
+ * so callers can safely update one side without re-validating the other.
  */
 export function updateSettings(updates: Partial<GlobalSettings>): void {
   const settings = loadSettings();
   if (updates.portPoolStart !== undefined) {
-    settings.portPoolStart = Math.max(1024, Math.min(65535, updates.portPoolStart));
+    settings.portPoolStart = Math.max(1024, Math.min(65534, updates.portPoolStart));
   }
   if (updates.portPoolEnd !== undefined) {
-    settings.portPoolEnd = Math.max(1024, Math.min(65535, updates.portPoolEnd));
+    settings.portPoolEnd = Math.max(1025, Math.min(65535, updates.portPoolEnd));
   }
-  // Ensure start < end
+  // Ensure start < end. If the caller only updates one side and the result
+  // is invalid, push the other side to keep at least a 1-port gap.
   if (settings.portPoolStart >= settings.portPoolEnd) {
-    settings.portPoolEnd = settings.portPoolStart + 100;
+    if (updates.portPoolStart !== undefined) {
+      // start was just set; bump end upward to be valid
+      settings.portPoolEnd = Math.min(65535, settings.portPoolStart + 100);
+      if (settings.portPoolStart >= settings.portPoolEnd) {
+        settings.portPoolStart = settings.portPoolEnd - 1;
+      }
+    } else {
+      // end was just set; bump start downward to be valid
+      settings.portPoolStart = Math.max(1024, settings.portPoolEnd - 100);
+      if (settings.portPoolStart >= settings.portPoolEnd) {
+        settings.portPoolEnd = settings.portPoolStart + 1;
+      }
+    }
   }
   saveSettings(settings);
 }

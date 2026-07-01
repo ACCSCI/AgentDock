@@ -6,6 +6,7 @@
  * is skipped to allow multiple dev windows.
  */
 import { app } from "electron";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tryAcquireLock, type FileLock } from "../../plugins/os-file-lock.js";
 
@@ -27,6 +28,10 @@ export async function acquireInstanceLock(): Promise<FileLock | null> {
   const lockPath = join(lockDir, "instance.lock");
 
   try {
+    // Ensure the parent directory exists before acquiring the lock —
+    // otherwise tryAcquireLock fails with ENOENT on a fresh userData dir
+    // and the app crashes at startup.
+    mkdirSync(lockDir, { recursive: true });
     return await tryAcquireLock(lockPath, { pid: process.pid });
   } catch {
     // Another instance holds the lock

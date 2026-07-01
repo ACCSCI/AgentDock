@@ -331,6 +331,9 @@ export function registerSessions(deps: SessionsDeps): void {
       throw new Error("db not initialized");
     }
     const sessionManager = deps.getSessionManager();
+    if (!sessionManager) {
+      throw new Error("SessionManager not initialized");
+    }
 
     const session = db
       .select()
