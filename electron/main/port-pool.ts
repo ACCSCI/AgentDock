@@ -116,46 +116,64 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
     count: number,
     portKeys: string[],
   ): Promise<Record<string, number>> {
-    return allocationQueue = allocationQueue.then(async () => {
-      // 1. Build candidate list
-      const candidates = isPortStrict()
-        ? parseAvailablePortEnv()
-        : buildRangeCandidates(config.start, config.end);
+    // Capture the (possibly-rejected) result of this allocation in a
+    // separate Promise that callers can await, but always keep the queue
+    // chain resolved so a single failure (e.g. PortPoolExhaustedError)
+    // doesn't poison subsequent allocations. Without this, any thrown
+    // error inside the .then() would leave `allocationQueue` rejected
+    // forever and every subsequent allocate() would re-reject.
+    let result: Record<string, number>;
+    let failure: unknown;
+    allocationQueue = allocationQueue.then(async () => {
+      try {
+        // 1. Build candidate list
+        const candidates = isPortStrict()
+          ? parseAvailablePortEnv()
+          : buildRangeCandidates(config.start, config.end);
 
-      // 2. Filter out already-allocated ports
-      const free = candidates.filter((p) => !allocated.has(p));
+        // 2. Filter out already-allocated ports
+        const free = candidates.filter((p) => !allocated.has(p));
 
-      // 3. Bind-probe the first `count` free candidates
-      const result: Record<string, number> = {};
-      const picked: number[] = [];
+        // 3. Bind-probe the first `count` free candidates
+        const picked: number[] = [];
+        const r: Record<string, number> = {};
 
-      for (const port of free) {
-        if (picked.length >= count) break;
+        for (const port of free) {
+          if (picked.length >= count) break;
 
-        const available = await isPortAvailable(port);
-        if (!available) continue;
+          const available = await isPortAvailable(port);
+          if (!available) continue;
 
-        picked.push(port);
-        // Map port to the corresponding key by index
-        const keyIndex = picked.length - 1;
-        if (keyIndex < portKeys.length) {
-          result[portKeys[keyIndex]] = port;
+          picked.push(port);
+          const keyIndex = picked.length - 1;
+          if (keyIndex < portKeys.length) {
+            r[portKeys[keyIndex]] = port;
+          }
         }
-      }
 
-      if (picked.length < count) {
-        throw new PortPoolExhaustedError(count, picked.length);
-      }
+        if (picked.length < count) {
+          throw new PortPoolExhaustedError(count, picked.length);
+        }
 
-      // Reserve immediately, inside the serialized block, so any subsequent
-      // queued allocate() already sees these as in-use and won't race-pick
-      // them.
-      for (const port of picked) {
-        allocated.add(port);
-      }
+        // Reserve immediately, inside the serialized block, so any subsequent
+        // queued allocate() already sees these as in-use and won't race-pick
+        // them.
+        for (const port of picked) {
+          allocated.add(port);
+        }
 
-      return result;
+        result = r;
+      } catch (err) {
+        failure = err;
+        throw err;
+      }
     });
+    // If the queue rejected, propagate the error to the caller. The chain
+    // itself has already absorbed the rejection (we don't return it), so
+    // subsequent allocations can still proceed.
+    await allocationQueue.catch(() => undefined);
+    if (failure !== undefined) throw failure;
+    return result!;
   }
 
   function release(sessionId: string): void {
