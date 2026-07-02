@@ -21,6 +21,17 @@
   padding: 0 4px;
   gap: 2px;
   flex-shrink: 0;
+  /* Horizontal scroll for many open projects. Wheel + touchpad scroll
+     is mapped to horizontal by the React side (TabBar.tsx onWheel). */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  /* Hide the scrollbar — keep the visual clean like browsers/IDEs.
+     Firefox: scrollbar-width: none. Chromium/Safari: vendor pseudo. */
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-item {
@@ -33,6 +44,10 @@
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  /* Don't shrink when tab-bar overflows — let it scroll horizontally
+     instead of compressing labels. */
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 13px;
   user-select: none;
   transition: background 0.15s;
