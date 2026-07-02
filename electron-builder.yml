@@ -65,9 +65,13 @@ win:
 # NSIS 安装器详细配置
 nsis:
   oneClick: false
+  # 仅当前用户安装 — 不展示 "为所有用户安装" 选项 (perMachine=false 隐含)
   perMachine: false
-  allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: false
+  # 不允许用户改安装目录 — 避免和"为所有用户"选项混淆
+  allowToChangeInstallationDirectory: false
+  # 卸载时清掉 userData (sessions, todos, global projects.db).
+  # 单用户桌面应用, 不应该跨卸载保留 session 数据.
+  deleteAppDataOnUninstall: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: AgentDock
