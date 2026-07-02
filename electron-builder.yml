@@ -36,11 +36,13 @@ files:
   - node_modules/node-pty/**/*
   # 不在 asar 中，必须 unpack 的原生模块
   - "!node_modules/node-pty/build/**/*"
-  # 显式排除用户数据目录（防御性 — files 是白名单已自动排除）
-  - "!**/.agentdock/**"
-  - "!**/data/db.sqlite*"
-  - "!**/data/**"
-  - "!**/global/projects.db*"
+  # 显式排除用户数据目录（防御性 — files 是白名单已自动排除）。
+  # 注意：使用相对路径而非 `**/data/**` 这种全局 glob，避免误删
+  # out/renderer/data 等合法路径下的运行时资源。
+  - "!.agentdock/**"
+  - "!data/db.sqlite*"
+  - "!data/**"
+  - "!global/projects.db*"
 
 # 原生模块解包到 app.asar.unpacked
 asarUnpack:
