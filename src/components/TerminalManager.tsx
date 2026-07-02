@@ -71,7 +71,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     const terminalMap = new Map(terminals.map((term) => [term.terminalId, term]));
     const ordered = localOrder
       .map((id) => terminalMap.get(id))
-      .filter((t): t is NonNullable<typeof t> => t != null);
+      .filter((term): term is NonNullable<typeof term> => term != null);
     // Append any new terminals from the server that aren't in localOrder yet
     const localSet = new Set(localOrder);
     const added = terminals.filter((term) => !localSet.has(term.terminalId));
@@ -211,7 +211,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       await deleteTerminal.mutateAsync(terminalId);
       terminalCache.dispose(terminalId);
       if (activeTerminalId === terminalId) {
-        const remaining = terminals.filter((t) => t.terminalId !== terminalId && t.status !== "exited");
+        const remaining = terminals.filter((term) => term.terminalId !== terminalId && term.status !== "exited");
         setActiveTerminal(sessionId, remaining.length > 0 ? remaining[0].terminalId : null);
       }
     } catch {
@@ -231,7 +231,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   };
 
   const handleStartRename = useCallback((terminalId: string) => {
-    const terminal = terminals.find((t) => t.terminalId === terminalId);
+    const terminal = terminals.find((term) => term.terminalId === terminalId);
     if (!terminal) return;
     setMenu(null);
     setEditValue(terminal.name);
@@ -241,7 +241,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const handleConfirmRename = useCallback(() => {
     if (!editingId) return;
     const trimmed = editValue.trim();
-    const terminal = terminals.find((t) => t.terminalId === editingId);
+    const terminal = terminals.find((term) => term.terminalId === editingId);
     if (trimmed && terminal && trimmed !== terminal.name) {
       renameTerminal.mutateAsync({ terminalId: editingId, name: trimmed });
     }
@@ -324,7 +324,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     [displayTerminals, terminals, sessionId, dragPosition, queryClient],
   );
 
-  const activeTerminal = terminals.find((t) => t.terminalId === activeTerminalId);
+  const activeTerminal = terminals.find((term) => term.terminalId === activeTerminalId);
   const isDefault = (key: TerminalDefaultAction) => terminalDefaultAction === key;
 
   return (
