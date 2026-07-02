@@ -68,13 +68,13 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   // Derived ordered list of terminals for rendering (no useEffect needed)
   const displayTerminals = useMemo(() => {
     if (!localOrder) return terminals;
-    const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
+    const terminalMap = new Map(terminals.map((term) => [term.terminalId, term]));
     const ordered = localOrder
       .map((id) => terminalMap.get(id))
       .filter((t): t is NonNullable<typeof t> => t != null);
     // Append any new terminals from the server that aren't in localOrder yet
     const localSet = new Set(localOrder);
-    const added = terminals.filter((t) => !localSet.has(t.terminalId));
+    const added = terminals.filter((term) => !localSet.has(term.terminalId));
     return [...ordered, ...added];
   }, [terminals, localOrder]);
 
@@ -125,17 +125,17 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
 
   // Single effect for terminal selection
   useEffect(() => {
-    if (justCreatedRef.current && terminals.find((t) => t.terminalId === justCreatedRef.current)) {
+    if (justCreatedRef.current && terminals.find((term) => term.terminalId === justCreatedRef.current)) {
       justCreatedRef.current = null;
     }
     const justCreated = justCreatedRef.current;
     const isJustCreatedActive = justCreated && activeTerminalId === justCreated;
-    if (!isJustCreatedActive && activeTerminalId && !terminals.find((t) => t.terminalId === activeTerminalId)) {
+    if (!isJustCreatedActive && activeTerminalId && !terminals.find((term) => term.terminalId === activeTerminalId)) {
       setActiveTerminal(sessionId, null);
       return;
     }
     if (!activeTerminalId && terminals.length > 0) {
-      const first = terminals.find((t) => t.status !== "exited") ?? terminals[0];
+      const first = terminals.find((term) => term.status !== "exited") ?? terminals[0];
       setActiveTerminal(sessionId, first.terminalId);
     }
   }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
@@ -299,7 +299,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         return;
       }
 
-      const currentOrder = displayTerminals.map((t) => t.terminalId);
+      const currentOrder = displayTerminals.map((term) => term.terminalId);
       if (!currentOrder.includes(draggedId) || !currentOrder.includes(targetId)) {
         setDragOverTerminalId(null);
         return;
@@ -313,8 +313,8 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       setLocalOrder(next);
 
       // Update React Query cache (side effect outside state updater)
-      const terminalMap = new Map(terminals.map((t) => [t.terminalId, t]));
-      const reordered = next.map((id) => terminalMap.get(id)).filter((t): t is NonNullable<typeof t> => t != null);
+      const terminalMap = new Map(terminals.map((term) => [term.terminalId, term]));
+      const reordered = next.map((id) => terminalMap.get(id)).filter((term): term is NonNullable<typeof term> => term != null);
       queryClient.setQueryData(queryKeys.terminals(sessionId), reordered);
 
       setDragOverTerminalId(null);
@@ -339,35 +339,35 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         onDrop={() => { setDragOverTerminalId(null); setDragActive(false); draggedIdRef.current = null; }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverTerminalId(null); }}
       >
-        {displayTerminals.map((t) => (
+        {displayTerminals.map((term) => (
           <div
-            key={t.terminalId}
+            key={term.terminalId}
             className={[
               "terminal-tab",
-              t.terminalId === activeTerminalId ? "terminal-tab-active" : "",
-              t.status === "exited" ? "terminal-tab-exited" : "",
-              draggedIdRef.current === t.terminalId ? "dragging" : "",
-              dragOverTerminalId === t.terminalId ? (dragPosition === "left" ? "drag-over-left" : "drag-over-right") : "",
+              term.terminalId === activeTerminalId ? "terminal-tab-active" : "",
+              term.status === "exited" ? "terminal-tab-exited" : "",
+              draggedIdRef.current === term.terminalId ? "dragging" : "",
+              dragOverTerminalId === term.terminalId ? (dragPosition === "left" ? "drag-over-left" : "drag-over-right") : "",
             ].filter(Boolean).join(" ")}
             draggable={true}
-            onClick={() => handleTabClick(t.terminalId)}
-            onContextMenu={(e) => handleContextMenu(e, t.terminalId)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleTabClick(t.terminalId); }}
-            onDragStart={() => handleDragStart(t.terminalId)}
+            onClick={() => handleTabClick(term.terminalId)}
+            onContextMenu={(e) => handleContextMenu(e, term.terminalId)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleTabClick(term.terminalId); }}
+            onDragStart={() => handleDragStart(term.terminalId)}
             onDragEnd={handleDragEnd}
-            onDragOver={(e) => handleTabDragOver(e, t.terminalId)}
+            onDragOver={(e) => handleTabDragOver(e, term.terminalId)}
             onDragLeave={handleTabDragLeave}
-            onDrop={(e) => handleTabDrop(e, t.terminalId)}
+            onDrop={(e) => handleTabDrop(e, term.terminalId)}
             tabIndex={0}
             role="tab"
-            aria-selected={t.terminalId === activeTerminalId}
+            aria-selected={term.terminalId === activeTerminalId}
             data-testid="terminal-tab"
-            data-terminal-id={t.terminalId}
+            data-terminal-id={term.terminalId}
           >
             <span className="terminal-tab-icon">
-              {t.status === "exited" ? "○" : "●"}
+              {term.status === "exited" ? "○" : "●"}
             </span>
-            {editingId === t.terminalId ? (
+            {editingId === term.terminalId ? (
               <input
                 ref={inputRef}
                 className="terminal-rename-input"
@@ -378,12 +378,12 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="terminal-tab-name">{t.name}</span>
+              <span className="terminal-tab-name">{term.name}</span>
             )}
             <button
               type="button"
               className="terminal-tab-close"
-              onClick={(e) => handleCloseTerminal(t.terminalId, e)}
+              onClick={(e) => handleCloseTerminal(term.terminalId, e)}
               title={t("closeTerminal")}
             >
               x
