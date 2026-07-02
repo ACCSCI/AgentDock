@@ -77,17 +77,24 @@ export function createWindow(
     });
   }
 
-  // Intercept Ctrl+W / Cmd+W at the OS level so the renderer's keydown
-  // handler can close the active project tab instead of letting the
-  // default application menu (macOS "Close Window", etc.) consume the
-  // shortcut. The renderer-side keydown listener in TabBar.tsx does the
-  // actual tab-closing work; we just suppress the native handler here.
+  // Ctrl+W / Cmd+W — close the active project tab.
+  //
+  // We use IPC (main → renderer) instead of renderer keydown because
+  // calling `event.preventDefault()` in `before-input-event` prevents
+  // the keydown from ever reaching the renderer's DOM listeners (the
+  // event is intercepted before it enters the renderer's event system).
+  //
+  // Without this main-process handler, macOS's default Electron menu
+  // would consume Cmd+W and close the entire window before the
+  // renderer's keydown handler gets a chance to fire.
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
     if (!(input.control || input.meta)) return;
     if (input.key !== "w" && input.key !== "W") return;
     if (input.alt || input.shift) return;
     event.preventDefault();
+    // Tell the renderer to close the active project tab.
+    win.webContents.send("app:close-tab");
   });
 
   win.once("ready-to-show", () => {

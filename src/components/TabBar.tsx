@@ -38,14 +38,25 @@ export function TabBar() {
     }
   }, [openProjects, closeProject, setActiveProject, navigate]);
 
-  // Ctrl+W (Cmd+W on macOS) closes the active project tab. Matches the
-  // common IDE shortcut for "close current tab". Skipped when an input
-  // is focused so users typing in a terminal/editor aren't surprised.
-  // The Electron main process also intercepts this at before-input-event
-  // (electron/main/window.ts) to suppress the OS-level menu binding
-  // (macOS "Close Window", etc.) that would otherwise consume the
-  // shortcut before it reaches the renderer.
+  // Ctrl+W / Cmd+W — close the active project tab.
+  //
+  // Two paths:
+  //   1. IPC "app:close-tab" from main process (handles macOS default menu
+  //      which consumes Cmd+W before the renderer's keydown fires).
+  //   2. Renderer keydown listener (handles Windows/Linux where no menu
+  //      accelerator exists, and the IPC might not fire).
+  //
+  // Both call handleRemoveProject(activeProjectId).
   useEffect(() => {
+    const closeActiveTab = () => {
+      if (!activeProjectId) return;
+      handleRemoveProject(activeProjectId);
+    };
+
+    // Path 1: IPC from main process (via before-input-event → send).
+    const cleanupIpc = window.api?.app?.onCloseTab?.(closeActiveTab) ?? (() => {});
+
+    // Path 2: Renderer keydown (fallback for Windows/Linux).
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key !== "w" && e.key !== "W") return;
@@ -64,7 +75,11 @@ export function TabBar() {
       handleRemoveProject(activeProjectId);
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+
+    return () => {
+      cleanupIpc();
+      window.removeEventListener("keydown", handler);
+    };
   }, [activeProjectId, handleRemoveProject]);
 
   // Wheel handler — React's onWheel={...} is registered as a passive

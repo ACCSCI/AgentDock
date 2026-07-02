@@ -307,6 +307,11 @@ const api = {
         | { status: "error"; message: string }
       >("app:checkForUpdates"),
     quitAndInstall: () => invoke<{ ok: boolean }>("app:quitAndInstall"),
+    // Close the active project tab. Pushed from main process when the
+    // user presses Ctrl+W / Cmd+W — the main process handles the
+    // keydown interception and forwards it via IPC so the renderer
+    // doesn't need to register a DOM-level keydown listener.
+    onCloseTab: (cb: () => void) => on("app:close-tab", cb),
   },
 
   // Global app settings
