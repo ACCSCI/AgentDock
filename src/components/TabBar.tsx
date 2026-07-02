@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { useInitDb, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
 import { useOpenProject } from "../hooks/useOpenProject";
@@ -37,6 +38,33 @@ export function TabBar() {
     }
   };
 
+  // Ctrl+W (Cmd+W on macOS) closes the active project tab. Matches the
+  // common IDE shortcut for "close current tab". Skipped when an input
+  // is focused so users typing in a terminal/editor aren't surprised.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== "w" && e.key !== "W") return;
+      if (e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (!activeProjectId) return;
+      e.preventDefault();
+      handleRemoveProject(activeProjectId);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // handleRemoveProject closes over activeProjectId + openProjects; re-bind
+    // each time either changes so the closure stays current.
+  }, [activeProjectId, openProjects]);
+
   const handleTabClick = (projectId: string) => {
     if (closedProjectIds.includes(projectId)) {
       closeProject(projectId);
@@ -68,7 +96,21 @@ export function TabBar() {
 
   return (
     <>
-      <div className="tab-bar" data-testid="tab-bar">
+      <div
+        className="tab-bar"
+        data-testid="tab-bar"
+        onWheel={(e) => {
+          // Map vertical wheel (mouse) / touchpad horizontal gestures onto
+          // the tab-bar's horizontal scroll. Without this, an overflowing
+          // tab bar would be unreachable on devices without horizontal
+          // scroll wheels (most mouse wheels only emit deltaY).
+          const target = e.currentTarget;
+          if (e.deltaY !== 0 && target.scrollWidth > target.clientWidth) {
+            target.scrollLeft += e.deltaY;
+            e.preventDefault();
+          }
+        }}
+      >
       {openProjects.map((project) => (
         <div
           key={project.id}

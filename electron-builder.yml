@@ -20,6 +20,15 @@ directories:
 
 # 打包到 app.asar 的文件
 # electron-vite 输出在 out/，编译后的 daemon 在 out/daemon/
+#
+# IMPORTANT — 不要把用户数据目录打进安装包：
+#   - ~/.agentdock/projects.db   (global projects DB)
+#   - <userDataDir>/data/db.sqlite  (per-project DB)
+#   - <userDataDir>/global/projects.db  (dev-mode global DB)
+#   - <project>/.agentdock/worktrees/  (session worktrees)
+# 这些目录在用户机器上运行时由 app 创建，不在 repo 里也不该被打包。
+# 下方 files 是白名单（只打包列出项），且额外显式排除任何用户数据
+# 路径作为防御。
 files:
   - out/**/*
   - package.json
@@ -27,6 +36,11 @@ files:
   - node_modules/node-pty/**/*
   # 不在 asar 中，必须 unpack 的原生模块
   - "!node_modules/node-pty/build/**/*"
+  # 显式排除用户数据目录（防御性 — files 是白名单已自动排除）
+  - "!**/.agentdock/**"
+  - "!**/data/db.sqlite*"
+  - "!**/data/**"
+  - "!**/global/projects.db*"
 
 # 原生模块解包到 app.asar.unpacked
 asarUnpack:
