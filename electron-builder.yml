@@ -73,6 +73,10 @@ nsis:
   shortcutName: AgentDock
   # 启用差分更新（blockmap），electron-updater 利用它做增量下载
   differentialPackage: true
+  # 自定义 NSIS 脚本：升级时先删旧 .lnk 再让 installer 重建，强制
+  # explorer 重新读新 exe 的图标（解决"升级后桌面图标还是旧的"问题）
+  # 详见 build/installer/custom-install.nsh
+  include: build/installer/custom-install.nsh
 
 # 仅构建 Windows
 mac: null
