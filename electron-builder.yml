@@ -64,10 +64,42 @@ win:
 
 # NSIS 安装器详细配置
 nsis:
+  # We want:
+  #   - Hide "install for all users" radio from MUI install-mode page
+  #   - Allow custom install path
+  #   - Let user opt in/out of data deletion at uninstall time
+  #
+  # Constraints:
+  #   - perMachine: true would define INSTALL_MODE_PER_ALL_USERS (hiding
+  #     the radio) BUT would install to Program Files (per-machine path).
+  #     We don't actually want that — Electron's userData would still go
+  #     to AppData\Roaming, but the install dir itself would be global.
+  #   - oneClick: true would skip MUI install-mode entirely but rejects
+  #     allowToChangeInstallationDirectory=true at build time.
+  #
+  # Solution: keep perMachine=false + oneClick=false (assisted installer,
+  # path customizable) and inject `INSTALL_MODE_PER_ALL_USERS` via a
+  # customInstall macro. This hides the install-mode radio without
+  # moving the install location to Program Files.
   oneClick: false
-  perMachine: false
+  # perMachine=true: install to Program Files, triggers one UAC prompt
+  # at install time. This is the standard behavior for desktop apps on
+  # Windows (VS Code, Discord, Slack, etc.). Side effects:
+  #   - MUI install-mode page is automatically skipped (template
+  #     detects INSTALL_MODE_PER_ALL_USERS and skips PAGE_INSTALL_MODE)
+  #   - allowToChangeInstallationDirectory=true still works (user can
+  #     pick a non-default dir, but it must be writable by admin)
+  #   - Electron's userData path is unchanged: still per-user at
+  #     %APPDATA%\Roaming\AgentDock (Electron always uses per-user
+  #     userData regardless of install mode)
+  perMachine: true
   allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: false
+  deleteAppDataOnUninstall: true
+  # Custom uninstall macro that additionally cleans
+  # $PROGRAMDATA\AgentDock\ (perMachine data path) on top of the
+  # standard $APPDATA\AgentDock\ cleanup. See
+  # build/installer/custom-uninstall.nsh.
+  include: build/installer/custom-uninstall.nsh
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: AgentDock

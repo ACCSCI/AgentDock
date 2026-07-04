@@ -129,7 +129,15 @@ async function bootstrap() {
     );
     globalDbHandle = openGlobalDb(projectsDbDir);
   } else {
-    globalDbHandle = openGlobalDb();
+    // Co-locate global DB with the rest of the userData so it follows
+    // the install mode (perUser → AppData\Roaming\AgentDock, perMachine →
+    // ProgramData\AgentDock). See electron/main/userdata.ts.
+    const userDataDir = app.getPath("userData");
+    log.info(
+      { userDataDir, installMode: process.execPath.toLowerCase().includes("\\program files\\") ? "perMachine" : "perUser" },
+      "global DB co-located with userData",
+    );
+    globalDbHandle = openGlobalDb(userDataDir);
   }
 
   // 4. Register ALL IPC handlers
@@ -222,18 +230,34 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // ============================================================
-// Dev mode userData isolation
+// User-data path resolution
 // ============================================================
+// The location of userData depends on how AgentDock was installed:
+//   - dev mode (AGENTDOCK_USER_DATA_DIR set): explicit override
+//   - perUser install    → %APPDATA%\AgentDock\ (current user only)
+//   - perMachine install → %PROGRAMDATA%\AgentDock\ (shared by all users)
+//
+// The decision is made here — before app.whenReady — so every IPC handler
+// that reads the DB path sees the right location.
+import { resolveUserDataPath, migrateLegacyUserData } from "./main/userdata.js";
 
 if (process.env.AGENTDOCK_USER_DATA_DIR) {
-  const devUserData = resolve(process.env.AGENTDOCK_USER_DATA_DIR);
-  app.setPath("userData", devUserData);
-}
-
-// 打包后将 userData/sessionData 指向 %APPDATA%/AgentDock.
-if (app.isPackaged) {
-  app.setPath("userData", resolve(app.getPath("appData"), "AgentDock"));
-  app.setPath("sessionData", resolve(app.getPath("appData"), "AgentDock"));
+  app.setPath("userData", resolve(process.env.AGENTDOCK_USER_DATA_DIR));
+} else {
+  const userDataPath = resolveUserDataPath();
+  app.setPath("userData", userDataPath);
+  app.setPath("sessionData", userDataPath);
+  // One-shot migration: if we just switched install mode, copy legacy
+  // userData into the new location so projects / sessions don't disappear.
+  if (app.isPackaged) {
+    const { migratedFrom } = migrateLegacyUserData(userDataPath);
+    if (migratedFrom) {
+      log.info(
+        { userDataPath, migratedFrom },
+        "migrated legacy userData into new location",
+      );
+    }
+  }
 }
 
 // ============================================================
