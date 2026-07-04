@@ -134,7 +134,7 @@ async function bootstrap() {
     // ProgramData\AgentDock). See electron/main/userdata.ts.
     const userDataDir = app.getPath("userData");
     log.info(
-      { userDataDir, installMode: process.execPath.toLowerCase().includes("\\program files\\") ? "perMachine" : "perUser" },
+      { userDataDir, installMode: detectInstallMode() },
       "global DB co-located with userData",
     );
     globalDbHandle = openGlobalDb(userDataDir);
@@ -239,7 +239,7 @@ protocol.registerSchemesAsPrivileged([
 //
 // The decision is made here — before app.whenReady — so every IPC handler
 // that reads the DB path sees the right location.
-import { resolveUserDataPath, migrateLegacyUserData } from "./main/userdata.js";
+import { resolveUserDataPath, migrateLegacyUserData, detectInstallMode } from "./main/userdata.js";
 
 if (process.env.AGENTDOCK_USER_DATA_DIR) {
   app.setPath("userData", resolve(process.env.AGENTDOCK_USER_DATA_DIR));

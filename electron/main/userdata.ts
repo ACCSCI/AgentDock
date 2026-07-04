@@ -82,7 +82,7 @@ function legacyCandidatePaths(): string[] {
  */
 export function migrateLegacyUserData(newPath: string): { migratedFrom: string | null } {
   if (!existsSync(newPath)) mkdirSync(newPath, { recursive: true });
-  const existing = readdirSync(newPath).filter((n) => n !== "Preferences" || n !== "Local State");
+  const existing = readdirSync(newPath).filter((n) => n !== "Preferences" && n !== "Local State");
   if (existing.length > 0) {
     // New path already has data — don't migrate over it.
     return { migratedFrom: null };
