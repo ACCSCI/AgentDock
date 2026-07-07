@@ -284,11 +284,16 @@ export function SessionSidebar() {
   const handleRescanDisk = async () => {
     try {
       const result = await rescan.mutateAsync();
-      const n = result?.synced ?? 0;
-      if (n > 0) {
-        toast.success(`扫描完成, 共 ${n} 个 session`);
+      const { inserted, removed, cleanedOrphans, prunedRefs, total } = result ?? {};
+      if (inserted || removed || cleanedOrphans || prunedRefs) {
+        const parts: string[] = [];
+        if (inserted) parts.push(`新增 ${inserted}`);
+        if (cleanedOrphans) parts.push(`清理孤儿 ${cleanedOrphans}`);
+        if (prunedRefs) parts.push(`修剪 ${prunedRefs}`);
+        if (removed) parts.push(`移除失效 ${removed}`);
+        toast.success(`同步完成: ${parts.join(", ")} (共 ${total} 个)`);
       } else {
-        toast.info("扫描完成, 没有发现新 worktree");
+        toast.info(`扫描完成, 共 ${total ?? 0} 个 session`);
       }
     } catch (err) {
       toast.error(`扫描失败: ${err instanceof Error ? err.message : "未知错误"}`);

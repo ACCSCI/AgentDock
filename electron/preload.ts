@@ -89,7 +89,13 @@ const api = {
   },
 
   sync: {
-    project: () => invoke<{ synced: number }>("sync:project"),
+    project: () => invoke<{
+      inserted: number;
+      removed: number;
+      cleanedOrphans: number;
+      prunedRefs: number;
+      total: number;
+    }>("sync:project"),
   },
 
   sessions: {

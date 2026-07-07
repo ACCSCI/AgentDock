@@ -7,7 +7,8 @@
 import { eq, asc } from "drizzle-orm";
 import { ipcMain } from "electron";
 import { nanoid } from "nanoid";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
@@ -71,6 +72,23 @@ function isDirectoryComplete(dirPath: string): boolean {
 }
 
 /**
+ * Result of a single syncProject call. Returned to the renderer so it
+ * can show accurate toast text (e.g. "X inserted, Y orphans cleaned").
+ */
+export interface SyncReport {
+  /** Sessions newly inserted into the DB from the disk scan. */
+  inserted: number;
+  /** Stale DB rows removed (worktree gone from disk). */
+  removed: number;
+  /** Incomplete worktree directories deleted (no .git pointer or empty). */
+  cleanedOrphans: number;
+  /** Dead refs pruned by `git worktree prune` in the main repo's .git/worktrees/. */
+  prunedRefs: number;
+  /** Total sessions for this project in DB after the sync. */
+  total: number;
+}
+
+/**
  * Full project sync — simple single-instance logic:
  *   1. Scan disk worktrees
  *   2. For each: if not in DB and directory is complete, insert DB record
@@ -81,9 +99,9 @@ export async function syncProject(
   projectPath: string,
   ctx: DbContext,
   force = false,
-): Promise<void> {
+): Promise<SyncReport> {
   const last = lastScanAt.get(projectPath) ?? 0;
-  if (!force && Date.now() - last < SCAN_THROTTLE_MS) return;
+  if (!force && Date.now() - last < SCAN_THROTTLE_MS) return { inserted: 0, removed: 0, cleanedOrphans: 0, prunedRefs: 0, total: 0 };
   lastScanAt.set(projectPath, Date.now());
 
   const db = ensureActiveDb(projectPath);
@@ -146,13 +164,38 @@ export async function syncProject(
         { err, projectPath },
         "syncProject: auto-register failed; aborting sync",
       );
-      return;
+      return { inserted: 0, removed: 0, cleanedOrphans: 0, prunedRefs: 0, total: 0 };
     }
   }
-  if (!project) return;
+  if (!project) return { inserted: 0, removed: 0, cleanedOrphans: 0, prunedRefs: 0, total: 0 };
 
   // 2. Single-DB architecture: project_id migration removed
   // Each session keeps its original project_id from when it was created
+
+  // 2.5. Prune stale .git/worktrees/ refs in the main repo.
+  // After manual cleanup (e.g. user wiped AppData but left worktree dirs
+  // in the project), the registry still points to non-existent paths.
+  // `git worktree prune` cleans those refs so the next `git worktree list`
+  // only returns active worktrees. Failure here is non-fatal: orphan refs
+  // just stay around until the next successful prune.
+  let prunedRefs = 0;
+  try {
+    const out = execFileSync("git", ["worktree", "prune", "--verbose"], {
+      cwd: projectPath,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+    // Each removed ref prints a line like:
+    //   Removing worktrees/<id>: gitdir <path>
+    prunedRefs = out
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith("Removing worktrees/")).length;
+    if (prunedRefs > 0) {
+      log.info({ projectPath, prunedRefs }, "syncProject: pruned stale worktree refs");
+    }
+  } catch (err) {
+    log.warn({ err, projectPath }, "syncProject: git worktree prune failed");
+  }
 
   // 3. Scan disk worktrees
   let disk: ReturnType<typeof scanDiskWorktrees> = [];
@@ -183,43 +226,70 @@ export async function syncProject(
   );
 
   // 5. Insert discovered worktrees not yet in DB
+  let inserted = 0;
+  let cleanedOrphans = 0;
+
   for (const wt of disk) {
     if (existingIds.has(wt.sessionId) || existingPaths.has(wt.worktreePath)) continue;
 
-    // Worktree exists on disk + directory is complete → insert DB record
-    // But skip if session is still being created in SessionManager
-    const dirComplete = isDirectoryComplete(wt.worktreePath);
+    // Skip if session is still being created in SessionManager
     const sessionInProgress = sessionManager?.getSession(wt.sessionId);
-    if (dirComplete && !sessionInProgress) {
-      try {
-        db.insert(schema.sessions)
-          .values({
-            id: wt.sessionId,
-            projectId: project.id,
-            name: wt.sessionId,
-            branch: wt.branch,
-            worktreePath: wt.worktreePath,
-            backgroundHookStatus: null,
-          })
-          .run();
-        log.info(
-          { sessionId: wt.sessionId, projectPath },
-          "syncProject: inserted discovered worktree",
-        );
-      } catch (err) {
-        log.warn({ err, sessionId: wt.sessionId }, "syncProject: insert failed");
-      }
-    } else if (sessionInProgress) {
+    if (sessionInProgress) {
       log.debug(
         { sessionId: wt.sessionId, status: sessionInProgress.status },
         "syncProject: skipping session still in progress",
       );
+      continue;
     }
-    // Incomplete worktrees are not inserted (handled by orphan detection elsewhere)
+
+    const dirComplete = isDirectoryComplete(wt.worktreePath);
+
+    if (!dirComplete) {
+      // Incomplete worktree: no .git pointer, or empty dir. These are
+      // leftovers from failed/interrupted session creation (mkdir succeeded
+      // but git worktree add never finished). Remove them — they have no
+      // useful content and confuse the user.
+      log.info(
+        { sessionId: wt.sessionId, worktreePath: wt.worktreePath },
+        "syncProject: removing incomplete worktree",
+      );
+      try {
+        rmSync(wt.worktreePath, { recursive: true, force: true });
+        cleanedOrphans++;
+      } catch (err) {
+        log.warn(
+          { err, sessionId: wt.sessionId },
+          "syncProject: failed to remove incomplete worktree",
+        );
+      }
+      continue;
+    }
+
+    // Complete worktree — insert into DB
+    try {
+      db.insert(schema.sessions)
+        .values({
+          id: wt.sessionId,
+          projectId: project.id,
+          name: wt.sessionId,
+          branch: wt.branch,
+          worktreePath: wt.worktreePath,
+          backgroundHookStatus: null,
+        })
+        .run();
+      inserted++;
+      log.info(
+        { sessionId: wt.sessionId, projectPath },
+        "syncProject: inserted discovered worktree",
+      );
+    } catch (err) {
+      log.warn({ err, sessionId: wt.sessionId }, "syncProject: insert failed");
+    }
   }
 
   // 6. Clean up stale DB sessions (worktree gone from disk)
   // But skip sessions that are still being created in SessionManager
+  let removed = 0;
   log.info(
     { projectPath, existingCount: existingRows.length, diskCount: disk.length },
     "syncProject: checking stale sessions",
@@ -267,7 +337,19 @@ export async function syncProject(
         .run();
     }
   }
-  // Note: cross-project cleanup removed — existingRows is already filtered by projectId
+
+  // 8. Return structured report for the renderer
+  const total = db
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.projectId, project.id))
+    .all().length;
+
+  log.info(
+    { inserted, removed, cleanedOrphans, prunedRefs, total },
+    "syncProject: complete",
+  );
+  return { inserted, removed, cleanedOrphans, prunedRefs, total };
 }
 
 export function registerDb(ctx: DbContext): void {
@@ -419,9 +501,6 @@ steps: (() => {
     const projectPath = ctx.getProjectPath();
     if (!projectPath) throw new Error("db:init must be called first");
     getDb(ctx);
-    await syncProject(projectPath, ctx, true);
-    const db = getActiveDb();
-    if (!db) return { synced: 0 };
-    return { synced: db.select().from(schema.sessions).all().length };
+    return syncProject(projectPath, ctx, true);
   });
 }
