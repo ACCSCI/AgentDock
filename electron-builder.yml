@@ -15,7 +15,7 @@ publish:
 
 # 目录配置
 directories:
-  output: release/${version}
+  output: release/v0.3.0-section-fix
   buildResources: build
 
 # 打包到 app.asar 的文件
@@ -67,7 +67,18 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: false
+  # On uninstall remove the entire userData directory (sessions, todos,
+  # global projects DB). Combined with build/installer/installer.nsh's
+  # preInit + customInstall + customUnInstall macros, this gives a
+  # fully clean uninstall experience.
+  deleteAppDataOnUninstall: true
+  # Custom NSIS include (default path build/installer/installer.nsh).
+  # preInit: clears legacy InstallLocation registry cache so the next
+  #   install falls back to the perUser default path.
+  # customInstall: forces default install path to
+  #   %LOCALAPPDATA%\Programs\AgentDock on fresh installs.
+  # customUnInstall: also removes C:\ProgramData\AgentDock (perMachine
+  #   shared data path) on top of the standard $APPDATA cleanup.
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: AgentDock

@@ -442,9 +442,26 @@ steps: (() => {
     });
 
     if (existing) {
-      // Return the existing project instead of creating a duplicate
+      // Path differs only in case, trailing slash, or other normalization.
+      // Heal the DB row to use the caller's exact spelling so future
+      // exact-match lookups find it without re-running the fuzzy scan.
+      if (existing.path !== safePath) {
+        globalDb
+          .update(schema.projects)
+          .set({ path: safePath })
+          .where(eq(schema.projects.id, existing.id))
+          .run();
+        log.info(
+          { path: safePath, existingId: existing.id, oldPath: existing.path },
+          "db:projects:create: healed path",
+        );
+      }
       log.info({ path: safePath, existingId: existing.id }, "db:projects:create: project already exists");
-      return existing;
+      return globalDb
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, existing.id))
+        .get();
     }
 
     const id = nanoid(8);
