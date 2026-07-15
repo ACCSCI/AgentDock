@@ -16,6 +16,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
 import { IPC_CHANNEL_COUNT } from "./shared/api-types.js";
 import { registerAllIpc, type AllIpcDeps } from "./main/ipc/index.js";
 import { log } from "../plugins/logger.js";
@@ -109,11 +110,22 @@ async function bootstrap() {
   log.info({ dbBasePath }, "database base path set");
 
   // 3. Auto-init the active project to the current working directory.
-  try {
-    activeProjectPath = process.cwd();
-    log.info({ projectPath: activeProjectPath }, "auto-set active project to cwd");
-  } catch (err) {
-    log.warn({ err }, "failed to auto-set active project");
+  //    ONLY in dev mode: there process.cwd() is the repo root, which is
+  //    a real project the developer wants open. In a packaged build
+  //    process.cwd() is the install directory (e.g.
+  //    C:\Users\<u>\AppData\Local\Programs\AgentDock), which is NOT a
+  //    user project — auto-registering it would create a bogus
+  //    "AgentDock" project tab. Packaged builds start with no active
+  //    project and show the "open project" welcome screen instead.
+  if (!app.isPackaged) {
+    try {
+      activeProjectPath = process.cwd();
+      log.info({ projectPath: activeProjectPath }, "dev mode: auto-set active project to cwd");
+    } catch (err) {
+      log.warn({ err }, "failed to auto-set active project");
+    }
+  } else {
+    log.info("packaged build: no auto active project (waiting for user to open one)");
   }
 
   // 3. Open global projects DB (still used for project lookups by fs-config/worktree-shell)
@@ -129,6 +141,21 @@ async function bootstrap() {
     );
     globalDbHandle = openGlobalDb(projectsDbDir);
   } else {
+    // On startup, proactively clean the legacy homedir global DB
+    // ($HOME/.agentdock/projects.db) if it exists. This path was
+    // used by v0.1-v0.2 before the global DB moved to userData.
+    // Stale entries here cause project tabs to appear on fresh install.
+    // The NSIS uninstaller was supposed to clean this but $USERPROFILE
+    // is not a valid NSIS variable and the cleanup never fires.
+    const legacyDbPath = join(app.getPath("home"), ".agentdock", "projects.db");
+    if (existsSync(legacyDbPath)) {
+      try {
+        unlinkSync(legacyDbPath);
+        log.info({ path: legacyDbPath }, "cleaned legacy homedir global DB on startup");
+      } catch (err) {
+        log.warn({ err, path: legacyDbPath }, "failed to clean legacy global DB");
+      }
+    }
     globalDbHandle = openGlobalDb();
   }
 

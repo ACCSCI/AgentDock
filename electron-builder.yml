@@ -15,7 +15,7 @@ publish:
 
 # 目录配置
 directories:
-  output: release/v0.3.0-section-fix
+  output: release/${version}
   buildResources: build
 
 # 打包到 app.asar 的文件
