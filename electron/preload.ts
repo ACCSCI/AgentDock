@@ -89,7 +89,13 @@ const api = {
   },
 
   sync: {
-    project: () => invoke<{ synced: number }>("sync:project"),
+    project: () => invoke<{
+      inserted: number;
+      removed: number;
+      cleanedOrphans: number;
+      prunedRefs: number;
+      total: number;
+    }>("sync:project"),
   },
 
   sessions: {
@@ -272,6 +278,12 @@ const api = {
       return on<boolean>("window:maximize-change", cb);
     },
   },
+
+  // Close the active project tab. Pushed from main process when the user
+  // presses Ctrl+W / Cmd+W — the main process handles the keydown
+  // interception and forwards it via IPC so the renderer doesn't need
+  // to register a DOM-level keydown listener.
+  onCloseTab: (cb: () => void) => on("app:close-tab", cb),
 
   // Font availability — main pushes "fonts:ready" once the background
   // download finishes so the renderer can trigger a stylesheet refresh.
