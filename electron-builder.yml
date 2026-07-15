@@ -64,21 +64,33 @@ win:
 
 # NSIS 安装器详细配置
 nsis:
+  # perUser install convention (per user's explicit requirement):
+  #   - Install to %LOCALAPPDATA%\Programs\AgentDock (no UAC prompt)
+  #   - Assisted installer with customizable path
+  #   - userData at %APPDATA%\Roaming\AgentDock
+  #
+  # We deliberately keep perMachine=false (NOT the perMachine=true that
+  # PR #114 introduced). perMachine=true installs to Program Files and
+  # triggers a UAC prompt, which contradicts the desired perUser flow.
+  # build/installer/installer.nsh's preInit + customInstall macros force
+  # the default install path to %LOCALAPPDATA%\Programs\AgentDock.
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   # On uninstall remove the entire userData directory (sessions, todos,
   # global projects DB). Combined with build/installer/installer.nsh's
-  # preInit + customInstall + customUnInstall macros, this gives a
-  # fully clean uninstall experience.
+  # preInit + customInstall + customUnInstall + customUnInstallSection
+  # macros, this gives a fully clean uninstall experience.
   deleteAppDataOnUninstall: true
-  # Custom NSIS include (default path build/installer/installer.nsh).
-  # preInit: clears legacy InstallLocation registry cache so the next
-  #   install falls back to the perUser default path.
-  # customInstall: forces default install path to
-  #   %LOCALAPPDATA%\Programs\AgentDock on fresh installs.
-  # customUnInstall: also removes C:\ProgramData\AgentDock (perMachine
-  #   shared data path) on top of the standard $APPDATA cleanup.
+  # Custom NSIS include.
+  #   preInit: clears legacy InstallLocation registry cache so the next
+  #     install falls back to the perUser default path.
+  #   customInstall: forces default install path to
+  #     %LOCALAPPDATA%\Programs\AgentDock on fresh installs.
+  #   customUnInstall / customUnInstallSection: also removes
+  #     $PROFILE\.agentdock (legacy global DB) + C:\ProgramData\AgentDock
+  #     (perMachine data) on top of the standard $APPDATA cleanup.
+  include: build/installer/installer.nsh
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: AgentDock
