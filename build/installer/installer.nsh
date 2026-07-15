@@ -1,9 +1,8 @@
 ; preInit: clear legacy InstallLocation cache so the next install falls
 ; back to the perUser default path. Only clean on fresh installs.
+; The whole body is guarded by !ifndef UNINSTALLER_OUT_FILE so it's a
+; no-op in the uninstaller build (where $INSTDIR mustn't be touched).
 !macro preInit
-  !ifdef BUILD_UNINSTALLER
-    !macroend
-  !endif
   !ifndef UNINSTALLER_OUT_FILE
     ${IfNot} ${isUpdated}
       DeleteRegValue HKLM "Software\AgentDock" "InstallLocation"
@@ -15,11 +14,8 @@
 
 ; customInstall: force the default install path to the perUser
 ; convention ($LOCALAPPDATA\Programs\AgentDock). Skipped on upgrade
-; and skipped on the uninstaller build.
+; and no-op in the uninstaller build.
 !macro customInstall
-  !ifdef BUILD_UNINSTALLER
-    !macroend
-  !endif
   !ifndef UNINSTALLER_OUT_FILE
     ${IfNot} ${isUpdated}
       StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${APP_FILENAME}"
@@ -28,11 +24,9 @@
 !macroend
 
 ; customUnInstall: runs inside Section "Uninstall". Removes data from
-; every location AgentDock may have written to. IMPORTANT: $USERPROFILE
-; is NOT a valid NSIS built-in variable — it's a Windows env var that
-; NSIS doesn't inherit in uninstaller context. We derive the user's
-; home directory from $DESKTOP by stripping the trailing "Desktop" (8
-; chars + trailing backslash = 8 chars from the end).
+; every location AgentDock may have written to. NOTE: $USERPROFILE is
+; NOT a valid NSIS built-in variable — use $PROFILE (= C:\Users\<u>),
+; which is reliable across OneDrive/redirected-folder setups.
 !macro customUnInstall
   ; 1. Install dir (Local\Programs\AgentDock)
   StrCpy $0 "$LOCALAPPDATA\Programs\${APP_FILENAME}"
