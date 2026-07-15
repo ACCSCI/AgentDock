@@ -7,7 +7,6 @@
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import os from "node:os";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { eq } from "drizzle-orm";
@@ -45,20 +44,30 @@ let globalSqlite: DatabaseSync | null = null;
  * the global schema migration (projects table only).
  *
  * @param overrideDir  Optional caller-controlled directory override. When set,
- *                     the DB lives at `<overrideDir>/projects.db` instead of the
- *                     production default `<homedir>/.agentdock/projects.db`.
- *                     Used by dev mode (per-userData isolation) and by E2E
- *                     fixtures to keep test DBs out of the user's real home dir.
- *                     Must be a directory path, not a file path.
+ *                     the DB lives at `<overrideDir>/projects.db` instead of
+ *                     the Electron `userData` directory. Used by the main
+ *                     process to keep the global DB co-located with the rest
+ *                     of the app data (perUser → AppData\Roaming\AgentDock,
+ *                     perMachine → ProgramData\AgentDock) and by E2E
+ *                     fixtures to keep test DBs out of the user's real
+ *                     userData dir. Must be a directory path, not a file path.
  */
 export function openGlobalDb(overrideDir?: string): GlobalDbHandle {
   if (globalDb && globalSqlite) {
     return { db: globalDb, sqlite: globalSqlite, close: closeGlobalDb };
   }
 
-  // Resolve the DB directory: use overrideDir if provided (dev/test),
-  // otherwise fall back to the production default (homedir + .agentdock).
-  const dbDir = overrideDir ?? path.join(os.homedir(), GLOBAL_DB_DIR);
+  // Resolve the DB directory. We always want the global DB co-located with
+  // the rest of the userData so it follows the install mode (perUser or
+  // perMachine) the user picked. The main process is responsible for
+  // passing in the resolved userData path; we default to the current
+  // working directory as a last-resort fallback (e.g. when called from
+  // unit tests that don't go through the main bootstrap).
+  const dbDir =
+    overrideDir ??
+    (typeof process !== "undefined" && process.cwd
+      ? process.cwd()
+      : ".");
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
   }
