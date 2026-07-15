@@ -277,11 +277,6 @@ const api = {
     onMaximizeChange: (cb: (maximized: boolean) => void) => {
       return on<boolean>("window:maximize-change", cb);
     },
-    // Close the active project tab. Pushed from main process when the
-    // user presses Ctrl+W / Cmd+W — the main process handles the
-    // keydown interception and forwards it via IPC so the renderer
-    // doesn't need to register a DOM-level keydown listener.
-    onCloseTab: (cb: () => void) => on("app:close-tab", cb),
   },
 
   // Close the active project tab. Pushed from main process when the user

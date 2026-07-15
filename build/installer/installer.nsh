@@ -50,11 +50,10 @@
     RMDir /r "$0"
   ${EndIf}
   ; 4. Legacy homedir global DB (pre-v0.3 fallback)
-  ;    $DESKTOP = C:\Users\<u>\Desktop; strip last 8 chars ("Desktop")
-  ;    gives C:\Users\<u>\, then append ".agentdock"
-  StrCpy $0 "$DESKTOP"
-  StrCpy $0 $0 -8
-  StrCpy $0 "$0.agentdock"
+  ;    $PROFILE is an NSIS built-in = C:\Users\<u>. Reliable across
+  ;    OneDrive/redirected-folder setups (unlike deriving from $DESKTOP,
+  ;    which becomes C:\Users\<u>\OneDrive\Desktop under OneDrive).
+  StrCpy $0 "$PROFILE\.agentdock"
   ${If} ${FileExists} "$0"
     RMDir /r "$0"
   ${EndIf}
@@ -64,10 +63,8 @@
 ; Runs AFTER customUnInstall, inside Section "Uninstall".
 !macro customUnInstallSection
   Section "-un.AgentDockLegacyCleanup"
-    ; Derive homedir from $DESKTOP (NSIS built-in, reliable in Section context)
-    StrCpy $0 "$DESKTOP"
-    StrCpy $0 $0 -8
-    StrCpy $0 "$0.agentdock"
+    ; $PROFILE = C:\Users\<u> (NSIS built-in, reliable in Section context)
+    StrCpy $0 "$PROFILE\.agentdock"
     ${If} ${FileExists} "$0"
       RMDir /r "$0"
     ${EndIf}

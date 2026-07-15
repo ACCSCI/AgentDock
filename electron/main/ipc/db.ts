@@ -9,7 +9,7 @@ import { ipcMain } from "electron";
 import { nanoid } from "nanoid";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve as resolvePath, sep } from "node:path";
 import { IPC_CHANNELS } from "../../shared/api-types.js";
 import * as schema from "../../../plugins/db/schema.js";
 import {
@@ -249,12 +249,31 @@ export async function syncProject(
       // leftovers from failed/interrupted session creation (mkdir succeeded
       // but git worktree add never finished). Remove them — they have no
       // useful content and confuse the user.
+      //
+      // Safety: verify the path is actually inside this project's
+      // .agentdock/worktrees/ directory before rmSync. scanDiskWorktrees
+      // should only ever return such paths, but rmSync(recursive) is
+      // destructive so we double-check to guard against a malformed
+      // sessionId (e.g. "../..") escaping the intended directory.
+      const worktreesRoot = join(projectPath, ".agentdock", "worktrees");
+      const resolvedWt = resolvePath(wt.worktreePath);
+      const resolvedRoot = resolvePath(worktreesRoot);
+      const insideWorktreesDir =
+        resolvedWt.startsWith(resolvedRoot + sep) &&
+        resolvedWt !== resolvedRoot;
+      if (!insideWorktreesDir) {
+        log.warn(
+          { sessionId: wt.sessionId, worktreePath: wt.worktreePath, worktreesRoot },
+          "syncProject: refusing to remove worktree outside .agentdock/worktrees",
+        );
+        continue;
+      }
       log.info(
         { sessionId: wt.sessionId, worktreePath: wt.worktreePath },
         "syncProject: removing incomplete worktree",
       );
       try {
-        rmSync(wt.worktreePath, { recursive: true, force: true });
+        rmSync(resolvedWt, { recursive: true, force: true });
         cleanedOrphans++;
       } catch (err) {
         log.warn(
