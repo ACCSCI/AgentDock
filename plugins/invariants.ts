@@ -1,3 +1,4 @@
+import { SESSION_ID_RE } from "./config-derived.js";
 // @ts-nocheck
 /**
  * Invariant Assertions — 新架构 §11.3.
@@ -21,7 +22,6 @@
  *      doesn't regress
  */
 import type { DaemonStateV2 } from "./daemon-state-v2.js";
-import { SESSION_ID_RE } from "./config-derived.js";
 
 export interface InvariantResult {
   ok: boolean;
@@ -194,9 +194,7 @@ export function assertWorktreeSingleOwner(state: DaemonStateV2): InvariantResult
  * is a behavioral test of /claim, /session/* routes — caller invokes it
  * after a takeover to confirm stale writes are rejected.
  */
-export function assertNoDoubleWrite(
-  staleWriteStatus: number,
-): InvariantResult {
+export function assertNoDoubleWrite(staleWriteStatus: number): InvariantResult {
   if (staleWriteStatus === 409) {
     return { ok: true, detail: "stale write returned 409 STALE_OWNER" };
   }
@@ -244,10 +242,7 @@ export function assertDisplayNameIsolation(
   // Defense-in-depth: ensure the (potentially dangerous) displayName string
   // appears nowhere in worktreePath or branch.
   const dnameEscaped = displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (
-    dnameEscaped &&
-    new RegExp(dnameEscaped).test(worktreePath + branch)
-  ) {
+  if (dnameEscaped && new RegExp(dnameEscaped).test(worktreePath + branch)) {
     return {
       ok: false,
       detail: `displayName '${displayName}' appears in path/branch — injection`,
@@ -283,7 +278,13 @@ export function assertSnapshotStreamMonotonic(
   // For any key in both, incremental value must win (be >= snapshot, with
   // port counter as a stand-in for "more recent").
   for (const key of Object.keys(snapshotState)) {
-    if (key in incrementalAfter && incrementalAfter[key]! < snapshotState[key]!) {
+    const incrementalValue = incrementalAfter[key];
+    const snapshotValue = snapshotState[key];
+    if (
+      incrementalValue !== undefined &&
+      snapshotValue !== undefined &&
+      incrementalValue < snapshotValue
+    ) {
       return {
         ok: false,
         detail: `key ${key}: incremental=${incrementalAfter[key]} regressed snapshot=${snapshotState[key]}`,

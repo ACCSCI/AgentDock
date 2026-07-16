@@ -138,9 +138,7 @@
 
 .session-sidebar-resize-handle:hover .session-sidebar-resize-dots {
   background: var(--color-primary);
-  box-shadow:
-    -4px 0 0 var(--color-primary),
-    4px 0 0 var(--color-primary);
+  box-shadow: -4px 0 0 var(--color-primary), 4px 0 0 var(--color-primary);
 }
 
 .session-sidebar-resize-dots {
@@ -149,9 +147,7 @@
   height: 2px;
   border-radius: 50%;
   background: var(--color-border-light);
-  box-shadow:
-    -4px 0 0 var(--color-border-light),
-    4px 0 0 var(--color-border-light);
+  box-shadow: -4px 0 0 var(--color-border-light), 4px 0 0 var(--color-border-light);
   transition: background 0.15s, box-shadow 0.15s;
 }
 
@@ -163,4 +159,3 @@
   flex-direction: column;
   gap: 4px;
 }
-

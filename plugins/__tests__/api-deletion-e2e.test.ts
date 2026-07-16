@@ -1,14 +1,14 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import path from "node:path";
+import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import os from "node:os";
-import { createDb, type DrizzleDb } from "../db/index.js";
-import { projects, sessions } from "../db/schema.js";
+import path from "node:path";
 import { eq } from "drizzle-orm";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../config.js";
+import { type DrizzleDb, createDb } from "../db/index.js";
+import { projects, sessions } from "../db/schema.js";
 import { createHookEngine, createHookRegistry } from "../hook-engine.js";
 import type { PortService } from "../session-lifecycle.js";
 
@@ -19,7 +19,9 @@ function createMockPortService(): PortService {
     async allocateSession() {
       const ports: Record<string, number> = {};
       const keys = ["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT", "DEBUG_PORT", "PREVIEW_PORT"];
-      keys.forEach((k, i) => { ports[k] = 30000 + counter * keys.length + i; });
+      keys.forEach((k, i) => {
+        ports[k] = 30000 + counter * keys.length + i;
+      });
       counter++;
       return ports;
     },
@@ -35,9 +37,7 @@ let baseUrl: string;
 
 const isWin = process.platform === "win32";
 function sleepCmd(seconds: number): string {
-  return isWin
-    ? `ping -n ${seconds + 1} 127.0.0.1 >nul`
-    : `sleep ${seconds}`;
+  return isWin ? `ping -n ${seconds + 1} 127.0.0.1 >nul` : `sleep ${seconds}`;
 }
 
 function initGitRepo(dir: string) {
@@ -46,15 +46,21 @@ function initGitRepo(dir: string) {
   execSync("git config user.name Test", { cwd: dir, stdio: "pipe" });
   writeFileSync(path.join(dir, "README.md"), "# test\n");
   execSync("git add .", { cwd: dir, stdio: "pipe" });
-  execSync('git commit -m init', { cwd: dir, stdio: "pipe" });
+  execSync("git commit -m init", { cwd: dir, stdio: "pipe" });
 }
 
 function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString();
+    });
     req.on("end", () => {
-      try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); }
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch {
+        resolve({});
+      }
     });
   });
 }
@@ -92,14 +98,20 @@ beforeEach(async () => {
       const projectId = scMatch[1];
       const body = await parseBody(req);
       const { name: sessionName } = body as { name?: string };
-      if (!sessionName) { json(res, 400, { error: "name is required" }); return; }
+      if (!sessionName) {
+        json(res, 400, { error: "name is required" });
+        return;
+      }
       try {
         const p = db.select().from(projects).where(eq(projects.id, projectId)).get();
-        if (!p) { json(res, 404, { error: "Project not found" }); return; }
+        if (!p) {
+          json(res, 404, { error: "Project not found" });
+          return;
+        }
 
         const config = loadConfig(p.path);
         const registry = createHookRegistry();
-        const engine = createHookEngine(registry);
+        const _engine = createHookEngine(registry);
         const lifecycle = (await import("../session-lifecycle.js")).createSessionLifecycle({
           portService: createMockPortService(),
         });
@@ -107,21 +119,26 @@ beforeEach(async () => {
         const result = await lifecycle.create({
           projectId,
           projectPath: p.path,
-          sessionId: pathname.split("/").slice(-1)[0] + "_" + Date.now(),
+          sessionId: `${pathname.split("/").slice(-1)[0]}_${Date.now()}`,
           sessionName,
           config,
         });
 
-        db.insert(sessions).values({
-          id: result.sessionId,
-          projectId,
-          name: sessionName,
-          branch: result.branch,
-          worktreePath: result.worktreePath,
-          ports: JSON.stringify(result.ports),
-        }).run();
+        db.insert(sessions)
+          .values({
+            id: result.sessionId,
+            projectId,
+            name: sessionName,
+            branch: result.branch,
+            worktreePath: result.worktreePath,
+            ports: JSON.stringify(result.ports),
+          })
+          .run();
 
-        json(res, 200, { success: true, session: { id: result.sessionId, worktreePath: result.worktreePath, ports: result.ports } });
+        json(res, 200, {
+          success: true,
+          session: { id: result.sessionId, worktreePath: result.worktreePath, ports: result.ports },
+        });
       } catch (err) {
         json(res, 500, { error: err instanceof Error ? err.message : "Unknown error" });
       }
@@ -134,9 +151,15 @@ beforeEach(async () => {
       const id = sMatch[1];
       try {
         const s = db.select().from(sessions).where(eq(sessions.id, id)).get();
-        if (!s) { json(res, 404, { error: "Session not found" }); return; }
+        if (!s) {
+          json(res, 404, { error: "Session not found" });
+          return;
+        }
         const p = db.select().from(projects).where(eq(projects.id, s.projectId)).get();
-        if (!p) { json(res, 404, { error: "Project not found" }); return; }
+        if (!p) {
+          json(res, 404, { error: "Project not found" });
+          return;
+        }
 
         const config = loadConfig(p.path);
         const { createSessionLifecycle } = await import("../session-lifecycle.js");
@@ -191,10 +214,14 @@ beforeEach(async () => {
 afterEach(async () => {
   if (server) server.close();
   if (existsSync(projectDir)) {
-    try { rmSync(projectDir, { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(projectDir, { recursive: true, force: true });
+    } catch {}
   }
   if (existsSync(dbDir)) {
-    try { rmSync(dbDir, { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(dbDir, { recursive: true, force: true });
+    } catch {}
   }
 });
 
@@ -213,9 +240,14 @@ async function api(method: string, pathname: string, body?: Record<string, unkno
 // E19–E21: 删除与孤儿清理 E2E
 // ============================================================
 describe("E2E — 删除 session 与孤儿目录清理", () => {
-  it("E19: 创建带异步 hook 的 session → 不等 hook 完成 → 删除成功", { timeout: 120000 }, async () => {
-    // 写入 config：异步 hook 长时间运行
-    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+  it(
+    "E19: 创建带异步 hook 的 session → 不等 hook 完成 → 删除成功",
+    { timeout: 120000 },
+    async () => {
+      // 写入 config：异步 hook 长时间运行
+      writeFileSync(
+        path.join(projectDir, "agentdock.config.yaml"),
+        `
 version: "1"
 resources: { sync: [] }
 hooks:
@@ -227,31 +259,38 @@ hooks:
       async: true
 env:
   ports: [FRONTEND_PORT, BACKEND_PORT, WS_PORT, DEBUG_PORT, PREVIEW_PORT]
-`);
+`,
+      );
 
-    const createRes = await api("POST", "/api/projects/delproj/sessions", { name: "E19 Session" });
-    expect(createRes.status).toBe(200);
-    expect(createRes.data.success).toBe(true);
-    expect(createRes.data.session.worktreePath).toBeDefined();
-    const worktreePath = createRes.data.session.worktreePath;
-    expect(existsSync(worktreePath)).toBe(true);
+      const createRes = await api("POST", "/api/projects/delproj/sessions", {
+        name: "E19 Session",
+      });
+      expect(createRes.status).toBe(200);
+      expect(createRes.data.success).toBe(true);
+      expect(createRes.data.session.worktreePath).toBeDefined();
+      const worktreePath = createRes.data.session.worktreePath;
+      expect(existsSync(worktreePath)).toBe(true);
 
-    // 不等 hook 完成，立即删除
-    await new Promise((r) => setTimeout(r, 500));
-    const delRes = await api("DELETE", `/api/sessions/${createRes.data.session.id}`);
-    expect(delRes.status).toBe(200);
-    expect(delRes.data.success).toBe(true);
-    expect(existsSync(worktreePath)).toBe(false);
-  });
+      // 不等 hook 完成，立即删除
+      await new Promise((r) => setTimeout(r, 500));
+      const delRes = await api("DELETE", `/api/sessions/${createRes.data.session.id}`);
+      expect(delRes.status).toBe(200);
+      expect(delRes.data.success).toBe(true);
+      expect(existsSync(worktreePath)).toBe(false);
+    },
+  );
 
   it("E20: 创建→删除→再创建同一 session（端口重新分配）", { timeout: 60000 }, async () => {
-    writeFileSync(path.join(projectDir, "agentdock.config.yaml"), `
+    writeFileSync(
+      path.join(projectDir, "agentdock.config.yaml"),
+      `
 version: "1"
 resources: { sync: [] }
 hooks: {}
 env:
   ports: [FRONTEND_PORT, BACKEND_PORT, WS_PORT, DEBUG_PORT, PREVIEW_PORT]
-`);
+`,
+    );
 
     const c1 = await api("POST", "/api/projects/delproj/sessions", { name: "First" });
     expect(c1.status).toBe(200);

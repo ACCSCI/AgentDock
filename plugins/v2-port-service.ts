@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { PORT_KEYS_DEFAULT } from "./config.js";
 // @ts-nocheck
 /**
  * v2 PortService — 新架构 §4.2 + §4.4.
@@ -34,11 +37,8 @@
  * an internal concern.
  */
 import { LEASE_RENEW_INTERVAL_MS } from "./constants.js";
-import { PORT_KEYS_DEFAULT } from "./config.js";
 import type { SessionPorts } from "./daemon-state.js";
 import type { PortService } from "./session-lifecycle.js";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 
 /**
  * parseEnvFilePorts — 解析 .env 文件, 提取形如 `KEY=number` 的行.
@@ -76,18 +76,13 @@ function parseEnvFilePorts(contents: string): Record<string, number> {
  * "键数 == N" 判通过会把脏 .env 误判为已提交. 本函数做**逐项值匹配**
  * (架构 §4.2 不变式).
  */
-export function verifyCommitPoint(
-  worktreePath: string,
-  claimedPorts: SessionPorts,
-): void {
+export function verifyCommitPoint(worktreePath: string, claimedPorts: SessionPorts): void {
   const envFile = path.join(worktreePath, ".env");
   let envContents: string;
   try {
     envContents = readFileSync(envFile, "utf-8");
   } catch (err) {
-    throw new Error(
-      `commit-point verify: cannot read ${envFile}: ${(err as Error).message}`,
-    );
+    throw new Error(`commit-point verify: cannot read ${envFile}: ${(err as Error).message}`);
   }
   const envValues = parseEnvFilePorts(envContents);
   const claimedEntries = Object.entries(claimedPorts);
@@ -100,9 +95,7 @@ export function verifyCommitPoint(
       throw new Error(`commit-point verify: .env missing port key ${name}`);
     }
     if (envVal !== port) {
-      throw new Error(
-        `commit-point verify: .env ${name}=${envVal} != daemon port ${port}`,
-      );
+      throw new Error(`commit-point verify: .env ${name}=${envVal} != daemon port ${port}`);
     }
   }
 }
@@ -337,12 +330,7 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       };
       tokens.set(sessionId, createBody.fencingToken);
       statuses.set(sessionId, "creating");
-      startLeaseRenewal(
-        sessionId,
-        sessionId,
-        createBody.fencingToken,
-        "creating",
-      );
+      startLeaseRenewal(sessionId, sessionId, createBody.fencingToken, "creating");
 
       try {
         // 2. Claim each port key.
@@ -351,9 +339,11 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         sessionPortKeys.set(sessionId, [...keys]);
         const ports: SessionPorts = {};
         for (const name of keys) {
+          const claimToken = tokens.get(sessionId);
+          if (claimToken === undefined) throw new Error(`Missing fencing token for ${sessionId}`);
           const claim = await postJson("/claim", {
             sessionId,
-            fencingToken: tokens.get(sessionId)!,
+            fencingToken: claimToken,
             name,
           });
           if (!claim.ok) {
@@ -375,9 +365,12 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
         }
 
         // 3. Activate — commits the session to active.
+        const activationToken = tokens.get(sessionId);
+        if (activationToken === undefined)
+          throw new Error(`Missing fencing token for ${sessionId}`);
         const activate = await postJson("/session/activate", {
           sessionId,
-          fencingToken: tokens.get(sessionId)!,
+          fencingToken: activationToken,
         });
         if (!activate.ok) {
           throw new Error(`v2 /session/activate failed: ${activate.status}`);
@@ -460,7 +453,9 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       const body = (await res.json()) as { ports: SessionPorts };
       return body.ports;
     },
-    completeDeletion: service.completeDeletion!,
+    completeDeletion: async (sessionId) => {
+      await service.completeDeletion?.(sessionId);
+    },
     async claimOrReuse(params: {
       sessionId: string;
       projectPath: string;
@@ -516,9 +511,12 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
           }
         }
         // Activate
+        const activationToken = tokens.get(sessionId);
+        if (activationToken === undefined)
+          throw new Error(`Missing fencing token for ${sessionId}`);
         const activate = await postJson("/session/activate", {
           sessionId,
-          fencingToken: tokens.get(sessionId)!,
+          fencingToken: activationToken,
         });
         if (!activate.ok) {
           throw new Error(`v2 /session/activate failed: ${activate.status}`);
@@ -529,11 +527,12 @@ export function createV2PortService(deps: V2PortServiceDeps): V2PortServiceHandl
       // 3. Daemon already had this session (active, ports already claimed).
       //    Return daemon's current port state via /debug/state.
       const state = await getDebugState();
-      const sessionPorts = state?.v2Ports
-        ? Object.values(state.v2Ports)
-            .filter((p) => p.sessionId === sessionId)
-            .reduce((acc, p) => ({ ...acc, [p.name]: p.port }), {} as SessionPorts)
-        : {};
+      const sessionPorts: SessionPorts = {};
+      if (state?.v2Ports) {
+        for (const port of Object.values(state.v2Ports)) {
+          if (port.sessionId === sessionId) sessionPorts[port.name] = port.port;
+        }
+      }
       return sessionPorts;
     },
     // §5.3 — 列出本地已知的所有 active/creating sessions, 给断线重连

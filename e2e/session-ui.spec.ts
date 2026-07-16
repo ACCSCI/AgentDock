@@ -19,20 +19,19 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { dumpDb } from "./helpers/dump";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TabBarPage } from "./pages/tab-bar";
 import { TID } from "./pages/testids";
-import { dumpDb } from "./helpers/dump";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -73,16 +72,16 @@ test.describe("session UI flow (real clicks)", () => {
     // 4. The TabBar should now show a tab for the project.
     const tabBar = new TabBarPage(window);
     await expect(tabBar.tabBar).toBeVisible();
-    await expect(
-      window.locator(`[data-testid="${TID.projectTab}"]`).first(),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(window.locator(`[data-testid="${TID.projectTab}"]`).first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     // 5. SessionSidebar should appear (we landed on /app/$projectId).
     const sidebar = new SidebarPage(window);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     expect(await sidebar.cardCount()).toBe(0);
 
-    // 6. Click "+" to create a session. The renderer's useCreateSessionSSE
+    // 6. Click "+" to create a session. The renderer's session mutation hook
     //    handles the IPC + optimistic update; the card should appear.
     await sidebar.clickNewSession();
 
@@ -90,9 +89,7 @@ test.describe("session UI flow (real clicks)", () => {
     //    sidebar's optimistic insert runs as soon as `sessions:create`
     //    resolves with `{sessionId}`. We don't know the id yet, so
     //    wait by count.
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     // 8. Find the card's sessionId from its data attribute, then assert
     //    its DB row landed with a real port.
@@ -116,23 +113,26 @@ test.describe("session UI flow (real clicks)", () => {
           // On timeout the message should show what we DID see so we
           // know whether the DB is empty (wrong file?) vs has rows with
           // null ports (race / scan not run yet).
-          if (!row) return JSON.stringify({ sessionId, sawSessions: dump.sessions.map((s) => s.id), sawProjects: dump.projects.length });
+          if (!row)
+            return JSON.stringify({
+              sessionId,
+              sawSessions: dump.sessions.map((s) => s.id),
+              sawProjects: dump.projects.length,
+            });
           return row.ports;
         },
         { timeout: 30_000, message: "session ports never persisted" },
       )
       .not.toBeNull();
 
-    // 10. Delete the session via UI: click the close ✕ inside the card
-    //     (which arms the inline confirm), then click the ✓ to confirm.
-    //     Selectors come from SessionCard.tsx — `.session-close` triggers
-    //     the confirm row, `.session-delete-confirm-yes` accepts it.
+    // 10. Delete the session via UI: click the close ✕ inside the card,
+    //     then confirm in the shared deletion modal.
     //     Use a longer timeout — in full-suite runs the card may still
     //     be transitioning to active state when we get here.
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.waitFor({ state: "visible", timeout: 15_000 });
     await deleteBtn.click();
-    const confirmYes = card.locator(".session-delete-confirm-yes");
+    const confirmYes = window.getByTestId("confirm-delete-ok");
     await confirmYes.waitFor({ state: "visible", timeout: 10_000 });
     await confirmYes.click();
 
@@ -146,10 +146,7 @@ test.describe("session UI flow (real clicks)", () => {
 
     // 12. DB row should be gone too.
     await expect
-      .poll(
-        () => dumpDb(dataDir).sessions.find((s) => s.id === sessionId),
-        { timeout: 5_000 },
-      )
+      .poll(() => dumpDb(dataDir).sessions.find((s) => s.id === sessionId), { timeout: 5_000 })
       .toBeUndefined();
 
     // 13. No native dialogs should have popped during the flow.
@@ -161,10 +158,7 @@ test.describe("session UI flow (real clicks)", () => {
     ).toHaveLength(0);
 
     // 14. No renderer pageerrors either.
-    expect(
-      pageErrors,
-      `renderer pageerrors: ${JSON.stringify(pageErrors)}`,
-    ).toHaveLength(0);
+    expect(pageErrors, `renderer pageerrors: ${JSON.stringify(pageErrors)}`).toHaveLength(0);
 
     // 15. Verify the main-process log doesn't contain an EPIPE
     //     "uncaught exception" line — the bug surfaced as a popup
@@ -187,7 +181,7 @@ test.describe("session UI flow (real clicks)", () => {
       (e) =>
         e.type === "error" &&
         !e.text.includes("agentdock-fonts://") &&
-        !((e.location && e.location.url) || "").includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
         !e.text.includes("net::ERR_FAILED"),
     );
     expect(

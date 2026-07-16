@@ -1,3 +1,7 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 // @ts-nocheck
 /**
  * F6: renameWorktree must derive the new branch from sessionId, NOT
@@ -17,17 +21,7 @@
  * rename, regardless of what newName was. We can no longer derive branch
  * from newName (which can be unicode, emoji, etc., §4.1).
  */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { execSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorktree, renameWorktree } from "../worktree.js";
 
 let projectDir: string;
@@ -97,24 +91,14 @@ describe("renameWorktree — F6 branch derives from sessionId, NOT newName", () 
     createWorktree(projectDir, "sesJKL");
     // Pass a currentBranch — should be ignored for derivation (we still
     // take sessionId as the source of truth).
-    const result = renameWorktree(
-      projectDir,
-      "sesJKL",
-      "another display",
-      "agentdock/sesJKL",
-    );
+    const result = renameWorktree(projectDir, "sesJKL", "another display", "agentdock/sesJKL");
     expect(result.newBranch).toBe("agentdock/sesJKL");
   });
 
   it("WRN5: 连续 rename 不会导致 branch 漂移", () => {
     createWorktree(projectDir, "sesMNO");
     renameWorktree(projectDir, "sesMNO", "first");
-    const result = renameWorktree(
-      projectDir,
-      "sesMNO",
-      "second",
-      "agentdock/sesMNO",
-    );
+    const result = renameWorktree(projectDir, "sesMNO", "second", "agentdock/sesMNO");
     expect(result.newBranch).toBe("agentdock/sesMNO");
     const branches = execSync("git branch --list", {
       cwd: projectDir,
@@ -128,12 +112,7 @@ describe("renameWorktree — F6 branch derives from sessionId, NOT newName", () 
   it("WRN6: worktree 路径保持 agentdock/worktrees/<sessionId>", () => {
     createWorktree(projectDir, "sesPQR");
     renameWorktree(projectDir, "sesPQR", "中文名;rm -rf");
-    const expectedPath = path.join(
-      projectDir,
-      ".agentdock",
-      "worktrees",
-      "sesPQR",
-    );
+    const expectedPath = path.join(projectDir, ".agentdock", "worktrees", "sesPQR");
     expect(existsSync(expectedPath)).toBe(true);
   });
 });

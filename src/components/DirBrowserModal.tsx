@@ -27,9 +27,13 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   const scrollPositions = useRef<Map<string, number>>(new Map());
 
   // Register the shortcut so Alt+D (or whatever the user configured) focuses the search input.
-  useShortcutAction("dirSearchFocus", useCallback(() => {
-    searchInputRef.current?.focus();
-  }, []), open);
+  useShortcutAction(
+    "dirSearchFocus",
+    useCallback(() => {
+      searchInputRef.current?.focus();
+    }, []),
+    open,
+  );
 
   // Filter entries by search keyword
   const displayEntries = search.trim()
@@ -65,6 +69,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   }, [currentPath]);
 
   // Restore scroll position when data for the new directory is ready
+  // biome-ignore lint/correctness/useExhaustiveDependencies: entries changing means the directory listing has finished refreshing and its scroll position can be restored.
   useLayoutEffect(() => {
     if (!loading && listRef.current) {
       const saved = scrollPositions.current.get(currentPath);
@@ -128,7 +133,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     } else if (lastSlash > 0) {
       const parent = normalized.slice(0, lastSlash);
       // On Windows, "C:" needs a backslash — "C:/" → "C:\"
-      const parentPath = /^[A-Z]:$/.test(parent) ? parent + "\\" : parent;
+      const parentPath = /^[A-Z]:$/.test(parent) ? `${parent}\\` : parent;
       fetchDirs(parentPath);
     } else {
       // Reached top — go to root list
@@ -147,10 +152,10 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     for (const part of parts) {
       if (part.endsWith(":")) {
         // Windows drive letter — e.g. "C:" → "C:\"
-        accumulated = part + "\\";
+        accumulated = `${part}\\`;
       } else if (!accumulated && isUnixRoot) {
         // First segment on Unix — prepend /
-        accumulated = "/" + part;
+        accumulated = `/${part}`;
       } else {
         accumulated = `${accumulated}${sep}${part}`;
       }
@@ -159,12 +164,13 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   }
 
   return (
-    <div className="dir-modal-overlay" onClick={onCancel}>
-      <div
-        className="dir-modal"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="dir-modal"
-      >
+    <div
+      className="dir-modal-overlay"
+      role="presentation"
+      onClick={(event) => event.target === event.currentTarget && onCancel()}
+      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    >
+      <div className="dir-modal" data-testid="dir-modal">
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
             <button
@@ -185,11 +191,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
         {/* Breadcrumb */}
         <div className="dir-modal-breadcrumb">
-          <button
-            type="button"
-            className="dir-breadcrumb-item"
-            onClick={() => fetchDirs()}
-          >
+          <button type="button" className="dir-breadcrumb-item" onClick={() => fetchDirs()}>
             /
           </button>
           {breadcrumbs.map((seg) => (
@@ -231,7 +233,8 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
           {!loading &&
             !error &&
             displayEntries.map((entry) => (
-              <div
+              <button
+                type="button"
                 key={entry.path}
                 className={`dir-entry ${selected === entry.path ? "dir-entry-selected" : ""}`}
                 onClick={() => handleEntryClick(entry)}
@@ -256,7 +259,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
                     ▶
                   </button>
                 )}
-              </div>
+              </button>
             ))}
         </div>
 

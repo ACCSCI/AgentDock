@@ -39,8 +39,6 @@
       "detail": "点击 dir-confirm (disabled=false)"
     }
   ],
-  "errors": [
-    "page.waitForFunction: Timeout 30000ms exceeded."
-  ],
+  "errors": ["page.waitForFunction: Timeout 30000ms exceeded."],
   "summary": "Failed: 0 step(s) failed, 1 error(s)."
 }

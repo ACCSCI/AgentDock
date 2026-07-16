@@ -52,7 +52,9 @@ export function captureLogs(fn: () => void | Promise<void>): Promise<CapturedLog
   const previousLogger = (globalThis as { __testLogger?: Logger }).__testLogger;
   (globalThis as { __testLogger?: Logger }).__testLogger = logger;
 
-  return Promise.resolve(fn()).finally(() => {
-    (globalThis as { __testLogger?: Logger }).__testLogger = previousLogger;
-  }).then(() => captured);
+  return Promise.resolve(fn())
+    .finally(() => {
+      (globalThis as { __testLogger?: Logger }).__testLogger = previousLogger;
+    })
+    .then(() => captured);
 }

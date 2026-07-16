@@ -8,19 +8,18 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -36,7 +35,6 @@ test.describe("error recovery", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -47,19 +45,19 @@ test.describe("error recovery", () => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     // 1. Open project and create a session.
     await home.openProject(projectPath);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {});
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
 
     const nameEl = card.locator(".session-name");
     await expect(nameEl).toBeVisible({ timeout: 5_000 });
@@ -110,14 +108,10 @@ test.describe("error recovery", () => {
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
     await card.locator(".session-delete-confirm-yes").click();
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     // 8. No React infinite loops or page errors.
-    const maxDepthErrors = rendererLog.filter((e) =>
-      /Maximum update depth exceeded/i.test(e.text),
-    );
+    const maxDepthErrors = rendererLog.filter((e) => /Maximum update depth exceeded/i.test(e.text));
     expect(
       maxDepthErrors,
       `React infinite-loop during error recovery:\n${maxDepthErrors.map((e) => e.text).join("\n")}`,
@@ -128,10 +122,11 @@ test.describe("error recovery", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

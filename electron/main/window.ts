@@ -1,3 +1,6 @@
+import { dirname, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 /**
  * Window creation — BrowserWindow factory with DevTools, titlebar, and
  * lifecycle wiring.
@@ -6,10 +9,7 @@
  * capture the window reference (since `createWindow` mutates the module-
  * level `mainWindow` variable back in main.ts).
  */
-import { app, BrowserWindow } from "electron";
-import { dirname, resolve } from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { BrowserWindow, app } from "electron";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -27,9 +27,7 @@ const __dirname = dirname(__filename);
  *   Receives the window before `ready-to-show` fires.
  * @returns The newly created BrowserWindow.
  */
-export function createWindow(
-  onCreated?: (win: BrowserWindow) => void,
-): BrowserWindow {
+export function createWindow(onCreated?: (win: BrowserWindow) => void): BrowserWindow {
   // e2e/debug knob — when AGENTDOCK_E2E_DEVTOOLS=1 the test runner (or a
   // developer reproducing a failure) gets a detached DevTools window so
   // they can inspect React state / network / storage from outside the
@@ -66,12 +64,12 @@ export function createWindow(
 
   // Allow F12 to toggle DevTools in development
   if (devToolsEnabled) {
-    win.webContents.on("before-input-event", (event, input) => {
+    win.webContents.on("before-input-event", (_event, input) => {
       if (input.key === "F12" && input.type === "keyDown") {
-        if (event.sender.isDevToolsOpened()) {
-          event.sender.closeDevTools();
+        if (win.webContents.isDevToolsOpened()) {
+          win.webContents.closeDevTools();
         } else {
-          event.sender.openDevTools({ mode: "detach" });
+          win.webContents.openDevTools({ mode: "detach" });
         }
       }
     });

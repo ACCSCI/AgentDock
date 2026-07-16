@@ -92,7 +92,9 @@ function loadSidebarWidth(): number {
       const v = Number(raw);
       if (Number.isFinite(v) && v >= SIDEBAR_MIN_WIDTH && v <= SIDEBAR_MAX_WIDTH) return v;
     }
-  } catch { /* localStorage unavailable */ }
+  } catch {
+    /* localStorage unavailable */
+  }
   return SIDEBAR_WIDTH_DEFAULT;
 }
 
@@ -110,7 +112,9 @@ function loadClosedProjects(): string[] {
 function saveClosedProjects(ids: string[]) {
   try {
     localStorage.setItem(CLOSED_PROJECTS_KEY, JSON.stringify(ids));
-  } catch { /* localStorage full or unavailable */ }
+  } catch {
+    /* localStorage full or unavailable */
+  }
 }
 
 const TERMINAL_DEFAULT_ACTION_KEY = "agentdock_terminal_default_action";
@@ -119,7 +123,9 @@ function loadTerminalDefaultAction(): TerminalDefaultAction {
   try {
     const raw = localStorage.getItem(TERMINAL_DEFAULT_ACTION_KEY);
     if (raw === "terminal" || raw === "claude" || raw === "copilot") return raw;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return "terminal";
 }
 
@@ -130,15 +136,20 @@ function loadTerminalPrefs(): TerminalPreferences {
     const raw = localStorage.getItem(TERMINAL_PREFS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<TerminalPreferences>;
-      const fontSize = (typeof parsed.fontSize === "number" && TERMINAL_FONT_SIZES.includes(parsed.fontSize as TerminalFontSize))
-        ? (parsed.fontSize as TerminalFontSize)
-        : DEFAULT_TERMINAL_PREFS.fontSize;
-      const fontFamily = typeof parsed.fontFamily === "string" && parsed.fontFamily
-        ? parsed.fontFamily
-        : DEFAULT_TERMINAL_PREFS.fontFamily;
+      const fontSize =
+        typeof parsed.fontSize === "number" &&
+        TERMINAL_FONT_SIZES.includes(parsed.fontSize as TerminalFontSize)
+          ? (parsed.fontSize as TerminalFontSize)
+          : DEFAULT_TERMINAL_PREFS.fontSize;
+      const fontFamily =
+        typeof parsed.fontFamily === "string" && parsed.fontFamily
+          ? parsed.fontFamily
+          : DEFAULT_TERMINAL_PREFS.fontFamily;
       return { fontSize, fontFamily };
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return DEFAULT_TERMINAL_PREFS;
 }
 
@@ -151,19 +162,25 @@ function loadShortcuts(): ShortcutMap {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
         const dirSearchFocus = Array.isArray(parsed.dirSearchFocus)
-          ? (parsed.dirSearchFocus as unknown[]).filter((s): s is KeyBinding => typeof s === "string")
+          ? (parsed.dirSearchFocus as unknown[]).filter(
+              (s): s is KeyBinding => typeof s === "string",
+            )
           : DEFAULT_SHORTCUTS.dirSearchFocus;
         return { dirSearchFocus };
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return DEFAULT_SHORTCUTS;
 }
 
 function saveShortcuts(map: ShortcutMap) {
   try {
     localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(map));
-  } catch { /* localStorage full or unavailable */ }
+  } catch {
+    /* localStorage full or unavailable */
+  }
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -183,7 +200,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setActiveProject = useCallback((projectId: string | null) => {
     setState((prev) => {
-      const closedProjectIds = projectId ? prev.closedProjectIds.filter((id) => id !== projectId) : prev.closedProjectIds;
+      const closedProjectIds = projectId
+        ? prev.closedProjectIds.filter((id) => id !== projectId)
+        : prev.closedProjectIds;
       if (projectId) saveClosedProjects(closedProjectIds);
       return { ...prev, activeProjectId: projectId, activeSessionId: null, closedProjectIds };
     });
@@ -191,9 +210,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const closeProject = useCallback((projectId: string) => {
     setState((prev) => {
-      const closedProjectIds = prev.closedProjectIds.includes(projectId) ? prev.closedProjectIds : [...prev.closedProjectIds, projectId];
+      const closedProjectIds = prev.closedProjectIds.includes(projectId)
+        ? prev.closedProjectIds
+        : [...prev.closedProjectIds, projectId];
       saveClosedProjects(closedProjectIds);
-      return { ...prev, activeProjectId: prev.activeProjectId === projectId ? null : prev.activeProjectId, closedProjectIds };
+      return {
+        ...prev,
+        activeProjectId: prev.activeProjectId === projectId ? null : prev.activeProjectId,
+        closedProjectIds,
+      };
     });
   }, []);
 
@@ -221,9 +246,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const getActiveTerminal = useCallback((sessionId: string): string | null => {
-    return state.activeTerminals.get(sessionId) ?? null;
-  }, [state.activeTerminals]);
+  const getActiveTerminal = useCallback(
+    (sessionId: string): string | null => {
+      return state.activeTerminals.get(sessionId) ?? null;
+    },
+    [state.activeTerminals],
+  );
 
   const toggleSidebar = useCallback(() => {
     setState((prev) => ({ ...prev, sidebarCollapsed: !prev.sidebarCollapsed }));
@@ -231,17 +259,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setSidebarWidth = useCallback((width: number) => {
     setState((prev) => ({ ...prev, sidebarWidth: width }));
-    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* localStorage full */ }
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    } catch {
+      /* localStorage full */
+    }
   }, []);
 
   const setTerminalDefaultAction = useCallback((action: TerminalDefaultAction) => {
     setState((prev) => ({ ...prev, terminalDefaultAction: action }));
-    try { localStorage.setItem(TERMINAL_DEFAULT_ACTION_KEY, action); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(TERMINAL_DEFAULT_ACTION_KEY, action);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const setTerminalPrefs = useCallback((prefs: TerminalPreferences) => {
     setState((prev) => ({ ...prev, terminalPrefs: prefs }));
-    try { localStorage.setItem(TERMINAL_PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(TERMINAL_PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const updateShortcut = useCallback((action: ShortcutAction, bindings: KeyBinding[]) => {

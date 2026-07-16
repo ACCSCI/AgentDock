@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 /**
  * Structured logger — pino wrapper for runtime use.
  *
@@ -17,9 +20,6 @@
  *   log.error({ err, channel }, "ipc handler failed");
  */
 import pino from "pino";
-import { existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
 /**
  * Resolve the per-process log file path.

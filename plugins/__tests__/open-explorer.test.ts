@@ -1,19 +1,13 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // We mock node:child_process.execFile so we can assert HOW the command is invoked
 // (argument array, not a shell string) without actually spawning a file manager.
-const execFileMock = vi.fn(
-  (
-    _cmd: string,
-    _args: string[],
-    cb?: (err: Error | null) => void,
-  ) => {
-    cb?.(null);
-  },
-);
+const execFileMock = vi.fn((_cmd: string, _args: string[], cb?: (err: Error | null) => void) => {
+  cb?.(null);
+});
 
 vi.mock("node:child_process", () => ({
   execFile: (cmd: string, args: string[], cb?: (err: Error | null) => void) =>

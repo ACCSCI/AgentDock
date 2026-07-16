@@ -9,6 +9,7 @@ dist/
 tsconfig.tsbuildinfo
 scripts/e2e-*
 .agentdock/
+.agentdock-dev/
 .claude/
 .data/
 out/

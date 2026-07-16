@@ -5,14 +5,14 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import {
-  Hono,
   type DaemonContext,
-  SESSION_ID_RE,
+  type Hono,
   LEASE_TTL_MS,
-  sanitizeDisplayName,
+  SESSION_ID_RE,
   lookupCurrentBranch,
-  zodErrorHandler,
   mapError,
+  sanitizeDisplayName,
+  zodErrorHandler,
 } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -97,29 +97,25 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
     },
   );
 
-  app.post(
-    "/session/reclaim",
-    zValidator("json", ReclaimSchema, zodErrorHandler),
-    async (c) => {
-      const body = c.req.valid("json");
-      const result = await ctx.mutex.runExclusive("state", () => {
-        const sanitized = sanitizeDisplayName(body.displayName);
-        const displayName = sanitized || body.sessionId.slice(0, 8);
-        const { fencingToken, created } = ctx.stateV2.reclaimSession({
-          sessionId: body.sessionId,
-          projectRoot: body.projectRoot,
-          displayName,
-          clientId: body.clientId,
-          pid: body.pid,
-          leaseExpiresAt: Date.now() + LEASE_TTL_MS,
-        });
-        ctx.walV2.persist(ctx.stateV2);
-        return { fencingToken, created };
+  app.post("/session/reclaim", zValidator("json", ReclaimSchema, zodErrorHandler), async (c) => {
+    const body = c.req.valid("json");
+    const result = await ctx.mutex.runExclusive("state", () => {
+      const sanitized = sanitizeDisplayName(body.displayName);
+      const displayName = sanitized || body.sessionId.slice(0, 8);
+      const { fencingToken, created } = ctx.stateV2.reclaimSession({
+        sessionId: body.sessionId,
+        projectRoot: body.projectRoot,
+        displayName,
+        clientId: body.clientId,
+        pid: body.pid,
+        leaseExpiresAt: Date.now() + LEASE_TTL_MS,
       });
-      ctx.expectedSessionIds?.add(body.sessionId);
-      return c.json({ success: true, ...result });
-    },
-  );
+      ctx.walV2.persist(ctx.stateV2);
+      return { fencingToken, created };
+    });
+    ctx.expectedSessionIds?.add(body.sessionId);
+    return c.json({ success: true, ...result });
+  });
 
   app.post(
     "/session/activate",
@@ -201,24 +197,20 @@ export function registerSessionsV2(app: Hono, ctx: DaemonContext): void {
     },
   );
 
-  app.post(
-    "/session/purge",
-    zValidator("json", SessionPurgeSchema, zodErrorHandler),
-    async (c) => {
-      const body = c.req.valid("json");
-      try {
-        await ctx.mutex.runExclusive("state", () => {
-          ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
-          ctx.stateV2.purgeSession(body.sessionId);
-          ctx.walV2.persist(ctx.stateV2);
-        });
-        ctx.sseBus.publish("session-purged", { sessionId: body.sessionId });
-        return c.json({ success: true });
-      } catch (err) {
-        return mapError(c, err);
-      }
-    },
-  );
+  app.post("/session/purge", zValidator("json", SessionPurgeSchema, zodErrorHandler), async (c) => {
+    const body = c.req.valid("json");
+    try {
+      await ctx.mutex.runExclusive("state", () => {
+        ctx.stateV2.assertFencingToken(body.sessionId, body.fencingToken);
+        ctx.stateV2.purgeSession(body.sessionId);
+        ctx.walV2.persist(ctx.stateV2);
+      });
+      ctx.sseBus.publish("session-purged", { sessionId: body.sessionId });
+      return c.json({ success: true });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
 
   app.post(
     "/session/heartbeat",
@@ -254,31 +246,22 @@ const TakeoverSchema = z.object({
 });
 
 export function registerTakeover(app: Hono, ctx: DaemonContext): void {
-  app.post(
-    "/takeover",
-    zValidator("json", TakeoverSchema, zodErrorHandler),
-    async (c) => {
-      const body = c.req.valid("json");
-      try {
-        const result = await ctx.mutex.runExclusive("state", () => {
-          const r = ctx.stateV2.takeover(
-            body.sessionId,
-            body.clientId,
-            body.pid,
-            body.fencingToken,
-          );
-          ctx.walV2.persist(ctx.stateV2);
-          return r;
-        });
-        ctx.sseBus.publish("ownership-revoked", {
-          sessionId: body.sessionId,
-          newOwner: body.clientId,
-          fencingToken: result.fencingToken,
-        });
-        return c.json({ success: true, ...result });
-      } catch (err) {
-        return mapError(c, err);
-      }
-    },
-  );
+  app.post("/takeover", zValidator("json", TakeoverSchema, zodErrorHandler), async (c) => {
+    const body = c.req.valid("json");
+    try {
+      const result = await ctx.mutex.runExclusive("state", () => {
+        const r = ctx.stateV2.takeover(body.sessionId, body.clientId, body.pid, body.fencingToken);
+        ctx.walV2.persist(ctx.stateV2);
+        return r;
+      });
+      ctx.sseBus.publish("ownership-revoked", {
+        sessionId: body.sessionId,
+        newOwner: body.clientId,
+        fencingToken: result.fencingToken,
+      });
+      return c.json({ success: true, ...result });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
 }

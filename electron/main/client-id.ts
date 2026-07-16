@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 /**
  * 客户端 ID 生成 (新架构 §6 末段).
  *
@@ -8,7 +9,6 @@
  */
 import os from "node:os";
 import process from "node:process";
-import { randomBytes } from "node:crypto";
 
 /**
  * 主入口: 在 main 启动时调一次, 锁定 bootTimeMs 当时值.
@@ -39,13 +39,9 @@ export function generateClientIdForTest(deps: ClientIdDeps): string {
   // (即只剩下 _), 视作空 hostname 降级为 "host".
   const replaced = deps.hostname.replace(/[^a-zA-Z0-9-]/g, "_").slice(0, 32);
   const safeHost = replaced.replace(/_/g, "") ? replaced : "host";
-  return [
-    "client",
-    safeHost,
-    deps.pid,
-    deps.bootTimeMs,
-    deps.randomBytes(4).toString("hex"),
-  ].join("_");
+  return ["client", safeHost, deps.pid, deps.bootTimeMs, deps.randomBytes(4).toString("hex")].join(
+    "_",
+  );
 }
 
 /** 测试钩子: 锁定 bootTimeMs (e.g. main 启动时一次). */

@@ -37,10 +37,9 @@ console.log(`[debug-start] launching Electron: ${process.execPath} ${mainEntry}`
 import { execSync } from "node:child_process";
 let electronBin: string;
 try {
-  electronBin = execSync(
-    "node -e \"console.log(require('electron'))\"",
-    { encoding: "utf-8" },
-  ).trim();
+  electronBin = execSync("node -e \"console.log(require('electron'))\"", {
+    encoding: "utf-8",
+  }).trim();
 } catch {
   electronBin = "node_modules/electron/dist/electron.exe";
 }
@@ -78,13 +77,13 @@ proc.on("exit", (code) => {
     const info = JSON.parse(readFileSync(resolve(dataDir, "daemon.json"), "utf-8"));
     console.log(`[debug-start] daemon.json: ${JSON.stringify(info)}`);
   } catch {
-    console.log(`[debug-start] no daemon.json written`);
+    console.log("[debug-start] no daemon.json written");
   }
   process.exit(code ?? 0);
 });
 
 // Run for 10s, then kill — enough to see startup + first IPC round-trip
 setTimeout(() => {
-  console.log(`\n[debug-start] timeout reached, killing Electron`);
+  console.log("\n[debug-start] timeout reached, killing Electron");
   proc.kill("SIGTERM");
 }, 10_000);

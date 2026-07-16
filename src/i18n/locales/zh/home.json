@@ -1,4 +1,15 @@
 {
   "openProject": "打开项目",
-  "selectProject": "选择一个项目目录开始"
+  "selectProject": "选择一个项目目录开始",
+  "openProjectFailed": "打开项目失败：{{message}}",
+  "loadProjectsFailed": "无法加载项目列表：{{message}}",
+  "notGitRepository": "不是 Git 仓库",
+  "notGitRepositoryDescription": "选择的目录 {{path}} 不是一个 Git 仓库。",
+  "gitRequiredDescription": "AgentDock 需要 Git worktree 来管理项目会话。是否自动执行",
+  "cancel": "取消",
+  "close": "关闭",
+  "initializingGit": "初始化中...",
+  "gitInitFailed": "Git 初始化失败：{{message}}",
+  "gitInitSuccess": "Git 仓库初始化完成",
+  "unknownError": "未知错误"
 }

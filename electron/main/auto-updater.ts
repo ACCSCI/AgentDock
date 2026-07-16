@@ -9,7 +9,7 @@
  * - Events forwarded to renderer for status UI.
  * - Actual install happens on next quit.
  */
-import { app, BrowserWindow } from "electron";
+import { type BrowserWindow, app } from "electron";
 import electronUpdater from "electron-updater";
 import { log } from "../../plugins/logger.js";
 
@@ -80,11 +80,14 @@ export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void
   });
 
   // Check on startup.
-  void autoUpdater.checkForUpdatesAndNotify().then((result) => {
-    log.info({ result }, "autoUpdater: initial check complete");
-  }).catch((err) => {
-    log.warn({ err }, "autoUpdater: initial check failed");
-  });
+  void autoUpdater
+    .checkForUpdatesAndNotify()
+    .then((result) => {
+      log.info({ result }, "autoUpdater: initial check complete");
+    })
+    .catch((err) => {
+      log.warn({ err }, "autoUpdater: initial check failed");
+    });
 
   // Periodic check every 4 hours (clear existing timer first).
   if (autoUpdateTimer) clearInterval(autoUpdateTimer);

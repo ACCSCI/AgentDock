@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "../i18n/react";
 import { type OrphanDir, useDeleteOrphans, useOrphans } from "../lib/queries";
 import { useStore } from "../lib/store";
-import { useTranslation } from "../i18n/react";
 
 interface OrphanCleanModalProps {
   open: boolean;
@@ -40,6 +40,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Reset selection when modal opens or data changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshed orphan data intentionally clears the previous selection.
   useEffect(() => {
     if (open) setSelected(new Set());
   }, [open, orphans]);
@@ -57,8 +58,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   if (!open) return null;
 
   const orphanList = orphans ?? [];
-  const allSelected =
-    orphanList.length > 0 && orphanList.every((o) => selected.has(orphanKey(o)));
+  const allSelected = orphanList.length > 0 && orphanList.every((o) => selected.has(orphanKey(o)));
 
   const toggleSelect = (o: OrphanDir) => {
     const key = orphanKey(o);
@@ -122,12 +122,13 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   };
 
   return (
-    <div className="dir-modal-overlay" onClick={onClose}>
-      <div
-        className="dir-modal orphan-modal"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="orphan-modal"
-      >
+    <div
+      className="dir-modal-overlay"
+      role="presentation"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+      onKeyDown={(event) => event.key === "Escape" && onClose()}
+    >
+      <div className="dir-modal orphan-modal" data-testid="orphan-modal">
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
             <h3>🧹 {t("orphanClean.title")}</h3>
@@ -137,9 +138,7 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
           </button>
         </div>
 
-        <div className="orphan-description">
-          {t("orphanClean.description")}
-        </div>
+        <div className="orphan-description">{t("orphanClean.description")}</div>
 
         {/* Select all — above the list */}
         {orphanList.length > 0 && (
@@ -166,36 +165,36 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
           {!isLoading && !error && orphanList.length === 0 && (
             <div className="dir-modal-status orphan-empty">✓ 没有孤儿目录</div>
           )}
-          {!isLoading && !error && orphanList.map((orphan) => {
-            const key = orphanKey(orphan);
-            const isSelected = selected.has(key);
-            // For branches, show the branch name; for dirs, the sessionId.
-            const displayName =
-              orphan.reason === "orphan-branch"
-                ? (orphan.branch ?? orphan.sessionId)
-                : orphan.sessionId;
-            return (
-              <div
-                key={key}
-                className={`orphan-item ${isSelected ? "orphan-item-selected" : ""}`}
-                onClick={() => toggleSelect(orphan)}
-                data-testid="orphan-item"
-                data-orphan-key={key}
-                data-orphan-reason={orphan.reason}
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => toggleSelect(orphan)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-                <span className="orphan-name">{displayName}</span>
-                <span className={`orphan-reason orphan-reason-${orphan.reason}`}>
-                  {REASON_LABELS[orphan.reason]}
-                </span>
-              </div>
-            );
-          })}
+          {!isLoading &&
+            !error &&
+            orphanList.map((orphan) => {
+              const key = orphanKey(orphan);
+              const isSelected = selected.has(key);
+              // For branches, show the branch name; for dirs, the sessionId.
+              const displayName =
+                orphan.reason === "orphan-branch"
+                  ? (orphan.branch ?? orphan.sessionId)
+                  : orphan.sessionId;
+              return (
+                <label
+                  key={key}
+                  className={`orphan-item ${isSelected ? "orphan-item-selected" : ""}`}
+                  data-testid="orphan-item"
+                  data-orphan-key={key}
+                  data-orphan-reason={orphan.reason}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(orphan)}
+                  />
+                  <span className="orphan-name">{displayName}</span>
+                  <span className={`orphan-reason orphan-reason-${orphan.reason}`}>
+                    {REASON_LABELS[orphan.reason]}
+                  </span>
+                </label>
+              );
+            })}
         </div>
 
         {/* Actions */}
@@ -210,7 +209,9 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
             onClick={handleDelete}
             data-testid="orphan-delete-selected"
           >
-            {deleteOrphans.isPending ? t("loading", { ns: "common" }) : `${t("orphanClean.clean")} (${selected.size})`}
+            {deleteOrphans.isPending
+              ? t("loading", { ns: "common" })
+              : `${t("orphanClean.clean")} (${selected.size})`}
           </button>
         </div>
       </div>

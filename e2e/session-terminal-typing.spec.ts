@@ -10,20 +10,19 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TerminalPage } from "./pages/terminal";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -43,7 +42,6 @@ test.describe("terminal interaction flow", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -55,7 +53,7 @@ test.describe("terminal interaction flow", () => {
     const sidebar = new SidebarPage(window);
     const terminalPage = new TerminalPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     // 1. Open project.
     await home.openProject(projectPath);
@@ -63,22 +61,22 @@ test.describe("terminal interaction flow", () => {
 
     // 2. Create a session.
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     // 3. Wait for ports to settle, then click the card to activate.
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
-    // Soft-assert ports: in full-suite runs the daemon may not have
+    // Soft-assert ports: in full-suite runs session setup may not have
     // assigned ports by the time the card appears. The next
     // assertions (click card → terminal panel) work without ports.
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 20_000 }).catch(() => {});
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 20_000 })
+      .catch(() => {});
     const sessionId = (await card.getAttribute("data-session-id")) ?? "";
     expect(sessionId, "session card missing data-session-id").not.toBe("");
     // sessionId is captured to ensure the card is fully provisioned
     // (id is only set after the React Query projects list refreshes
-    // with the real UUID from the daemon).
+    // with the real persisted UUID).
     void sessionId;
 
     // Click the card to activate it (mounts TerminalManager).
@@ -117,10 +115,7 @@ test.describe("terminal interaction flow", () => {
                 };
               };
             }
-          ).api.terminals.write(
-            terminalId,
-            "echo hello\r",
-          );
+          ).api.terminals.write(terminalId, "echo hello\r");
           return { ok: true };
         } catch (err) {
           return {
@@ -131,10 +126,7 @@ test.describe("terminal interaction flow", () => {
       },
       { terminalId },
     );
-    expect(
-      writeResult.ok,
-      `terminals.write failed: ${writeResult.error ?? "unknown"}`,
-    ).toBe(true);
+    expect(writeResult.ok, `terminals.write failed: ${writeResult.error ?? "unknown"}`).toBe(true);
 
     // 7. Give the shell a moment to echo the command, then verify the
     //    terminal is still connected. The xterm canvas can't be
@@ -142,28 +134,26 @@ test.describe("terminal interaction flow", () => {
     //    authoritative health signal.
     await window.waitForTimeout(500);
     const status = await terminalPage.currentTerminal.getAttribute("data-status");
-    expect(
-      status,
-      `terminal should still be connected after writing data (status=${status})`,
-    ).toBe("connected");
+    expect(status, `terminal should still be connected after writing data (status=${status})`).toBe(
+      "connected",
+    );
 
     // 9. Clean up: delete the session.
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
     await card.locator(".session-delete-confirm-yes").click();
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     expect(pageErrors).toHaveLength(0);
     // Filter out expected font CORS errors — the agentdock-fonts://
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

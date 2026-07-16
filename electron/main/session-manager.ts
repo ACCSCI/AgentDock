@@ -1,3 +1,5 @@
+import type { SessionPorts } from "../../plugins/daemon-state.js";
+import { log } from "../../plugins/logger.js";
 /**
  * Session Manager — in-memory session state for the single-instance architecture.
  *
@@ -6,8 +8,6 @@
  * Electron process owns everything.
  */
 import type { PortPoolInternal } from "./port-pool.js";
-import type { SessionPorts } from "../../plugins/daemon-state.js";
-import { log } from "../../plugins/logger.js";
 
 // ============================================================
 // Types
@@ -29,6 +29,8 @@ export interface SessionManager {
     portKeys: string[];
     displayName: string;
   }): Promise<SessionPorts>;
+  restoreSession(session: SessionInfo): void;
+  restorePorts(sessionId: string, ports: SessionPorts): void;
   activateSession(sessionId: string): void;
   releaseSession(sessionId: string): Promise<void>;
   getSession(sessionId: string): SessionInfo | null;
@@ -53,8 +55,8 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
     const { sessionId, projectPath, portKeys, displayName } = params;
 
     // Check if session already exists
-    if (sessions.has(sessionId)) {
-      const existing = sessions.get(sessionId)!;
+    const existing = sessions.get(sessionId);
+    if (existing) {
       log.warn({ sessionId }, "session-manager: session already exists, returning existing");
       return existing.ports;
     }
@@ -76,8 +78,34 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
     };
     sessions.set(sessionId, info);
 
-    log.info({ sessionId, portCount: Object.keys(ports).length }, "session-manager: session created");
+    log.info(
+      { sessionId, portCount: Object.keys(ports).length },
+      "session-manager: session created",
+    );
     return ports;
+  }
+
+  function restoreSession(session: SessionInfo): void {
+    const restored: SessionInfo = {
+      ...session,
+      ports: { ...session.ports },
+    };
+    portPool.recordSessionPorts(restored.sessionId, restored.ports);
+    sessions.set(restored.sessionId, restored);
+    log.info(
+      { sessionId: restored.sessionId, portCount: Object.keys(restored.ports).length },
+      "session-manager: persisted session restored",
+    );
+  }
+
+  function restorePorts(sessionId: string, ports: SessionPorts): void {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    const restored = { ...ports };
+    portPool.recordSessionPorts(sessionId, restored);
+    session.ports = restored;
   }
 
   function activateSession(sessionId: string): void {
@@ -114,14 +142,13 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
       throw new Error(`Session ${sessionId} not found`);
     }
 
-    // Release old ports
-    portPool.release(sessionId);
-
-    // Allocate new ports
+    // Keep the old mapping reserved until replacements have been allocated.
+    // If allocation fails, both SessionManager and PortPool remain unchanged.
     const portKeys = Object.keys(session.ports);
     const newPorts = await portPool.allocate(portKeys.length, portKeys);
 
-    // Record new ports
+    // Atomically swap ownership: recordSessionPorts releases the previous
+    // mapping only after the replacement set is ready.
     portPool.recordSessionPorts(sessionId, newPorts);
     session.ports = newPorts;
 
@@ -140,6 +167,8 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
 
   return {
     createSession,
+    restoreSession,
+    restorePorts,
     activateSession,
     releaseSession,
     getSession,

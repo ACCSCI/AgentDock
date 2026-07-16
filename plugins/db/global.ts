@@ -6,13 +6,13 @@
  * sessions and todos.
  */
 import { existsSync, mkdirSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { drizzle } from "drizzle-orm/node-sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-sqlite";
 import * as schema from "./schema.js";
 
-const GLOBAL_DB_DIR = ".agentdock";
+const _GLOBAL_DB_DIR = ".agentdock";
 const GLOBAL_DB_FILE = "projects.db";
 
 /**
@@ -64,10 +64,7 @@ export function openGlobalDb(overrideDir?: string): GlobalDbHandle {
   // working directory as a last-resort fallback (e.g. when called from
   // unit tests that don't go through the main bootstrap).
   const dbDir =
-    overrideDir ??
-    (typeof process !== "undefined" && process.cwd
-      ? process.cwd()
-      : ".");
+    overrideDir ?? (typeof process !== "undefined" && process.cwd ? process.cwd() : ".");
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
   }
@@ -119,9 +116,7 @@ const GLOBAL_MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
 ];
 
 function runGlobalMigrations(sqlite: DatabaseSync): void {
-  const row = sqlite.prepare("PRAGMA user_version").get() as
-    | { user_version: number }
-    | undefined;
+  const row = sqlite.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   const current = row?.user_version ?? 0;
   if (current >= GLOBAL_DB_VERSION) return;
 
@@ -148,10 +143,7 @@ function runGlobalMigrations(sqlite: DatabaseSync): void {
  * Opens the source DB via a lightweight DatabaseSync (not the app's
  * openDb singleton) to avoid side effects.
  */
-export function migrateProjectsToGlobal(
-  targetDb: DrizzleDb,
-  sourceDbPath: string,
-): void {
+export function migrateProjectsToGlobal(targetDb: DrizzleDb, sourceDbPath: string): void {
   if (!existsSync(sourceDbPath)) return;
 
   let srcSqlite: DatabaseSync | null = null;
@@ -159,9 +151,9 @@ export function migrateProjectsToGlobal(
     srcSqlite = new DatabaseSync(sourceDbPath);
 
     // Check if the projects table exists in the source
-    const tableCheck = srcSqlite.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'",
-    ).get() as { name: string } | undefined;
+    const tableCheck = srcSqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'")
+      .get() as { name: string } | undefined;
     if (!tableCheck) return;
 
     const sourceRows = srcSqlite
@@ -176,17 +168,24 @@ export function migrateProjectsToGlobal(
         .get();
       if (existing) continue;
 
-      targetDb.insert(schema.projects).values({
-        id: row.id,
-        name: row.name,
-        path: row.path,
-        createdAt: row.created_at,
-      }).run();
+      targetDb
+        .insert(schema.projects)
+        .values({
+          id: row.id,
+          name: row.name,
+          path: row.path,
+          createdAt: row.created_at,
+        })
+        .run();
     }
   } catch {
     // Source DB may not have projects table (v9 migration already ran)
     // or may not be a valid SQLite file — silently skip.
   } finally {
-    try { srcSqlite?.close(); } catch { /* best-effort */ }
+    try {
+      srcSqlite?.close();
+    } catch {
+      /* best-effort */
+    }
   }
 }

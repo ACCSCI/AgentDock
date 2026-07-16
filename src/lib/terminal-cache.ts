@@ -1,3 +1,4 @@
+import { FitAddon } from "@xterm/addon-fit";
 /**
  * Terminal cache (renderer-side) — Phase 5 MessagePort transport.
  *
@@ -15,17 +16,11 @@
  *                    { type: "error",  message }
  */
 import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import type { IDisposable } from "@xterm/xterm";
 
 // ---- Types ----
 
-export type TerminalCacheStatus =
-  | "connecting"
-  | "connected"
-  | "disconnected"
-  | "error"
-  | "exited";
+export type TerminalCacheStatus = "connecting" | "connected" | "disconnected" | "error" | "exited";
 
 interface CachedTerminal {
   terminalId: string;
@@ -144,7 +139,7 @@ export function buildTerminalConfig(prefs: TerminalPreferences) {
 
 declare global {
   interface Window {
-    api: import("../electron/preload").ApiSurface;
+    api: import("../../electron/preload").ApiSurface;
   }
 }
 
@@ -253,17 +248,13 @@ class TerminalCache {
             // (we already marked status = "connected" on onopen).
             break;
           case "exit":
-            entry.terminal.writeln(
-              `\r\n\x1b[33m[Process exited code=${msg.code}]\x1b[0m`,
-            );
+            entry.terminal.writeln(`\r\n\x1b[33m[Process exited code=${msg.code}]\x1b[0m`);
             entry.exited = true;
             entry.status = "exited";
             this.notifyStatus(entry.terminalId, "exited");
             break;
           case "error":
-            entry.terminal.writeln(
-              `\r\n\x1b[31m[Error] ${String(msg.message ?? "")}\x1b[0m`,
-            );
+            entry.terminal.writeln(`\r\n\x1b[31m[Error] ${String(msg.message ?? "")}\x1b[0m`);
             entry.status = "error";
             this.notifyStatus(entry.terminalId, "error");
             break;
@@ -326,11 +317,7 @@ class TerminalCache {
 
   private safeFit(entry: CachedTerminal): void {
     if (!entry.containerRef) return;
-    if (
-      entry.containerRef.offsetWidth === 0 ||
-      entry.containerRef.offsetHeight === 0
-    )
-      return;
+    if (entry.containerRef.offsetWidth === 0 || entry.containerRef.offsetHeight === 0) return;
     try {
       entry.fitAddon.fit();
     } catch {
@@ -416,7 +403,9 @@ class TerminalCache {
     const isFirstAttach = !entry.terminal.element;
     const term = entry.terminal;
     if (!isFirstAttach) {
-      container.appendChild(entry.terminal.element);
+      const element = entry.terminal.element;
+      if (!element) return;
+      container.appendChild(element);
     } else {
       term.open(container);
     }
@@ -445,7 +434,8 @@ class TerminalCache {
     if (!entry || !entry.containerRef) return;
     this.stopResizeObserver(entry);
     const graveyard = this.getGraveyard();
-    graveyard.appendChild(entry.terminal.element);
+    const element = entry.terminal.element;
+    if (element) graveyard.appendChild(element);
     entry.containerRef = null;
   }
 
@@ -455,7 +445,7 @@ class TerminalCache {
 
     if (entry.containerRef) {
       this.stopResizeObserver(entry);
-      entry.terminal.element.remove();
+      entry.terminal.element?.remove();
       entry.containerRef = null;
     }
 

@@ -1,3 +1,4 @@
+import { type Server, createServer, type connect as netConnect } from "node:net";
 // @ts-nocheck
 /**
  * port-runtime-probe — 新架构 §3.5 末段.
@@ -9,15 +10,14 @@
  *
  * 纯展示用途, 测试只守护三态分类 + 短超时, 绝不测反向影响端口归属.
  */
-import { describe, expect, it, afterEach } from "vitest";
-import { createServer, type Server, connect as netConnect } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
 import { probeRuntime } from "../port-runtime-probe.js";
 
 let grabbed: Server | null = null;
 
 afterEach(async () => {
   if (grabbed) {
-    await new Promise<void>((r) => grabbed!.close(() => r()));
+    await new Promise<void>((r) => grabbed?.close(() => r()));
     grabbed = null;
   }
 });

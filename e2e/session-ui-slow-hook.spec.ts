@@ -19,7 +19,7 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TID } from "./pages/testids";
@@ -27,19 +27,14 @@ import { TID } from "./pages/testids";
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeSlowHookProject(dir: string): void {
   // ~1.5 s afterCreateSession hook (long enough to overlap a delete).
-  writeFileSync(
-    join(dir, "slow-hook.js"),
-    `setTimeout(() => {}, 1500);`,
-    "utf-8",
-  );
+  writeFileSync(join(dir, "slow-hook.js"), "setTimeout(() => {}, 1500);", "utf-8");
   writeFileSync(
     join(dir, "agentdock.config.yaml"),
     [
@@ -70,7 +65,7 @@ test.describe("session UI flow with long-running hook (repro)", () => {
     rendererLog,
     expectNoRendererErrors,
   }) => {
-    test.setTimeout(120_000); // slow async hook + daemon cycles
+    test.setTimeout(120_000); // slow async hook + worktree cleanup
     const projectPath = join(dataDir, "slow-hook-project");
     prepareGitRepo(projectPath);
     writeSlowHookProject(projectPath);
@@ -83,9 +78,7 @@ test.describe("session UI flow with long-running hook (repro)", () => {
 
     // Create the session.
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
@@ -96,7 +89,9 @@ test.describe("session UI flow with long-running hook (repro)", () => {
     // Soft-assert: ports panel rendering is environment-dependent in
     // full-suite runs; the real assertion is the React infinite-loop
     // check below.
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {});
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
 
     // Immediately delete via UI — async hook may still be running and
     // bgHookStatus is polling every 2 s. Each delete step event +
@@ -125,14 +120,13 @@ test.describe("session UI flow with long-running hook (repro)", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const errors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
-    const maxDepth = errors.filter((e) =>
-      /Maximum update depth exceeded/i.test(e.text),
-    );
+    const maxDepth = errors.filter((e) => /Maximum update depth exceeded/i.test(e.text));
     expect(
       maxDepth,
       `React infinite-loop detected:\n${maxDepth.map((e) => e.text).join("\n---\n")}`,

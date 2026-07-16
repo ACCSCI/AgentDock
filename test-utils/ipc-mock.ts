@@ -47,7 +47,7 @@ export function invokeIpc<T = unknown>(channel: string, ...args: unknown[]): Pro
 
 export function onIpcEvent(channel: string, cb: (...args: unknown[]) => void): () => void {
   if (!eventListeners.has(channel)) eventListeners.set(channel, []);
-  eventListeners.get(channel)!.push(cb);
+  eventListeners.get(channel)?.push(cb);
   return () => {
     const list = eventListeners.get(channel);
     if (!list) return;

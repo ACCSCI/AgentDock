@@ -65,10 +65,7 @@ export function emptyState(): AppliedState {
   };
 }
 
-export function applySnapshot(
-  state: AppliedState,
-  snapshot: V2SyncSnapshot,
-): AppliedState {
+export function applySnapshot(state: AppliedState, snapshot: V2SyncSnapshot): AppliedState {
   const next = emptyState();
   next.snapshotSeq = snapshot.snapshotSeq;
   next.appliedSeq = Math.max(state.appliedSeq, snapshot.snapshotSeq);
@@ -80,10 +77,7 @@ export function applySnapshot(
   return next;
 }
 
-export function dispatchEvent(
-  state: AppliedState,
-  event: SseEvent,
-): AppliedState {
+export function dispatchEvent(state: AppliedState, event: SseEvent): AppliedState {
   if (state.snapshotSeq === null) return applyEventUnchecked(state, event);
   if (event.seq <= state.snapshotSeq) {
     return { ...state, discardedCount: state.discardedCount + 1 };
@@ -91,10 +85,7 @@ export function dispatchEvent(
   return applyEventUnchecked(state, event);
 }
 
-function applyEventUnchecked(
-  state: AppliedState,
-  event: SseEvent,
-): AppliedState {
+function applyEventUnchecked(state: AppliedState, event: SseEvent): AppliedState {
   const next: AppliedState = {
     ...state,
     appliedEventCount: state.appliedEventCount + 1,
@@ -122,7 +113,8 @@ function applyEventUnchecked(
     case "session-renamed": {
       const d = event.data as { sessionId?: string; newDisplayName?: string };
       if (!d?.sessionId || !next.sessions.has(d.sessionId)) return next;
-      const cur = next.sessions.get(d.sessionId)!;
+      const cur = next.sessions.get(d.sessionId);
+      if (!cur) return next;
       next.sessions.set(d.sessionId, { ...cur, displayName: d.newDisplayName ?? cur.displayName });
       return next;
     }

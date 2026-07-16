@@ -2,11 +2,7 @@
 /**
  * SSE events route for daemon API v2 (§7.3).
  */
-import {
-  Hono,
-  type DaemonContext,
-  streamSSE,
-} from "./shared.js";
+import { type DaemonContext, type Hono, streamSSE } from "./shared.js";
 
 // ---------------------------------------------------------------------------
 // /events — SSE (P5 full impl, this is the §7.3 frame format placeholder)

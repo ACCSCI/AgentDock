@@ -1,6 +1,6 @@
 import path from "node:path";
-import { updateEnvFile } from "./env.js";
 import type { SessionPorts } from "./daemon-state.js";
+import { updateEnvFile } from "./env.js";
 
 // @ts-nocheck
 /**

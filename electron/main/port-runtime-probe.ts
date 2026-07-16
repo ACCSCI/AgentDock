@@ -12,7 +12,7 @@
  *
  *   超时常量 RUNTIME_PROBE_TIMEOUT_MS (默认 300ms) — 来自新架构 §11.5 表.
  */
-import { connect, type Socket } from "node:net";
+import { type Socket, connect } from "node:net";
 import { RUNTIME_PROBE_TIMEOUT_MS } from "../../plugins/constants.js";
 
 export type RuntimeProbeState = "running" | "stopped" | "unknown";

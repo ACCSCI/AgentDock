@@ -1,15 +1,11 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import process from "node:process";
-import type { HookDefinition, HookLifecycleEvent } from "../config.js";
-import {
-  createHookRegistry,
-  createHookEngine,
-  type HookContext,
-} from "../hook-engine.js";
+// @ts-nocheck
+import { beforeEach, describe, expect, it } from "vitest";
+import type { HookDefinition } from "../config.js";
+import { type HookContext, createHookEngine, createHookRegistry } from "../hook-engine.js";
 
 const isWin = process.platform === "win32";
 
@@ -37,11 +33,15 @@ function makeHook(overrides: Partial<HookDefinition> & { run: string }): HookDef
     timeout: 30000,
     cwd: "worktree",
     ...overrides,
+    async: overrides.async ?? false,
   };
 }
 
 function makeContext(overrides: Partial<HookContext> = {}): HookContext {
-  const tmpDir = path.join(os.tmpdir(), `hook-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const tmpDir = path.join(
+    os.tmpdir(),
+    `hook-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(tmpDir, { recursive: true });
   return {
     event: "afterCreateSession",
@@ -131,12 +131,15 @@ describe("HookRegistry", () => {
   });
 
   it("C9: register 保留 HookDefinition 完整字段", () => {
-    registry.register("afterCreateSession", makeHook({
-      run: "echo test",
-      required: true,
-      timeout: 5000,
-      cwd: "project",
-    }));
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: "echo test",
+        required: true,
+        timeout: 5000,
+        cwd: "project",
+      }),
+    );
     const hooks = registry.getHooks("afterCreateSession");
     expect(hooks[0]).toMatchObject({
       run: "echo test",
@@ -252,21 +255,28 @@ describe("HookEngine.executeOne", () => {
   });
   it("C21: worktree .env overrides inherited parent env", async () => {
     const ctx = makeContext();
-    writeFileSync(path.join(ctx.worktreePath, ".env"), "FRONTEND_PORT=20091\nAPI_URL=http://local\n");
+    writeFileSync(
+      path.join(ctx.worktreePath, ".env"),
+      "FRONTEND_PORT=20091\nAPI_URL=http://local\n",
+    );
     const originalFrontendPort = process.env.FRONTEND_PORT;
     const originalApiUrl = process.env.API_URL;
     process.env.FRONTEND_PORT = "5175";
     process.env.API_URL = "http://parent";
     try {
-      const hook = makeHook({ run: isWin ? "echo %FRONTEND_PORT% %API_URL%" : "printf '%s %s' \"$FRONTEND_PORT\" \"$API_URL\"" });
+      const hook = makeHook({
+        run: isWin
+          ? "echo %FRONTEND_PORT% %API_URL%"
+          : 'printf \'%s %s\' "$FRONTEND_PORT" "$API_URL"',
+      });
       const result = await engine.executeOne(hook, ctx);
       expect(result.success).toBe(true);
       expect(result.stdout).toContain("20091");
       expect(result.stdout).toContain("http://local");
     } finally {
-      if (originalFrontendPort === undefined) delete process.env.FRONTEND_PORT;
+      if (originalFrontendPort === undefined) process.env.FRONTEND_PORT = undefined;
       else process.env.FRONTEND_PORT = originalFrontendPort;
-      if (originalApiUrl === undefined) delete process.env.API_URL;
+      if (originalApiUrl === undefined) process.env.API_URL = undefined;
       else process.env.API_URL = originalApiUrl;
     }
   });
@@ -277,12 +287,16 @@ describe("HookEngine.executeOne", () => {
     const originalFrontendPort = process.env.FRONTEND_PORT;
     process.env.FRONTEND_PORT = "5175";
     try {
-      const hook = makeHook({ run: isWin ? "if defined FRONTEND_PORT (echo defined) else echo missing" : "if [ -n \"$FRONTEND_PORT\" ]; then echo defined; else echo missing; fi" });
+      const hook = makeHook({
+        run: isWin
+          ? "if defined FRONTEND_PORT (echo defined) else echo missing"
+          : 'if [ -n "$FRONTEND_PORT" ]; then echo defined; else echo missing; fi',
+      });
       const result = await engine.executeOne(hook, ctx);
       expect(result.success).toBe(true);
       expect(result.stdout.trim()).toBe("missing");
     } finally {
-      if (originalFrontendPort === undefined) delete process.env.FRONTEND_PORT;
+      if (originalFrontendPort === undefined) process.env.FRONTEND_PORT = undefined;
       else process.env.FRONTEND_PORT = originalFrontendPort;
     }
   });
@@ -290,7 +304,9 @@ describe("HookEngine.executeOne", () => {
   it("C23: runtime AGENTDOCK vars override worktree .env", async () => {
     const ctx = makeContext({ sessionId: "runtime-session" });
     writeFileSync(path.join(ctx.worktreePath, ".env"), "AGENTDOCK_SESSION_ID=file-session\n");
-    const hook = makeHook({ run: isWin ? "echo %AGENTDOCK_SESSION_ID%" : "printf '%s' \"$AGENTDOCK_SESSION_ID\"" });
+    const hook = makeHook({
+      run: isWin ? "echo %AGENTDOCK_SESSION_ID%" : "printf '%s' \"$AGENTDOCK_SESSION_ID\"",
+    });
     const result = await engine.executeOne(hook, ctx);
     expect(result.success).toBe(true);
     expect(result.stdout.trim()).toBe("runtime-session");
@@ -346,7 +362,10 @@ describe("HookEngine.execute", () => {
 
   it("C25: required hook 失败中断 pipeline", async () => {
     registry.register("afterCreateSession", makeHook({ run: exitCmd(1), required: true }));
-    registry.register("afterCreateSession", makeHook({ run: echoCmd("should-not-run"), required: false }));
+    registry.register(
+      "afterCreateSession",
+      makeHook({ run: echoCmd("should-not-run"), required: false }),
+    );
     const ctx = makeContext();
     const report = await engine.execute("afterCreateSession", ctx);
     expect(report.results).toHaveLength(1);
@@ -379,18 +398,27 @@ describe("HookEngine.execute", () => {
 
   it("C28: execute 执行顺序与注册顺序一致", async () => {
     const tmpFile = path.join(os.tmpdir(), `hook-order-${Date.now()}.txt`);
-    registry.register("afterCreateSession", makeHook({
-      run: echoCmd("hook1") + ` >> "${tmpFile}"`,
-      required: false,
-    }));
-    registry.register("afterCreateSession", makeHook({
-      run: echoCmd("hook2") + ` >> "${tmpFile}"`,
-      required: false,
-    }));
-    registry.register("afterCreateSession", makeHook({
-      run: echoCmd("hook3") + ` >> "${tmpFile}"`,
-      required: false,
-    }));
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: `${echoCmd("hook1")} >> "${tmpFile}"`,
+        required: false,
+      }),
+    );
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: `${echoCmd("hook2")} >> "${tmpFile}"`,
+        required: false,
+      }),
+    );
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: `${echoCmd("hook3")} >> "${tmpFile}"`,
+        required: false,
+      }),
+    );
 
     const ctx = makeContext();
     await engine.execute("afterCreateSession", ctx);
@@ -402,7 +430,9 @@ describe("HookEngine.execute", () => {
     expect(lines[1]).toContain("hook2");
     expect(lines[2]).toContain("hook3");
 
-    try { rmSync(tmpFile); } catch {}
+    try {
+      rmSync(tmpFile);
+    } catch {}
   });
 
   it("C29: HookContext 环境变量可被命令访问", async () => {
@@ -424,15 +454,21 @@ describe("HookEngine.execute", () => {
   });
 
   it("C31: required hook 超时中断 pipeline", async () => {
-    registry.register("afterCreateSession", makeHook({
-      run: sleepCmd(10),
-      required: true,
-      timeout: 200,
-    }));
-    registry.register("afterCreateSession", makeHook({
-      run: echoCmd("should-not-run"),
-      required: false,
-    }));
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: sleepCmd(10),
+        required: true,
+        timeout: 200,
+      }),
+    );
+    registry.register(
+      "afterCreateSession",
+      makeHook({
+        run: echoCmd("should-not-run"),
+        required: false,
+      }),
+    );
     const ctx = makeContext();
     const report = await engine.execute("afterCreateSession", ctx);
     expect(report.results).toHaveLength(1);
@@ -462,7 +498,7 @@ describe("跨平台兼容", () => {
   });
 
   it("C33: 多行命令执行", async () => {
-    const hook = makeHook({ run: echoCmd("line1") + " && " + echoCmd("line2") });
+    const hook = makeHook({ run: `${echoCmd("line1")} && ${echoCmd("line2")}` });
     const ctx = makeContext();
     const result = await engine.executeOne(hook, ctx);
     expect(result.success).toBe(true);

@@ -9,8 +9,8 @@
  * 用于 session-created SSE 事件 + 任何"现查"路径.
  */
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import path from "node:path";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,13 +27,7 @@ export async function lookupCurrentBranch(
   const worktreePath = path.join(projectRoot, ".agentdock", "worktrees", sessionId);
   const exec = deps.execImpl ?? defaultExec;
   try {
-    const { stdout } = await exec("git", [
-      "-C",
-      worktreePath,
-      "symbolic-ref",
-      "--short",
-      "HEAD",
-    ]);
+    const { stdout } = await exec("git", ["-C", worktreePath, "symbolic-ref", "--short", "HEAD"]);
     return stdout.trim() || null;
   } catch {
     // worktree 不存在 / 不是 git 目录 / detached HEAD — 返回 null

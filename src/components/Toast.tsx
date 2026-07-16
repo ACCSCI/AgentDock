@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { snapshot, subscribe, dismiss, type Toast as T } from "../lib/toast";
 import { useTranslation } from "../i18n/react";
+import { type Toast as T, dismiss, snapshot, subscribe } from "../lib/toast";
 
 const ICON: Record<T["kind"], string> = {
   info: "ℹ",

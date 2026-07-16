@@ -11,8 +11,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, queryKeys } from "./helpers.js";
-import type { ProjectData, CreatingSession, DeletingSession, SessionData, SessionUserStatus } from "./types.js";
-import { isCreatingSession, isDeletingSession } from "./types.js";
+import type { ProjectData, SessionData, SessionUserStatus } from "./types.js";
 
 // sessions.stream() helper — ipcRenderer.on(...) under the hood.
 export function useCreateSessionSSE() {
@@ -51,7 +50,7 @@ export function useCreateSessionSSE() {
     //   return { prevProjects, tempId };
     // },
 
-    mutationFn: async ({ projectId, name, baseBranch, tempId }) => {
+    mutationFn: async ({ projectId, name, baseBranch }) => {
       const { sessionId } = await api().sessions.create({
         projectId,
         name,
@@ -97,56 +96,66 @@ export function useCreateSessionSSE() {
       // Backend writes steps to DB; we invalidate on each step (throttled).
       const stream = api().sessions.stream(sessionId);
       let lastInvalidateAt = 0;
-      const offStep = stream.onStep((_step: { step: string; status: string; duration?: number; error?: string }) => {
-        // Throttle: avoid hammering on rapid step events
-        const now = Date.now();
-        if (now - lastInvalidateAt < 200) return;
-        lastInvalidateAt = now;
-        queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      });
+      const offStep = stream.onStep(
+        (_step: { step: string; status: string; duration?: number; error?: string }) => {
+          // Throttle: avoid hammering on rapid step events
+          const now = Date.now();
+          if (now - lastInvalidateAt < 200) return;
+          lastInvalidateAt = now;
+          queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+        },
+      );
 
       return new Promise<SessionData>((resolve, reject) => {
-        const offComplete = stream.onComplete((result: { success: boolean; error?: string; sessionId?: string }) => {
-          offStep();
-          offComplete();
-          if (!result.success) {
-            // [COMPENSATION-LOGIC] Rollback optimistic insert on failure
-            // WHY THIS EXISTS: Without onMutate, there's no optimistic entry to roll back.
-            // This was the original rollback for the onMutate-based optimistic insert.
+        const offComplete = stream.onComplete(
+          (result: { success: boolean; error?: string; sessionId?: string }) => {
+            offStep();
+            offComplete();
+            if (!result.success) {
+              // [COMPENSATION-LOGIC] Rollback optimistic insert on failure
+              // WHY THIS EXISTS: Without onMutate, there's no optimistic entry to roll back.
+              // This was the original rollback for the onMutate-based optimistic insert.
+              // queryClient.setQueryData(queryKeys.projects, (old) => {
+              //   if (!old) return old;
+              //   return old.map((p) => {
+              //     if (p.id !== projectId) return p;
+              //     return { ...p, sessions: (p.sessions ?? []).filter((s) => s.id !== tempId) };
+              //   });
+              // });
+              reject(new Error(result.error ?? "session create failed"));
+              return;
+            }
+            // [COMPENSATION-LOGIC] In-place replacement of temp→real
+            // WHY THIS EXISTS: Prevents race condition where user switches tabs,
+            // refetch returns server data without temp entry, creation progress lost.
+            // WHAT SHOULD REPLACE IT: Backend provides status in DB, no temp entry needed.
             // queryClient.setQueryData(queryKeys.projects, (old) => {
             //   if (!old) return old;
             //   return old.map((p) => {
             //     if (p.id !== projectId) return p;
-            //     return { ...p, sessions: (p.sessions ?? []).filter((s) => s.id !== tempId) };
+            //     return {
+            //       ...p,
+            //       sessions: (p.sessions ?? []).map((s) => {
+            //         if (s.id !== tempId) return s;
+            //         return { id: sessionId, projectId, name, branch: "", worktreePath: "",
+            //                  ports: null, createdAt: new Date().toISOString(), status: "existing" };
+            //       }),
+            //     };
             //   });
             // });
-            reject(new Error(result.error ?? "session create failed"));
-            return;
-          }
-          // [COMPENSATION-LOGIC] In-place replacement of temp→real
-          // WHY THIS EXISTS: Prevents race condition where user switches tabs,
-          // refetch returns server data without temp entry, creation progress lost.
-          // WHAT SHOULD REPLACE IT: Backend provides status in DB, no temp entry needed.
-          // queryClient.setQueryData(queryKeys.projects, (old) => {
-          //   if (!old) return old;
-          //   return old.map((p) => {
-          //     if (p.id !== projectId) return p;
-          //     return {
-          //       ...p,
-          //       sessions: (p.sessions ?? []).map((s) => {
-          //         if (s.id !== tempId) return s;
-          //         return { id: sessionId, projectId, name, branch: "", worktreePath: "",
-          //                  ports: null, createdAt: new Date().toISOString(), status: "existing" };
-          //       }),
-          //     };
-          //   });
-          // });
-          queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-          resolve({
-            id: sessionId, projectId, name, branch: "", worktreePath: "",
-            ports: null, createdAt: new Date().toISOString(), status: "existing",
-          });
-        });
+            queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+            resolve({
+              id: sessionId,
+              projectId,
+              name,
+              branch: "",
+              worktreePath: "",
+              ports: null,
+              createdAt: new Date().toISOString(),
+              status: "existing",
+            });
+          },
+        );
       });
     },
     onError: (_err, _variables, context) => {
@@ -193,25 +202,27 @@ export function useDeleteSessionSSE() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
       return new Promise<void>((resolve, reject) => {
-        const offComplete = stream.onComplete((result: { success: boolean; error?: string; sessionId?: string }) => {
-          offStep();
-          offComplete();
-          if (!result.success) {
-            reject(new Error(result.error ?? "delete failed"));
-            return;
-          }
-          queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
-            if (!old) return old;
-            return old.map((p) => {
-              if (p.id !== projectId) return p;
-              return {
-                ...p,
-                sessions: (p.sessions ?? []).filter((s) => s.id !== sessionId),
-              };
+        const offComplete = stream.onComplete(
+          (result: { success: boolean; error?: string; sessionId?: string }) => {
+            offStep();
+            offComplete();
+            if (!result.success) {
+              reject(new Error(result.error ?? "delete failed"));
+              return;
+            }
+            queryClient.setQueryData<ProjectData[]>(queryKeys.projects, (old) => {
+              if (!old) return old;
+              return old.map((p) => {
+                if (p.id !== projectId) return p;
+                return {
+                  ...p,
+                  sessions: (p.sessions ?? []).filter((s) => s.id !== sessionId),
+                };
+              });
             });
-          });
-          resolve();
-        });
+            resolve();
+          },
+        );
 
         // Fire the IPC — main schedules the lifecycle on setImmediate
         // so this resolves immediately with the synchronous result,
@@ -287,7 +298,10 @@ export function useReassignPorts() {
 export function useSetSessionUserStatus() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ sessionId, status }: { sessionId: string; status: SessionUserStatus | null }) => {
+    mutationFn: async ({
+      sessionId,
+      status,
+    }: { sessionId: string; status: SessionUserStatus | null }) => {
       return api().sessions.setUserStatus(sessionId, status);
     },
     onMutate: async ({ sessionId, status }) => {
@@ -298,9 +312,7 @@ export function useSetSessionUserStatus() {
         if (!old) return old;
         return old.map((p) => ({
           ...p,
-          sessions: p.sessions.map((s) =>
-            s.id === sessionId ? { ...s, userStatus: status } : s,
-          ),
+          sessions: p.sessions.map((s) => (s.id === sessionId ? { ...s, userStatus: status } : s)),
         }));
       });
       return { prev };

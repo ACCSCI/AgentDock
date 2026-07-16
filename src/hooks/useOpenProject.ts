@@ -1,6 +1,7 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { queryKeys, useCreateProject, useInitDb, useProjects } from "../lib/queries";
 import type { ProjectData } from "../lib/queries/types";
 import { useStore } from "../lib/store";
@@ -16,7 +17,7 @@ function normalizePath(p: string): string {
   return p
     .replace(/\\/g, "/")
     .replace(/\/+$/, "")
-    .replace(/^([A-Z]):/i, (_, d: string) => d.toLowerCase() + ":");
+    .replace(/^([A-Z]):/i, (_, d: string) => `${d.toLowerCase()}:`);
 }
 
 /**
@@ -53,10 +54,15 @@ function safeErrorMessage(error: unknown): string {
  *              then create project; on cancel, abort (no side-effects)
  */
 export function useOpenProject() {
+  const { t } = useTranslation("home");
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const { setActiveProject } = useStore();
-  const { data: projects, isLoading: isProjectsLoading, isFetched: isProjectsFetched } = useProjects();
+  const {
+    data: projects,
+    isLoading: isProjectsLoading,
+    isFetched: isProjectsFetched,
+  } = useProjects();
   const createProject = useCreateProject();
   const initDb = useInitDb();
   const navigate = useNavigate();
@@ -83,7 +89,9 @@ export function useOpenProject() {
    * cache state at the moment we issue navigate.
    */
   const insertOrReplaceProject = useCallback(
-    (project: ProjectData): ProjectData[] => {
+    (
+      project: Omit<ProjectData, "sessions"> & { sessions?: ProjectData["sessions"] },
+    ): ProjectData[] => {
       const old = queryClient.getQueryData<ProjectData[]>(queryKeys.projects);
       const list = old ?? [];
       const idx = list.findIndex((p) => p.id === project.id);
@@ -129,10 +137,10 @@ export function useOpenProject() {
         });
       } catch (error) {
         const message = safeErrorMessage(error);
-        alert(`打开项目失败: ${message}`);
+        toast.error(t("openProjectFailed", { message }));
       }
     },
-    [createProject, initDb, setActiveProject, navigate, insertOrReplaceProject],
+    [createProject, initDb, setActiveProject, navigate, insertOrReplaceProject, t],
   );
 
   /**
@@ -140,29 +148,24 @@ export function useOpenProject() {
    * against existing project names. Returns empty string if the project
    * already exists by exact path (caller should navigate instead).
    */
-  const resolveName = useCallback(
-    (selectedPath: string, projectsList: typeof projects): string => {
-      const normalizedSelected = normalizePath(selectedPath);
-      const existingByPath = projectsList?.find(
-        (p) => normalizePath(p.path) === normalizedSelected,
-      );
-      if (existingByPath) return "";
+  const resolveName = useCallback((selectedPath: string, projectsList: typeof projects): string => {
+    const normalizedSelected = normalizePath(selectedPath);
+    const existingByPath = projectsList?.find((p) => normalizePath(p.path) === normalizedSelected);
+    if (existingByPath) return "";
 
-      const normalized = selectedPath.replace(/\\/g, "/");
-      const segments = normalized.split("/").filter(Boolean);
-      const baseName = segments[segments.length - 1] || selectedPath;
+    const normalized = selectedPath.replace(/\\/g, "/");
+    const segments = normalized.split("/").filter(Boolean);
+    const baseName = segments[segments.length - 1] || selectedPath;
 
-      let name = baseName;
-      const existingNames = new Set(projectsList?.map((p) => p.name) ?? []);
-      if (existingNames.has(name)) {
-        let suffix = 1;
-        while (existingNames.has(`${baseName} (${suffix})`)) suffix++;
-        name = `${baseName} (${suffix})`;
-      }
-      return name;
-    },
-    [],
-  );
+    let name = baseName;
+    const existingNames = new Set(projectsList?.map((p) => p.name) ?? []);
+    if (existingNames.has(name)) {
+      let suffix = 1;
+      while (existingNames.has(`${baseName} (${suffix})`)) suffix++;
+      name = `${baseName} (${suffix})`;
+    }
+    return name;
+  }, []);
 
   // ── DirBrowserModal callbacks ───────────────────────────────────────
 
@@ -186,42 +189,46 @@ export function useOpenProject() {
           // If we can't fetch the projects list, surface a friendly error
           // and bail out — do not blindly attempt to create.
           const message = safeErrorMessage(error);
-          alert(`无法加载项目列表: ${message}`);
+          toast.error(t("loadProjectsFailed", { message }));
           return;
         }
       }
 
-      // Fast-path: project with same path already exists → navigate.
-      // Use normalized path comparison to handle trailing slashes, case differences, etc.
-      const normalizedSelected = normalizePath(selectedPath);
-      const existingByPath = projectsList?.find(
-        (p) => normalizePath(p.path) === normalizedSelected,
-      );
-      if (existingByPath) {
-        await initDb.mutateAsync(selectedPath);
-        setActiveProject(existingByPath.id);
-        // Ensure the cache reflects the active project state synchronously
-        // before navigating. Don't await an async refetch — it would race
-        // with the navigate and HomeComponent would swallow the route change.
-        insertOrReplaceProject(existingByPath);
-        requestAnimationFrame(() => {
-          navigate({ to: "/app/$projectId", params: { projectId: existingByPath.id } });
-        });
-        return;
-      }
+      try {
+        // Fast-path: project with same path already exists → navigate.
+        // Use normalized path comparison to handle trailing slashes, case differences, etc.
+        const normalizedSelected = normalizePath(selectedPath);
+        const existingByPath = projectsList?.find(
+          (p) => normalizePath(p.path) === normalizedSelected,
+        );
+        if (existingByPath) {
+          await initDb.mutateAsync(selectedPath);
+          setActiveProject(existingByPath.id);
+          // Ensure the cache reflects the active project state synchronously
+          // before navigating. Don't await an async refetch — it would race
+          // with the navigate and HomeComponent would swallow the route change.
+          insertOrReplaceProject(existingByPath);
+          requestAnimationFrame(() => {
+            navigate({ to: "/app/$projectId", params: { projectId: existingByPath.id } });
+          });
+          return;
+        }
 
-      // Check if directory is a git repo.
-      const isRepo = await window.api.git.isRepo(selectedPath);
-      if (isRepo) {
-        const name = resolveName(selectedPath, projectsList);
-        if (name) await createAndNavigate(selectedPath, name);
-        return;
-      }
+        // Check if directory is a git repo.
+        const isRepo = await window.api.git.isRepo(selectedPath);
+        if (isRepo) {
+          const name = resolveName(selectedPath, projectsList);
+          if (name) await createAndNavigate(selectedPath, name);
+          return;
+        }
 
-      // Not a git repo → pause and ask the user.
-      pendingPathRef.current = selectedPath;
-      setPendingPath(selectedPath);
-      setGitInitModalOpen(true);
+        // Not a git repo → pause and ask the user.
+        pendingPathRef.current = selectedPath;
+        setPendingPath(selectedPath);
+        setGitInitModalOpen(true);
+      } catch (error) {
+        toast.error(t("openProjectFailed", { message: safeErrorMessage(error) }));
+      }
     },
     [
       projects,
@@ -234,6 +241,7 @@ export function useOpenProject() {
       createAndNavigate,
       initDb,
       insertOrReplaceProject,
+      t,
     ],
   );
 
@@ -251,13 +259,13 @@ export function useOpenProject() {
     try {
       const result = await window.api.git.init(dirPath);
       if (!result.success) {
-        toast.error(`Git 初始化失败: ${result.error ?? "未知错误"}`);
+        toast.error(t("gitInitFailed", { message: result.error ?? t("unknownError") }));
         setGitInitModalOpen(false);
         setPendingPath("");
         return;
       }
 
-      toast.success("Git 仓库初始化完成");
+      toast.success(t("gitInitSuccess"));
       setGitInitModalOpen(false);
       setPendingPath("");
 
@@ -280,14 +288,22 @@ export function useOpenProject() {
       if (name) await createAndNavigate(dirPath, name);
     } catch (error) {
       const message = safeErrorMessage(error);
-      toast.error(`Git 初始化失败: ${message}`);
+      toast.error(t("gitInitFailed", { message }));
       setGitInitModalOpen(false);
       setPendingPath("");
     } finally {
       pendingPathRef.current = null;
       setGitInitLoading(false);
     }
-  }, [projects, isProjectsFetched, isProjectsLoading, queryClient, resolveName, createAndNavigate]);
+  }, [
+    projects,
+    isProjectsFetched,
+    isProjectsLoading,
+    queryClient,
+    resolveName,
+    createAndNavigate,
+    t,
+  ]);
 
   const handleGitInitCancel = useCallback(() => {
     pendingPathRef.current = null;

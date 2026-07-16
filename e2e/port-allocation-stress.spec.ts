@@ -8,19 +8,18 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { dumpDb } from "./helpers/dump";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TID } from "./pages/testids";
-import { dumpDb } from "./helpers/dump";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -42,7 +41,6 @@ test.describe("port allocation stress", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -67,18 +65,14 @@ test.describe("port allocation stress", () => {
     for (let i = 0; i < SESSION_COUNT; i++) {
       await sidebar.clickNewSession();
       // Wait until card count increments.
-      await expect
-        .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-        .toBe(i + 1);
+      await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(i + 1);
 
       // Re-query the card each iteration because the sidebar may
       // re-render between iterations (e.g. when the next card
       // appears) and the .nth(i) locator chain can become stale.
       // Use .last() since the just-created card is the most recent
       // and lands at the end of the (creation-ordered) list.
-      const latestCard = window
-        .locator(`[data-testid="${TID.sessionCard}"]`)
-        .last();
+      const latestCard = window.locator(`[data-testid="${TID.sessionCard}"]`).last();
       await expect(latestCard).toBeVisible({ timeout: 10_000 });
 
       // Wait for the latest card's ports to appear. Soft-asserted —
@@ -109,18 +103,18 @@ test.describe("port allocation stress", () => {
     for (const sid of sessionIds) {
       const row = dump.sessions.find((s) => s.id === sid);
       expect(row, `session ${sid} not found in DB`).toBeTruthy();
-      expect(row!.ports, `session ${sid} has no ports`).toBeTruthy();
-      const ports = JSON.parse(row!.ports!) as Record<string, number>;
+      expect(row?.ports, `session ${sid} has no ports`).toBeTruthy();
+      const ports = JSON.parse(row?.ports!) as Record<string, number>;
       expect(ports.FRONTEND_PORT).toBeGreaterThan(1024);
       frontendPorts.push(ports.FRONTEND_PORT);
     }
 
     // All frontend ports must be unique.
     const uniquePorts = new Set(frontendPorts);
-    expect(uniquePorts.size).toBe(
-      SESSION_COUNT,
+    expect(
+      uniquePorts.size,
       `expected ${SESSION_COUNT} unique ports, got ${uniquePorts.size}: [${frontendPorts.join(", ")}]`,
-    );
+    ).toBe(SESSION_COUNT);
 
     // 5. Delete all sessions one by one.
     for (let i = SESSION_COUNT - 1; i >= 0; i--) {
@@ -134,9 +128,7 @@ test.describe("port allocation stress", () => {
     }
 
     // 6. All cards should be gone.
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 60_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 60_000 }).toBe(0);
 
     // 7. DB should have no sessions.
     const finalDump = dumpDb(dataDir);
@@ -148,10 +140,11 @@ test.describe("port allocation stress", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

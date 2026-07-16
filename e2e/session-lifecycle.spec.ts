@@ -12,12 +12,12 @@
  *     → assert renderer-visible projects.list contains the session
  *     → sessions:rename (exercises git branch rename — 8ec663a fix)
  *     → assert DB row carries the renamed branch
- *     → sessions:delete → await complete via SSE-equivalent
+ *     → sessions:delete → await IPC completion
  *     → assert filesystem + DB cleanup
  *     → projects:delete → assert no leftover state
  *
  * Runs the whole flow twice in the same spec to surface idempotency
- * bugs (cached daemon state, lingering WAL handles, repeated branch
+ * bugs (stale in-memory state, lingering SQLite handles, repeated branch
  * collisions, etc.).
  *
  * Uses an isolated temp `agentdock.config.yaml` with no hooks so this
@@ -26,7 +26,8 @@
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { dumpDb, dumpWorktreeTree } from "./helpers/dump";
 import {
   awaitSessionComplete,
   bootstrapHealth,
@@ -38,7 +39,6 @@ import {
   listProjects,
   renameSession,
 } from "./helpers/ipc";
-import { dumpDb, dumpWorktreeTree } from "./helpers/dump";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
@@ -46,7 +46,7 @@ function prepareGitRepo(dir: string): void {
   // — every CI image we target has them. If this throws the e2e is meant
   // to fail loudly (worktree creation requires a git repo).
   execSync("git init -q -b main", { cwd: dir });
-  execSync('git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init', {
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
     cwd: dir,
   });
 }
@@ -69,9 +69,9 @@ test.describe("session lifecycle (real data flow)", () => {
     rendererLog,
     expectNoRendererErrors,
   }) => {
-    // 1. Health check — confirms daemon + IPC layer are up.
+    // 1. Health check — confirms the renderer and IPC layer are up.
     const health = await bootstrapHealth(window);
-    expect(health.daemon).toBe("ok");
+    expect(health.ipc).toBeGreaterThan(0);
     expect(health.ipc).toBeGreaterThanOrEqual(30); // 29 original + sync:project
 
     // 2. Prepare a real git repo + empty config so this spec is hook-free.
@@ -93,8 +93,8 @@ test.describe("session lifecycle (real data flow)", () => {
     {
       const list = await listProjects(window);
       expect(list).toHaveLength(1);
-      expect(list[0]!.id).toBe(project.id);
-      expect(list[0]!.sessions).toHaveLength(0);
+      expect(list[0]?.id).toBe(project.id);
+      expect(list[0]?.sessions).toHaveLength(0);
     }
 
     // Two passes — second one catches idempotency / cache-staleness bugs.
@@ -134,9 +134,9 @@ test.describe("session lifecycle (real data flow)", () => {
       ]) {
         const slot = byStep.get(required);
         expect(slot, `missing step "${required}"`).toBeDefined();
-        expect(slot!.error, `step "${required}" errored: ${slot!.error ?? ""}`).toBeUndefined();
-        expect(slot!.running, `step "${required}" never reported running`).toBe(true);
-        expect(slot!.done, `step "${required}" never reached done`).toBe(true);
+        expect(slot?.error, `step "${required}" errored: ${slot?.error ?? ""}`).toBeUndefined();
+        expect(slot?.running, `step "${required}" never reported running`).toBe(true);
+        expect(slot?.done, `step "${required}" never reached done`).toBe(true);
       }
 
       // 9. Filesystem assertions — worktree on disk + .env populated.
@@ -153,19 +153,21 @@ test.describe("session lifecycle (real data flow)", () => {
       const db = dumpDb(projectPath);
       const dbRow = db.sessions.find((s) => s.id === sessionId);
       expect(dbRow, "session row missing").toBeDefined();
-      expect(dbRow!.worktree_path).toBe(worktreePath);
-      expect(dbRow!.branch).toBe(`agentdock/${sessionId}`);
-      const persistedPorts = dbRow!.ports ? (JSON.parse(dbRow!.ports) as Record<string, number>) : null;
+      expect(dbRow?.worktree_path).toBe(worktreePath);
+      expect(dbRow?.branch).toBe(`agentdock/${sessionId}`);
+      const persistedPorts = dbRow?.ports
+        ? (JSON.parse(dbRow?.ports) as Record<string, number>)
+        : null;
       expect(persistedPorts, "ports JSON missing in DB").not.toBeNull();
-      expect(typeof persistedPorts!.FRONTEND_PORT).toBe("number");
+      expect(typeof persistedPorts?.FRONTEND_PORT).toBe("number");
 
       // 11. Renderer-visible projects.list contains this session.
       {
         const list = await listProjects(window);
-        const sess = list[0]!.sessions.find((s) => s.id === sessionId);
+        const sess = list[0]?.sessions.find((s) => s.id === sessionId);
         expect(sess, "renderer projects.list missing session").toBeDefined();
-        expect(sess!.branch).toBe(`agentdock/${sessionId}`);
-        expect(sess!.ports).toBeTruthy();
+        expect(sess?.branch).toBe(`agentdock/${sessionId}`);
+        expect(sess?.ports).toBeTruthy();
       }
 
       // 12. Rename → confirm git branch is renamed (8ec663a fix).
@@ -178,20 +180,19 @@ test.describe("session lifecycle (real data flow)", () => {
       {
         const db2 = dumpDb(projectPath);
         const row2 = db2.sessions.find((s) => s.id === sessionId);
-        expect(row2!.branch).toBe(`agentdock/${sessionId}`);
-        expect(row2!.name).toBe(renamed);
+        expect(row2?.branch).toBe(`agentdock/${sessionId}`);
+        expect(row2?.name).toBe(renamed);
         // git itself should have the original branch (rename is a no-op
         // since branch is always agentdock/<sessionId>).
-        const branches = execFileSync(
-          "git",
-          ["branch", "--list", "agentdock/*"],
-          { cwd: projectPath, encoding: "utf-8" },
-        );
+        const branches = execFileSync("git", ["branch", "--list", "agentdock/*"], {
+          cwd: projectPath,
+          encoding: "utf-8",
+        });
         expect(branches).toContain(`agentdock/${sessionId}`);
         expect(branches).not.toContain(`agentdock/${renamed}`);
       }
 
-      // 13. Delete — exercises SSE-equivalent streaming on session:delete
+      // 13. Delete — exercises streamed IPC completion on session:delete
       //     (await fires when our handler sends `session:<id>:complete`).
       const deletePromise = (async () => {
         const tail = await awaitSessionComplete(window, sessionId, 30_000).catch((err) => {
@@ -218,19 +219,21 @@ test.describe("session lifecycle (real data flow)", () => {
       expect(existsSync(worktreePath), `worktree dir leaked: ${worktreePath}`).toBe(false);
       {
         const db3 = dumpDb(projectPath);
-        expect(db3.sessions.find((s) => s.id === sessionId), "DB row leaked").toBeUndefined();
+        expect(
+          db3.sessions.find((s) => s.id === sessionId),
+          "DB row leaked",
+        ).toBeUndefined();
       }
       {
         const list = await listProjects(window);
-        expect(list[0]!.sessions.find((s) => s.id === sessionId)).toBeUndefined();
+        expect(list[0]?.sessions.find((s) => s.id === sessionId)).toBeUndefined();
       }
       // The branch (agentdock/<sessionId>) should be gone after delete.
       // Rename never changes the branch, so verify both old and new names.
-      const branchesAfter = execFileSync(
-        "git",
-        ["branch", "--list", "agentdock/*"],
-        { cwd: projectPath, encoding: "utf-8" },
-      );
+      const branchesAfter = execFileSync("git", ["branch", "--list", "agentdock/*"], {
+        cwd: projectPath,
+        encoding: "utf-8",
+      });
       expect(branchesAfter).not.toContain(`agentdock/${renamed}`);
       expect(branchesAfter).not.toContain(`agentdock/${sessionId}`);
     }
@@ -246,7 +249,7 @@ test.describe("session lifecycle (real data flow)", () => {
     // 16. Surface diagnostic on failure of any subsequent step.
     if (mainLog.length === 0) {
       // No main-process output at all suggests Electron stderr piping
-      // is broken — this would silently swallow daemon errors in CI.
+      // is broken — this would silently swallow lifecycle errors in local E2E.
       throw new Error("mainLog is empty — Electron stderr piping not capturing");
     }
 
@@ -263,8 +266,9 @@ test.describe("session lifecycle (real data flow)", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const fontErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && (e.text.includes("agentdock-fonts://") || e.text.includes("net::ERR_FAILED")),
+      (e) =>
+        e.type === "error" &&
+        (e.text.includes("agentdock-fonts://") || e.text.includes("net::ERR_FAILED")),
     );
     // Remove font errors from the capture buffer so expectNoRendererErrors
     // doesn't trip on them.

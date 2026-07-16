@@ -23,8 +23,8 @@
  */
 import { app, ipcMain } from "electron";
 import electronUpdater from "electron-updater";
-import { IPC_CHANNELS } from "../../shared/api-types.js";
 import { log } from "../../../plugins/logger.js";
+import { IPC_CHANNELS } from "../../shared/api-types.js";
 
 const { autoUpdater } = electronUpdater;
 
@@ -51,31 +51,28 @@ export function registerApp(): void {
     };
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS["app:checkForUpdates"],
-    async (): Promise<CheckForUpdatesResult> => {
-      if (!app.isPackaged) {
-        log.info("app:checkForUpdates: dev mode — skipping");
-        return { status: "dev-mode" };
-      }
-      try {
-        // checkForUpdates resolves with UpdateCheckResult even when
-        // no newer version is available — the result.info always
-        // carries the latest release, which may be the same as the
-        // current version. The canonical signal is the event chain
-        // (onAvailable / update-not-available / update-downloaded /
-        // error) registered in initAutoUpdater(). The renderer
-        // subscribes to these and manages state transitions; all we
-        // do here is kick off the check.
-        await autoUpdater.checkForUpdates();
-        return { status: "checking" };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn({ err }, "app:checkForUpdates failed");
-        return { status: "error", message };
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS["app:checkForUpdates"], async (): Promise<CheckForUpdatesResult> => {
+    if (!app.isPackaged) {
+      log.info("app:checkForUpdates: dev mode — skipping");
+      return { status: "dev-mode" };
+    }
+    try {
+      // checkForUpdates resolves with UpdateCheckResult even when
+      // no newer version is available — the result.info always
+      // carries the latest release, which may be the same as the
+      // current version. The canonical signal is the event chain
+      // (onAvailable / update-not-available / update-downloaded /
+      // error) registered in initAutoUpdater(). The renderer
+      // subscribes to these and manages state transitions; all we
+      // do here is kick off the check.
+      await autoUpdater.checkForUpdates();
+      return { status: "checking" };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err }, "app:checkForUpdates failed");
+      return { status: "error", message };
+    }
+  });
 
   // quitAndInstall is dangerous in dev — only callable when packaged.
   // We rely on isPackaged as the gate; if a dev shell somehow calls this,

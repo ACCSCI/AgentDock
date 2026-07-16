@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import path from "node:path";
 // @ts-nocheck
 /**
  * AgentDockDaemon — backward-compatible wrapper around the Hono app.
@@ -16,30 +19,27 @@
  *
  * The class doesn't own route logic — that's all in plugins/daemon/routes/*.ts.
  */
-import { serve, type ServerType } from "@hono/node-server";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { execFile } from "node:child_process";
-import path from "node:path";
-import { writeDaemonInfo, deleteDaemonInfo } from "../daemon-discovery.js";
+import { type ServerType, serve } from "@hono/node-server";
+import { deleteDaemonInfo, writeDaemonInfo } from "../daemon-discovery.js";
 import { log } from "../logger.js";
-import { createApp } from "./app.js";
 import {
-  cleanupStaleClients,
-  HEARTBEAT_CHECK_INTERVAL_MS,
-  makeContext,
-  type DaemonContext,
-  type DaemonOptions,
-} from "./context.js";
-import {
-  createRecoveringController,
-  RECOVERING_TICK_INTERVAL_MS,
-} from "../recovering-controller.js";
-import {
-  createReconciler,
   RECONCILER_TUNING,
   type Reconciler,
   type WorktreeDirEntry,
+  createReconciler,
 } from "../reconciler.js";
+import {
+  RECOVERING_TICK_INTERVAL_MS,
+  createRecoveringController,
+} from "../recovering-controller.js";
+import { createApp } from "./app.js";
+import {
+  type DaemonContext,
+  type DaemonOptions,
+  HEARTBEAT_CHECK_INTERVAL_MS,
+  cleanupStaleClients,
+  makeContext,
+} from "./context.js";
 
 export class AgentDockDaemon {
   private ctx: DaemonContext;
@@ -66,7 +66,7 @@ export class AgentDockDaemon {
       let firstError: Error | null = null;
 
       const onListen = () => {
-        const addr = this.server!.address();
+        const addr = this.server?.address();
         const actualPort = typeof addr === "object" && addr ? addr.port : this.ctx.port;
         this.ctx.actualPort = actualPort;
         this.ctx.state.setDaemonPort(actualPort);
@@ -330,7 +330,7 @@ export class AgentDockDaemon {
       return;
     }
     return new Promise<void>((resolve) => {
-      this.server!.close(() => {
+      this.server?.close(() => {
         try {
           deleteDaemonInfo();
         } catch {
@@ -360,9 +360,7 @@ export class AgentDockDaemon {
  * re-exports AgentDockDaemon and a thin `runDaemon()` helper.
  */
 export async function runDaemon(options: DaemonOptions = {}): Promise<AgentDockDaemon> {
-  const envPort = process.env.AGENTDOCK_DAEMON_PORT
-    ? Number(process.env.AGENTDOCK_DAEMON_PORT)
-    : 0;
+  const envPort = process.env.AGENTDOCK_DAEMON_PORT ? Number(process.env.AGENTDOCK_DAEMON_PORT) : 0;
   const port = options.port ?? envPort;
   const daemon = new AgentDockDaemon({ ...options, port });
   await daemon.start();
@@ -371,10 +369,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<AgentDockD
 
 // Auto-start when invoked as the main module.
 // (matches the original plugins/daemon.ts:1005-1016 behavior)
-if (
-  process.argv[1] &&
-  /\bdaemon\.(ts|js|cjs|mjs)$/.test(process.argv[1])
-) {
+if (process.argv[1] && /\bdaemon\.(ts|js|cjs|mjs)$/.test(process.argv[1])) {
   runDaemon()
     .then((daemon) => {
       console.log(`[daemon] listening on http://127.0.0.1:${daemon.getPort()}`);

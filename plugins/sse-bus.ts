@@ -51,11 +51,7 @@ export class SseBus {
   private subscribers = new Set<(e: DaemonEvent) => void>();
 
   /** Publish an event. Assigns seq if not provided. Returns the event with seq. */
-  publish(
-    event: EventName,
-    data: Record<string, unknown>,
-    seq?: number,
-  ): DaemonEvent {
+  publish(event: EventName, data: Record<string, unknown>, seq?: number): DaemonEvent {
     const finalSeq = seq ?? ++this.seq;
     const e: DaemonEvent = {
       seq: finalSeq,
@@ -88,17 +84,17 @@ export class SseBus {
    * caller should emit `resync-required`.
    */
   replaySince(lastEventId: number): DaemonEvent[] | null {
-    if (lastEventId < 0) lastEventId = 0;
+    const replayFrom = Math.max(0, lastEventId);
     if (this.buffer.length === 0) {
       // No events ever published — even lastEventId=0 is "all ack'd"
       return [];
     }
-    const firstSeq = this.buffer[0]!.seq;
-    if (lastEventId < firstSeq - 1) {
+    const firstSeq = this.buffer[0]?.seq;
+    if (replayFrom < firstSeq - 1) {
       // Overflow or restart — can't replay
       return null;
     }
-    return this.buffer.filter((e) => e.seq > lastEventId);
+    return this.buffer.filter((e) => e.seq > replayFrom);
   }
 
   /** Subscribe to live events. Returns an unsubscribe function. */

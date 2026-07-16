@@ -3,9 +3,9 @@
  * Debug and metrics routes for daemon API v2 (§11.1, P10).
  */
 import {
-  Hono,
-  type DaemonContext,
   CURRENT_SCHEMA_VERSION,
+  type DaemonContext,
+  type Hono,
   checkAllInvariants,
 } from "./shared.js";
 
@@ -30,10 +30,9 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
           worktreePath: `${sess.projectRoot}/.agentdock/worktrees/${id}`,
           projectPath: sess.projectRoot,
           ports: Object.fromEntries(
-            ctx.stateV2.getSessionPorts(id).map((p) => [
-              ctx.stateV2.getPortOwner(p)?.name ?? "?",
-              p,
-            ]),
+            ctx.stateV2
+              .getSessionPorts(id)
+              .map((p) => [ctx.stateV2.getPortOwner(p)?.name ?? "?", p]),
           ),
           ownerClientId: ctx.stateV2.getOwner(id)?.clientId,
           createdAt: new Date(sess.createdAt).toISOString(),
@@ -68,7 +67,7 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
           allocatedPorts,
           worktreeIndex: Object.fromEntries(
             Object.entries(v1Sessions).map(([id]) => [
-              `${(v2.sessions[id]?.projectRoot ?? "")}/.agentdock/worktrees/${id}`,
+              `${v2.sessions[id]?.projectRoot ?? ""}/.agentdock/worktrees/${id}`,
               id,
             ]),
           ),
@@ -97,9 +96,7 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
       startedAt: ctx.startedAt,
       state: {
         sessions: {},
-        clients: Object.fromEntries(
-          ctx.state.listClients().map((c) => [c.clientId, c]),
-        ),
+        clients: Object.fromEntries(ctx.state.listClients().map((c) => [c.clientId, c])),
         allocatedPorts: [],
         worktreeIndex: {},
       },
@@ -123,9 +120,7 @@ export function registerDebugState(app: Hono, ctx: DaemonContext): void {
     //   - 真监听 ⊆ RESERVED, RESERVED ⊆ allocated, 所以仍成立
     // 真正的运行时监听由 E2E 用 probeRuntime 收集, 这里用 allocated 给 daemon
     // 端自检一个保守起点.
-    const listeners = new Set<number>(
-      ctx.stateV2.listAllPorts().map((p) => p.port),
-    );
+    const listeners = new Set<number>(ctx.stateV2.listAllPorts().map((p) => p.port));
     const composite = checkAllInvariants(ctx.stateV2, listeners);
     if (!composite.ok) {
       return c.json(

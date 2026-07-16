@@ -1,18 +1,30 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import process from "node:process";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDockConfig } from "../config.js";
-import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
+import type { HookReport } from "../hook-engine.js";
+import { type PortService, createSessionLifecycle } from "../session-lifecycle.js";
 import { getWorktreePath } from "../worktree.js";
-import type { SessionPorts } from "../daemon-state.js";
 
 const isWin = process.platform === "win32";
-function echoCmd(msg: string) { return `echo ${msg}`; }
-function exitCmd(code: number) { return isWin ? `cmd /c exit ${code}` : `exit ${code}`; }
+function assertDefined<T>(value: T | null | undefined): asserts value is T {
+  expect(value).toBeDefined();
+  if (value == null) throw new Error("Expected value to be defined");
+}
+function requireDefined<T>(value: T): NonNullable<T> {
+  assertDefined(value);
+  return value as NonNullable<T>;
+}
+function echoCmd(msg: string) {
+  return `echo ${msg}`;
+}
+function exitCmd(code: number) {
+  return isWin ? `cmd /c exit ${code}` : `exit ${code}`;
+}
 function sleepCmd(seconds: number) {
   return isWin ? `ping 127.0.0.1 -n ${seconds + 1} -w 1000 >nul` : `sleep ${seconds}`;
 }
@@ -59,7 +71,10 @@ function defaultConfig(): AgentDockConfig {
 }
 
 beforeEach(() => {
-  projectDir = path.join(os.tmpdir(), `ad-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  projectDir = path.join(
+    os.tmpdir(),
+    `ad-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(projectDir, { recursive: true });
   initGitRepo(projectDir);
   portCounter = 0;
@@ -189,7 +204,9 @@ describe("create — 正常流程", () => {
 
   it("D8: afterCreateSession hook 执行成功", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{ run: echoCmd("done"), required: false, timeout: 30000, cwd: "worktree" }];
+    config.hooks.afterCreateSession = [
+      { run: echoCmd("done"), required: false, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -201,14 +218,16 @@ describe("create — 正常流程", () => {
     });
     const afterReport = result.hookReports.find((r) => r.event === "afterCreateSession");
     expect(afterReport).toBeDefined();
-    expect(afterReport!.results).toHaveLength(1);
-    expect(afterReport!.results[0].success).toBe(true);
-    expect(afterReport!.results[0].stdout).toContain("done");
+    expect(afterReport?.results).toHaveLength(1);
+    expect(afterReport?.results[0].success).toBe(true);
+    expect(afterReport?.results[0].stdout).toContain("done");
   });
 
   it("D9: beforeCreateSession hook 执行成功", async () => {
     const config = defaultConfig();
-    config.hooks.beforeCreateSession = [{ run: echoCmd("ready"), required: false, timeout: 30000, cwd: "project" }];
+    config.hooks.beforeCreateSession = [
+      { run: echoCmd("ready"), required: false, timeout: 30000, cwd: "project", async: false },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -220,7 +239,7 @@ describe("create — 正常流程", () => {
     });
     const beforeReport = result.hookReports.find((r) => r.event === "beforeCreateSession");
     expect(beforeReport).toBeDefined();
-    expect(beforeReport!.results[0].success).toBe(true);
+    expect(beforeReport?.results[0].success).toBe(true);
   });
 
   it("D10: 无 config 时 pipeline 正常完成", async () => {
@@ -259,7 +278,9 @@ describe("create — 正常流程", () => {
 describe("create — 失败与 rollback", () => {
   it("D12: beforeCreateSession required hook 失败中断 create", async () => {
     const config = defaultConfig();
-    config.hooks.beforeCreateSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
+    config.hooks.beforeCreateSession = [
+      { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
@@ -277,7 +298,9 @@ describe("create — 失败与 rollback", () => {
 
   it("D13: afterCreateSession required hook 失败触发 rollback", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
+    config.hooks.afterCreateSession = [
+      { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
@@ -295,7 +318,9 @@ describe("create — 失败与 rollback", () => {
 
   it("D14: afterCreateSession optional hook 失败不 rollback", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{ run: exitCmd(1), required: false, timeout: 30000, cwd: "worktree" }];
+    config.hooks.afterCreateSession = [
+      { run: exitCmd(1), required: false, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -308,7 +333,7 @@ describe("create — 失败与 rollback", () => {
     expect(existsSync(result.worktreePath)).toBe(true);
     expect(result.ports.FRONTEND_PORT).toBeGreaterThan(0);
     const afterReport = result.hookReports.find((r) => r.event === "afterCreateSession");
-    expect(afterReport!.results[0].success).toBe(false);
+    expect(afterReport?.results[0].success).toBe(false);
   });
 
   it("D15: 资源同步 skipIfMissing=false 失败触发 rollback", async () => {
@@ -372,16 +397,26 @@ describe("create — 执行顺序验证", () => {
     config.resources.sync = [{ source: ".env", strategy: "overwrite", skipIfMissing: true }];
 
     // beforeCreateSession: write marker to tmpFile
-    config.hooks.beforeCreateSession = [{
-      run: echoCmd("before") + ` >> "${tmpFile}"`,
-      required: false, timeout: 30000, cwd: "project",
-    }];
+    config.hooks.beforeCreateSession = [
+      {
+        run: `${echoCmd("before")} >> "${tmpFile}"`,
+        required: false,
+        timeout: 30000,
+        cwd: "project",
+        async: false,
+      },
+    ];
 
     // afterCreateSession: read .env from worktree and write marker
-    config.hooks.afterCreateSession = [{
-      run: echoCmd("after") + ` >> "${tmpFile}"`,
-      required: false, timeout: 30000, cwd: "worktree",
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: `${echoCmd("after")} >> "${tmpFile}"`,
+        required: false,
+        timeout: 30000,
+        cwd: "worktree",
+        async: false,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -401,20 +436,25 @@ describe("create — 执行顺序验证", () => {
     expect(markers).toContain("before");
     expect(markers).toContain("after");
 
-    try { rmSync(tmpFile); } catch {}
+    try {
+      rmSync(tmpFile);
+    } catch {}
   });
 
   it("D18: afterCreateSession hook 中 worktree 已有端口 .env", async () => {
     const config = defaultConfig();
     const envReadFile = path.join(os.tmpdir(), `env-read-${Date.now()}.txt`);
 
-    config.hooks.afterCreateSession = [{
-      // Read .env and dump it to a temp file
-      run: isWin
-        ? `type .env >> "${envReadFile}"`
-        : `cat .env >> "${envReadFile}"`,
-      required: false, timeout: 30000, cwd: "worktree",
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        // Read .env and dump it to a temp file
+        run: isWin ? `type .env >> "${envReadFile}"` : `cat .env >> "${envReadFile}"`,
+        required: false,
+        timeout: 30000,
+        cwd: "worktree",
+        async: false,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -428,7 +468,9 @@ describe("create — 执行顺序验证", () => {
     const envContent = readFileSync(envReadFile, "utf-8");
     expect(envContent).toContain(`FRONTEND_PORT=${result.ports.FRONTEND_PORT}`);
 
-    try { rmSync(envReadFile); } catch {}
+    try {
+      rmSync(envReadFile);
+    } catch {}
   });
 });
 
@@ -496,7 +538,9 @@ describe("remove — 正常流程", () => {
     });
 
     const config = defaultConfig();
-    config.hooks.beforeDeleteSession = [{ run: echoCmd("deleting"), required: false, timeout: 30000, cwd: "project" }];
+    config.hooks.beforeDeleteSession = [
+      { run: echoCmd("deleting"), required: false, timeout: 30000, cwd: "project", async: false },
+    ];
 
     const result = await lifecycle.remove({
       sessionId: "sess21",
@@ -506,7 +550,7 @@ describe("remove — 正常流程", () => {
     });
     const beforeReport = result.hookReports.find((r) => r.event === "beforeDeleteSession");
     expect(beforeReport).toBeDefined();
-    expect(beforeReport!.results[0].stdout).toContain("deleting");
+    expect(beforeReport?.results[0].stdout).toContain("deleting");
   });
 
   it("D22: afterDeleteSession hook 执行", async () => {
@@ -520,7 +564,9 @@ describe("remove — 正常流程", () => {
     });
 
     const config = defaultConfig();
-    config.hooks.afterDeleteSession = [{ run: echoCmd("deleted"), required: false, timeout: 30000, cwd: "project" }];
+    config.hooks.afterDeleteSession = [
+      { run: echoCmd("deleted"), required: false, timeout: 30000, cwd: "project", async: false },
+    ];
 
     const result = await lifecycle.remove({
       sessionId: "sess22",
@@ -530,7 +576,7 @@ describe("remove — 正常流程", () => {
     });
     const afterReport = result.hookReports.find((r) => r.event === "afterDeleteSession");
     expect(afterReport).toBeDefined();
-    expect(afterReport!.results[0].stdout).toContain("deleted");
+    expect(afterReport?.results[0].stdout).toContain("deleted");
   });
 
   it("D23: 无 config 时 remove 正常完成", async () => {
@@ -589,18 +635,45 @@ describe("remove — hook 失败", () => {
     });
 
     const config = defaultConfig();
-    config.hooks.beforeDeleteSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
+    config.hooks.beforeDeleteSession = [
+      { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
+    const onBeforeCoreDelete = vi.fn();
     await expect(
       lifecycle.remove({
         sessionId: "sess25",
         projectPath: projectDir,
         worktreePath: created.worktreePath,
         config,
+        onBeforeCoreDelete,
       }),
     ).rejects.toThrow("beforeDeleteSession hook failed");
+    expect(onBeforeCoreDelete).not.toHaveBeenCalled();
     // Worktree should still exist (deletion was interrupted)
     expect(existsSync(created.worktreePath)).toBe(true);
+  });
+
+  it("runs destructive cleanup only after beforeDeleteSession succeeds", async () => {
+    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
+    const created = await lifecycle.create({
+      projectId: "proj1",
+      projectPath: projectDir,
+      sessionId: "sess25-order",
+      sessionName: "Test",
+      config: defaultConfig(),
+    });
+    const onBeforeCoreDelete = vi.fn();
+
+    await lifecycle.remove({
+      sessionId: "sess25-order",
+      projectPath: projectDir,
+      worktreePath: created.worktreePath,
+      config: defaultConfig(),
+      onBeforeCoreDelete,
+    });
+
+    expect(onBeforeCoreDelete).toHaveBeenCalledOnce();
   });
 
   it("D26: afterDeleteSession hook 失败不影响结果", async () => {
@@ -614,7 +687,9 @@ describe("remove — hook 失败", () => {
     });
 
     const config = defaultConfig();
-    config.hooks.afterDeleteSession = [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }];
+    config.hooks.afterDeleteSession = [
+      { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     // afterDeleteSession failure should NOT prevent deletion
     // The worktree is already removed before afterDelete hooks run
@@ -639,7 +714,9 @@ describe("remove — hook 失败", () => {
     });
 
     const config = defaultConfig();
-    config.hooks.beforeDeleteSession = [{ run: exitCmd(1), required: false, timeout: 30000, cwd: "worktree" }];
+    config.hooks.beforeDeleteSession = [
+      { run: exitCmd(1), required: false, timeout: 30000, cwd: "worktree", async: false },
+    ];
 
     const result = await lifecycle.remove({
       sessionId: "sess27",
@@ -658,13 +735,15 @@ describe("remove — hook 失败", () => {
 describe("create — async afterCreateSession", () => {
   it("D28: async hook 时 create() 立即返回，不等待 hook 完成", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: sleepCmd(3), // 3 seconds
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: sleepCmd(3), // 3 seconds
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const start = Date.now();
@@ -682,22 +761,25 @@ describe("create — async afterCreateSession", () => {
     expect(result.sessionId).toBe("sess28");
     expect(result.worktreePath).toContain("sess28");
     expect(result.ports).toBeDefined();
-    expect(result.backgroundHookPromise).toBeDefined();
+    assertDefined(result.backgroundHookPromise);
 
     // Wait for background hook to complete
-    const bgReport = await result.backgroundHookPromise;
+    assertDefined(result.backgroundHookPromise);
+    const bgReport = await requireDefined(result.backgroundHookPromise);
     expect(bgReport.success).toBe(true);
   });
 
   it("D29: backgroundHookPromise 在 hook 完成后 resolve", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: echoCmd("bg-done"),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: echoCmd("bg-done"),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -708,7 +790,7 @@ describe("create — async afterCreateSession", () => {
       config,
     });
 
-    const bgReport = await result.backgroundHookPromise;
+    const bgReport = await requireDefined(result.backgroundHookPromise);
     expect(bgReport.success).toBe(true);
     expect(bgReport.results).toHaveLength(1);
     expect(bgReport.results[0].stdout).toContain("bg-done");
@@ -716,15 +798,17 @@ describe("create — async afterCreateSession", () => {
 
   it("D30: onBackgroundHookComplete 在成功时被调用", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: echoCmd("completed"),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: echoCmd("completed"),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
-    let completedReport: any = null;
+    let completedReport: HookReport | null = null;
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
@@ -732,28 +816,33 @@ describe("create — async afterCreateSession", () => {
       sessionId: "sess30",
       sessionName: "Test",
       config,
-      onBackgroundHookComplete: (report) => { completedReport = report; },
+      onBackgroundHookComplete: (report) => {
+        completedReport = report;
+      },
     });
 
+    assertDefined(result.backgroundHookPromise);
     await result.backgroundHookPromise;
     // Give a tick for the callback to fire
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(completedReport).not.toBeNull();
-    expect(completedReport.success).toBe(true);
+    const callbackReport = requireDefined(completedReport as HookReport | null);
+    expect(callbackReport.success).toBe(true);
   });
 
   it("D31: onBackgroundHookComplete 在失败时被调用", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: exitCmd(1),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: exitCmd(1),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
-    let completedReport: any = null;
+    let completedReport: HookReport | null = null;
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
       projectId: "proj1",
@@ -761,28 +850,33 @@ describe("create — async afterCreateSession", () => {
       sessionId: "sess31",
       sessionName: "Test",
       config,
-      onBackgroundHookComplete: (report) => { completedReport = report; },
+      onBackgroundHookComplete: (report) => {
+        completedReport = report;
+      },
     });
 
+    assertDefined(result.backgroundHookPromise);
     const bgReport = await result.backgroundHookPromise;
     // Individual hook result fails (exit code 1), but report.success is true
     // because the hook is not required
     expect(bgReport.results[0].success).toBe(false);
 
     await new Promise((r) => setTimeout(r, 50));
-    expect(completedReport).not.toBeNull();
-    expect(completedReport.results[0].success).toBe(false);
+    const callbackReport = requireDefined(completedReport as HookReport | null);
+    expect(callbackReport.results[0].success).toBe(false);
   });
 
   it("D32: async hook 失败不回滚 session", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: exitCmd(1),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: exitCmd(1),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -803,19 +897,24 @@ describe("create — async afterCreateSession", () => {
 
   it("D33: beforeCreateSession 仍同步阻塞", async () => {
     const config = defaultConfig();
-    config.hooks.beforeCreateSession = [{
-      run: exitCmd(1),
-      required: true,
-      timeout: 10000,
-      cwd: "worktree",
-    }];
-    config.hooks.afterCreateSession = [{
-      run: echoCmd("should not run"),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.beforeCreateSession = [
+      {
+        run: exitCmd(1),
+        required: true,
+        timeout: 10000,
+        cwd: "worktree",
+        async: false,
+      },
+    ];
+    config.hooks.afterCreateSession = [
+      {
+        run: echoCmd("should not run"),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     await expect(
@@ -840,20 +939,20 @@ describe("create — async afterCreateSession", () => {
       config: defaultConfig(),
     });
 
-    const bgReport = await result.backgroundHookPromise;
-    expect(bgReport.success).toBe(true);
-    expect(bgReport.results).toEqual([]);
+    expect(result.backgroundHookPromise).toBeUndefined();
   });
 
   it("D35: async=false 时仍同步等待（向后兼容）", async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: echoCmd("sync-done"),
-      required: false,
-      timeout: 10000,
-      cwd: "worktree",
-      async: false,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: echoCmd("sync-done"),
+        required: false,
+        timeout: 10000,
+        cwd: "worktree",
+        async: false,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const result = await lifecycle.create({
@@ -866,59 +965,67 @@ describe("create — async afterCreateSession", () => {
 
     const afterReport = result.hookReports.find((r) => r.event === "afterCreateSession");
     expect(afterReport).toBeDefined();
-    expect(afterReport!.results[0].stdout).toContain("sync-done");
-    // backgroundHookPromise should resolve immediately with the same report
-    const bgReport = await result.backgroundHookPromise;
-    expect(bgReport).toBe(afterReport);
+    expect(afterReport?.results[0].stdout).toContain("sync-done");
+    // Synchronous hooks have already finished, so no background task remains.
+    expect(result.backgroundHookPromise).toBeUndefined();
   });
 
   // --- S: backgroundHookStatus crash recovery ---
 
-  it("S1: async hook 运行中中断后，onWorktreeReady 已被调用但 backgroundHookPromise 未完成", { timeout: 15000 }, async () => {
-    const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: sleepCmd(3), // 3秒模拟长时间 hook
-      required: false,
-      timeout: 30000,
-      cwd: "worktree",
-      async: true,
-    }];
+  it(
+    "S1: async hook 运行中中断后，onWorktreeReady 已被调用但 backgroundHookPromise 未完成",
+    { timeout: 15000 },
+    async () => {
+      const config = defaultConfig();
+      config.hooks.afterCreateSession = [
+        {
+          run: sleepCmd(3), // 3秒模拟长时间 hook
+          required: false,
+          timeout: 30000,
+          cwd: "worktree",
+          async: true,
+        },
+      ];
 
-    let worktreeReadyCalled = false;
-    let worktreeReadyPath = "";
-    let worktreeReadyBranch = "";
+      let worktreeReadyCalled = false;
+      let worktreeReadyPath = "";
+      let worktreeReadyBranch = "";
 
-    const lifecycle = createSessionLifecycle({ portService: mockPortService() });
-    const result = await lifecycle.create({
-      projectId: "proj1",
-      projectPath: projectDir,
-      sessionId: "sess-crash",
-      sessionName: "CrashTest",
-      config,
-      onWorktreeReady: (wtPath, branch) => {
-        worktreeReadyCalled = true;
-        worktreeReadyPath = wtPath;
-        worktreeReadyBranch = branch;
-      },
-    });
+      const lifecycle = createSessionLifecycle({ portService: mockPortService() });
+      const result = await lifecycle.create({
+        projectId: "proj1",
+        projectPath: projectDir,
+        sessionId: "sess-crash",
+        sessionName: "CrashTest",
+        config,
+        onWorktreeReady: (wtPath, branch) => {
+          worktreeReadyCalled = true;
+          worktreeReadyPath = wtPath;
+          worktreeReadyBranch = branch;
+        },
+      });
 
-    // onWorktreeReady 应该在 createWorktree 之后立即被调用
-    expect(worktreeReadyCalled).toBe(true);
-    expect(worktreeReadyBranch).toBe("agentdock/sess-crash");
+      // onWorktreeReady 应该在 createWorktree 之后立即被调用
+      expect(worktreeReadyCalled).toBe(true);
+      expect(worktreeReadyBranch).toBe("agentdock/sess-crash");
 
-    // worktree 应该存在于磁盘
-    expect(existsSync(worktreeReadyPath)).toBe(true);
+      // worktree 应该存在于磁盘
+      expect(existsSync(worktreeReadyPath)).toBe(true);
 
-    // backgroundHookPromise 不应该完成（hook 还在 sleep）
-    let promiseResolved = false;
-    result.backgroundHookPromise.then(() => { promiseResolved = true; });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(promiseResolved).toBe(false);
+      // backgroundHookPromise 不应该完成（hook 还在 sleep）
+      let promiseResolved = false;
+      assertDefined(result.backgroundHookPromise);
+      result.backgroundHookPromise.then(() => {
+        promiseResolved = true;
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(promiseResolved).toBe(false);
 
-    // 模拟"服务器被杀"：不等待 backgroundHookPromise
-    // 在真实场景中，此时 DB 中 backgroundHookStatus = "running"
+      // 模拟"服务器被杀"：不等待 backgroundHookPromise
+      // 在真实场景中，此时 DB 中 backgroundHookStatus = "running"
 
-    // 等待 background hook 完成以便 afterEach 清理目录
-    await result.backgroundHookPromise;
-  });
+      // 等待 background hook 完成以便 afterEach 清理目录
+      await result.backgroundHookPromise;
+    },
+  );
 });

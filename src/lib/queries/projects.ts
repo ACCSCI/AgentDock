@@ -7,7 +7,13 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, queryKeys } from "./helpers.js";
-import type { ProjectData, SessionRuntimeStatus, SessionStep } from "./types.js";
+import type {
+  ProjectData,
+  SessionPorts,
+  SessionRuntimeStatus,
+  SessionStep,
+  SessionUserStatus,
+} from "./types.js";
 
 // GET projects
 export function useProjects() {
@@ -19,14 +25,14 @@ export function useProjects() {
       return raw.map((p: (typeof raw)[number]) => ({
         ...p,
         sessions: p.sessions
-          .filter(
-            (s: (typeof p.sessions)[number]) => {
-              const rt = (s as { runtimeStatus?: string }).runtimeStatus;
-              return rt !== "orphan" && rt !== "takeover";
-            },
-          )
+          .filter((s: (typeof p.sessions)[number]) => {
+            const rt = (s as { runtimeStatus?: string }).runtimeStatus;
+            return rt !== "orphan" && rt !== "takeover";
+          })
           .map((s: (typeof p.sessions)[number]) => ({
             ...s,
+            ports: s.ports as SessionPorts | null,
+            userStatus: s.userStatus as SessionUserStatus | null,
             // Backend provides status directly: "creating" | "active" | "deleting" | null
             // Map "active" to "existing" for backward compatibility
             status: ((): SessionRuntimeStatus | undefined => {

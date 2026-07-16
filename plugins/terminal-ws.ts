@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { WebSocketServer, type WebSocket } from "ws";
+import { type WebSocket, WebSocketServer } from "ws";
 import { terminalManager } from "./terminal-manager.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -20,9 +20,7 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
  *
  * URL: /api/terminal?terminalId=xxx
  */
-export function createTerminalWebSocket(
-  httpServer: import("node:http").Server,
-): WebSocketServer {
+export function createTerminalWebSocket(httpServer: import("node:http").Server): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
 
   // ---- HTTP Upgrade 拦截 ----
@@ -65,21 +63,27 @@ export function createTerminalWebSocket(
       }
 
       // 4. Send opened event
-      ws.send(JSON.stringify({
-        type: "opened",
-        terminalId,
-        sessionId: terminal.sessionId,
-        pid: terminal.pid,
-        status: terminal.status,
-      }));
+      ws.send(
+        JSON.stringify({
+          type: "opened",
+          terminalId,
+          sessionId: terminal.sessionId,
+          pid: terminal.pid,
+          status: terminal.status,
+        }),
+      );
 
-      console.log(`[TerminalWS] Terminal ${terminalId} connected (connections=${terminal.connections.size}, status=${terminal.status})`);
+      console.log(
+        `[TerminalWS] Terminal ${terminalId} connected (connections=${terminal.connections.size}, status=${terminal.status})`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error(`[TerminalWS] Failed to attach to terminal ${terminalId}:`, msg);
       try {
         ws.send(JSON.stringify({ type: "error", message: msg }));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       ws.close();
       return;
     }
@@ -127,21 +131,24 @@ export function createTerminalWebSocket(
   });
 
   // ---- 心跳检测 ----
+  type HeartbeatWebSocket = WebSocket & { _isAlive?: boolean };
   const heartbeatTimer = setInterval(() => {
-    wss.clients.forEach((ws) => {
-      if ((ws as any)._isAlive === false) {
+    for (const client of wss.clients) {
+      const ws = client as HeartbeatWebSocket;
+      if (ws._isAlive === false) {
         ws.terminate();
-        return;
+        continue;
       }
-      (ws as any)._isAlive = false;
+      ws._isAlive = false;
       ws.ping();
-    });
+    }
   }, HEARTBEAT_INTERVAL_MS);
 
   wss.on("connection", (ws) => {
-    (ws as any)._isAlive = true;
+    const heartbeatSocket = ws as HeartbeatWebSocket;
+    heartbeatSocket._isAlive = true;
     ws.on("pong", () => {
-      (ws as any)._isAlive = true;
+      heartbeatSocket._isAlive = true;
     });
   });
 

@@ -12,14 +12,17 @@
  * Cross-platform: works on Windows, macOS, and Linux.
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const FONTS_DIR = resolve(import.meta.dirname, "../public/fonts");
 
 // ---- GitHub release helpers ----
 
-async function ghReleaseAssets(repo: string, tag: string): Promise<{ name: string; browser_download_url: string }[]> {
+async function ghReleaseAssets(
+  repo: string,
+  tag: string,
+): Promise<{ name: string; browser_download_url: string }[]> {
   const url = `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
   const res = await fetch(url, {
     headers: { Accept: "application/vnd.github+json" },
@@ -49,7 +52,9 @@ function unzipFile(zipPath: string, outDir: string, innerPath: string, destPath:
       const extracted = join(outDir, innerPath);
       renameSync(extracted, destPath);
       return;
-    } catch { /* try next */ }
+    } catch {
+      /* try next */
+    }
   }
   // Windows PowerShell fallback (no single-file extraction — extract all then move)
   try {
@@ -60,7 +65,9 @@ function unzipFile(zipPath: string, outDir: string, innerPath: string, destPath:
     const extracted = join(outDir, innerPath);
     renameSync(extracted, destPath);
     return;
-  } catch { /* fail */ }
+  } catch {
+    /* fail */
+  }
   throw new Error(`Could not extract ${innerPath} from ${zipPath} — no supported unzip tool found`);
 }
 
@@ -102,7 +109,10 @@ const SOURCES: FontSource[] = [
       { innerPath: "fonts/ttf/JetBrainsMono-Regular.ttf", destName: "JetBrainsMono-Regular.ttf" },
       { innerPath: "fonts/ttf/JetBrainsMono-Bold.ttf", destName: "JetBrainsMono-Bold.ttf" },
       { innerPath: "fonts/ttf/JetBrainsMono-Italic.ttf", destName: "JetBrainsMono-Italic.ttf" },
-      { innerPath: "fonts/ttf/JetBrainsMono-BoldItalic.ttf", destName: "JetBrainsMono-BoldItalic.ttf" },
+      {
+        innerPath: "fonts/ttf/JetBrainsMono-BoldItalic.ttf",
+        destName: "JetBrainsMono-BoldItalic.ttf",
+      },
     ],
   },
 ];
@@ -119,7 +129,8 @@ async function main() {
   for (const src of SOURCES) {
     // Check if already present
     const allDirect = src.directFiles.every((f) => existsSync(join(FONTS_DIR, f)));
-    const allZip = !src.zipExtract || src.zipExtract.every((e) => existsSync(join(FONTS_DIR, e.destName)));
+    const allZip =
+      !src.zipExtract || src.zipExtract.every((e) => existsSync(join(FONTS_DIR, e.destName)));
     if (allDirect && allZip) {
       console.log(`${src.label} already present — skipping.`);
       continue;

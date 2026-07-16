@@ -16,6 +16,7 @@
  * type-safe Hono client via `hc<AppType>(daemonUrl)`.
  */
 import { Hono } from "hono";
+import { registerFaultEndpoints } from "../fault-injector.js";
 import type { DaemonContext } from "./context.js";
 import { errorEnvelope } from "./middleware/error.js";
 import { hostGuard } from "./middleware/host.js";
@@ -24,7 +25,6 @@ import { registerClients } from "./routes/clients.js";
 import { registerDebug } from "./routes/debug.js";
 import { registerRegistry } from "./routes/registry.js";
 import { registerV2 } from "./routes/v2/index.js";
-import { registerFaultEndpoints } from "../fault-injector.js";
 
 export function createApp(ctx: DaemonContext): Hono {
   const app = new Hono();

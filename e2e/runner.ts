@@ -55,8 +55,7 @@ function loadConfig(): PipelineConfig {
   const parsed = parseYaml(raw) as PipelineConfig;
   if (!parsed || parsed.version !== "1") {
     throw new Error(
-      `Unsupported pipeline config version: ${parsed?.version ?? "(missing)"}. ` +
-        `Expected "1".`
+      `Unsupported pipeline config version: ${parsed?.version ?? "(missing)"}. Expected "1".`,
     );
   }
   return parsed;
@@ -115,7 +114,7 @@ function runGroup(
   mode: "isolate" | "reuse",
   specs: string[],
   config: PipelineConfig,
-  tags: string[]
+  tags: string[],
 ): Promise<GroupResult> {
   return new Promise((resolve) => {
     const startedAt = new Date().toISOString();
@@ -127,10 +126,7 @@ function runGroup(
     const args = ["playwright", "test"];
     if (specs.length > 0) args.push(...specs);
     if (tags.length > 0) {
-      args.push(
-        "--grep",
-        tags.map((t) => (t.startsWith("@") ? t : `@${t}`)).join("|")
-      );
+      args.push("--grep", tags.map((t) => (t.startsWith("@") ? t : `@${t}`)).join("|"));
     }
     args.push(`--workers=${config.pipeline.global.parallel}`);
 
@@ -169,10 +165,16 @@ async function main(): Promise<void> {
 
   const allGroups: Array<{ mode: "isolate" | "reuse"; specs: string[] }> = [];
   if (!cliArgs.group || cliArgs.group === "isolate") {
-    allGroups.push({ mode: "isolate", specs: config.pipeline.specs.filter((s) => s.mode === "isolate").map((s) => s.pattern) });
+    allGroups.push({
+      mode: "isolate",
+      specs: config.pipeline.specs.filter((s) => s.mode === "isolate").map((s) => s.pattern),
+    });
   }
   if (!cliArgs.group || cliArgs.group === "reuse") {
-    allGroups.push({ mode: "reuse", specs: config.pipeline.specs.filter((s) => s.mode === "reuse").map((s) => s.pattern) });
+    allGroups.push({
+      mode: "reuse",
+      specs: config.pipeline.specs.filter((s) => s.mode === "reuse").map((s) => s.pattern),
+    });
   }
 
   const runState: RunState = {
@@ -220,7 +222,9 @@ async function main(): Promise<void> {
   const reportPath = join(REPORTS_DIR, `${runState.finishedAt.replace(/[:.]/g, "-")}.json`);
   writeFileSync(reportPath, JSON.stringify(finalReport, null, 2), "utf-8");
 
-  console.log(`\n${finalReport.success ? "✅" : "❌"} Pipeline ${finalReport.success ? "passed" : "failed"}`);
+  console.log(
+    `\n${finalReport.success ? "✅" : "❌"} Pipeline ${finalReport.success ? "passed" : "failed"}`,
+  );
   console.log(`📄 Report: ${reportPath}`);
   process.exit(finalReport.success ? 0 : 1);
 }

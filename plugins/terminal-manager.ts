@@ -1,11 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+import type { MessagePortMain } from "electron";
 import { nanoid } from "nanoid";
 import type { WebSocket } from "ws";
-import type { MessagePortMain } from "electron";
-import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,8 +34,7 @@ function resolvePtyHostPath(): string {
     if (existsSync(p)) return p;
   }
   throw new Error(
-    `pty-host.cjs not found. Searched: ${candidates.join(", ")}. ` +
-      `Make sure electron.vite.config.ts copies plugins/pty-host.cjs into out/main/.`,
+    `pty-host.cjs not found. Searched: ${candidates.join(", ")}. Make sure electron.vite.config.ts copies plugins/pty-host.cjs into out/main/.`,
   );
 }
 
@@ -88,7 +87,9 @@ export class TerminalManager {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     });
 
-    const rl = createInterface({ input: this.host.stdout! });
+    const stdout = this.host.stdout;
+    if (!stdout) throw new Error("PTY host stdout pipe was not created");
+    const rl = createInterface({ input: stdout });
 
     rl.on("line", (raw) => {
       let msg: Record<string, unknown>;
@@ -201,7 +202,7 @@ export class TerminalManager {
     if (!this.host || !this.host.stdin) {
       throw new Error("PTY host not available");
     }
-    this.host.stdin.write(JSON.stringify(msg) + "\n");
+    this.host.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
   private addToSessionIndex(sessionId: string, terminalId: string): void {
@@ -267,7 +268,9 @@ export class TerminalManager {
       rows,
     });
 
-    console.log(`[TerminalManager] Created terminal ${terminalId} (session: ${sessionId}, shell: ${shell})`);
+    console.log(
+      `[TerminalManager] Created terminal ${terminalId} (session: ${sessionId}, shell: ${shell})`,
+    );
     return terminal;
   }
 
@@ -342,9 +345,7 @@ export class TerminalManager {
     // Replay buffer so the renderer renders prior output. The xterm
     // serializer wrote each PTY chunk as-is; concat is safe.
     if (terminal.buffer.length > 0) {
-      port.postMessage(
-        JSON.stringify({ type: "output", data: terminal.buffer.join("") }),
-      );
+      port.postMessage(JSON.stringify({ type: "output", data: terminal.buffer.join("") }));
     }
     // Send "opened" so the renderer learns the pid (PortShim already
     // marked status=connected, but the master protocol emitted this).
@@ -433,7 +434,10 @@ export class TerminalManager {
   listBySession(sessionId: string): TerminalInstance[] {
     const ids = this.sessionIndex.get(sessionId);
     if (!ids) return [];
-    return Array.from(ids).map((id) => this.terminals.get(id)!).filter(Boolean);
+    return Array.from(ids).flatMap((id) => {
+      const terminal = this.terminals.get(id);
+      return terminal ? [terminal] : [];
+    });
   }
 
   /** Kill all terminals belonging to a session. */

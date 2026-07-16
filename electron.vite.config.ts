@@ -11,8 +11,8 @@
  */
 import { cpSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import type { Plugin } from "vite";
 import { loadDotEnvIntoProcess } from "./plugins/env.js";
@@ -24,7 +24,11 @@ import { loadDotEnvIntoProcess } from "./plugins/env.js";
 // loads .env — see 新架构 §8.
 // Gracefully skip when .env is absent (CI/CD, fresh clone) instead of
 // throwing — the build still works, just without env-var port overrides.
-try { loadDotEnvIntoProcess(); } catch { /* .env optional */ }
+try {
+  loadDotEnvIntoProcess();
+} catch {
+  /* .env optional */
+}
 
 /**
  * Copy `plugins/pty-host.cjs` next to the main bundle. The PTY host is
@@ -66,7 +70,7 @@ function copyBundledFontsPlugin(): Plugin {
       const src = resolve(__dirname, "public/fonts");
       const dest = resolve(__dirname, "out/main/fonts");
       if (!existsSync(src)) {
-        this.warn?.(`public/fonts/ missing — run \`bun run download-fonts\` first`);
+        this.warn?.("public/fonts/ missing — run `bun run download-fonts` first");
         return;
       }
       cpSync(src, dest, { recursive: true });
@@ -117,9 +121,9 @@ export default defineConfig({
     },
     server: {
       port: (() => {
-        const p = Number(process.env.FRONTEND_PORT);
-        if (!p || p < 1 || p > 65535) {
-          throw new Error("FRONTEND_PORT is required — set it in .env or environment");
+        const p = Number(process.env.FRONTEND_PORT ?? "5200");
+        if (!Number.isInteger(p) || p < 1 || p > 65535) {
+          throw new Error("FRONTEND_PORT must be an integer between 1 and 65535");
         }
         return p;
       })(),

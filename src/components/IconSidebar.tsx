@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
-import { OrphanCleanModal } from "./OrphanCleanModal";
 import { useTranslation } from "../i18n/react";
+import { OrphanCleanModal } from "./OrphanCleanModal";
 
 export function IconSidebar() {
   const { t } = useTranslation("sidebar");

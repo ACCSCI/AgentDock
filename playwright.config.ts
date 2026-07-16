@@ -21,12 +21,8 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
-  workers: process.env.E2E_PARALLEL
-    ? Number(process.env.E2E_PARALLEL)
-    : 1,
-  retries: process.env.E2E_RETRIES
-    ? Number(process.env.E2E_RETRIES)
-    : 0,
+  workers: process.env.E2E_PARALLEL ? Number(process.env.E2E_PARALLEL) : 1,
+  retries: process.env.E2E_RETRIES ? Number(process.env.E2E_RETRIES) : 0,
   reporter: [
     ["json", { outputFile: "e2e/reports/latest.json" }],
     ["html", { open: "never", outputFolder: "e2e/report-html" }],

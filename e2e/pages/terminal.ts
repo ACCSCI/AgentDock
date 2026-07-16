@@ -1,12 +1,7 @@
-import type { Page, Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { TID } from "./testids";
 
-export type TerminalStatus =
-  | "connecting"
-  | "connected"
-  | "disconnected"
-  | "error"
-  | "exited";
+export type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited";
 
 /**
  * TerminalManager + SessionTerminal — the xterm-hosting right pane.
@@ -47,10 +42,7 @@ export class TerminalPage {
    * Wait until the current terminal reports the given status. Default
    * status is `connected` (the success signal for PTY readiness).
    */
-  async waitForStatus(
-    status: TerminalStatus = "connected",
-    timeoutMs = 10_000,
-  ): Promise<void> {
+  async waitForStatus(status: TerminalStatus = "connected", timeoutMs = 10_000): Promise<void> {
     await this.currentTerminal.waitFor({ state: "visible", timeout: timeoutMs });
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {

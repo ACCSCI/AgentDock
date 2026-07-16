@@ -1,8 +1,8 @@
+import { useTranslation } from "../i18n/react";
 import { useStore } from "../lib/store";
-import { TERMINAL_FONT_SIZES, TERMINAL_FONT_FAMILIES } from "../lib/store";
+import { TERMINAL_FONT_FAMILIES, TERMINAL_FONT_SIZES } from "../lib/store";
 import type { TerminalPreferences } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
-import { useTranslation } from "../i18n/react";
 
 export function TerminalSettingsBar() {
   const { t } = useTranslation("terminal");
@@ -29,7 +29,7 @@ export function TerminalSettingsBar() {
   return (
     <div className="terminal-settings-bar">
       <div className="terminal-settings-group">
-        <label className="terminal-settings-label">{t("fontSize")}</label>
+        <span className="terminal-settings-label">{t("fontSize")}</span>
         <button
           type="button"
           className="terminal-settings-stepper"
@@ -52,8 +52,11 @@ export function TerminalSettingsBar() {
       </div>
 
       <div className="terminal-settings-group">
-        <label className="terminal-settings-label">Font</label>
+        <label className="terminal-settings-label" htmlFor="terminal-font-family">
+          Font
+        </label>
         <select
+          id="terminal-font-family"
           className="terminal-settings-select"
           value={terminalPrefs.fontFamily}
           onChange={handleFontFamilyChange}

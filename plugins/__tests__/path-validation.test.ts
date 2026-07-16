@@ -1,8 +1,8 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { validateProjectPath } from "../path-validation.js";
 
 let tmpDir: string;

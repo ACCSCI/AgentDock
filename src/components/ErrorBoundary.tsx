@@ -1,4 +1,4 @@
-import { Component, type ReactNode, type ErrorInfo } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import i18n from "../i18n";
 
 interface Props {
@@ -17,9 +17,10 @@ export class ErrorBoundary extends Component<Props, State> {
   static getDerivedStateFromError(error: unknown): Partial<State> {
     // React allows `throw "string"` or `throw { custom }`.
     // Normalize to Error so .message and .stack are always available.
-    const normalized = error instanceof Error
-      ? error
-      : new Error(typeof error === "string" ? error : JSON.stringify(error));
+    const normalized =
+      error instanceof Error
+        ? error
+        : new Error(typeof error === "string" ? error : JSON.stringify(error));
     return { hasError: true, error: normalized };
   }
 
@@ -36,11 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleCopy = () => {
     const { error, errorInfo } = this.state;
-    const text = [
-      error?.message,
-      error?.stack,
-      errorInfo?.componentStack,
-    ]
+    const text = [error?.message, error?.stack, errorInfo?.componentStack]
       .filter(Boolean)
       .join("\n\n");
     navigator.clipboard.writeText(text).catch(() => {});
@@ -55,7 +52,9 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="error-boundary">
           <div className="error-boundary-box">
-            <p className="error-boundary-title">{i18n.t("somethingWentWrong", { ns: "error-boundary" })}</p>
+            <p className="error-boundary-title">
+              {i18n.t("somethingWentWrong", { ns: "error-boundary" })}
+            </p>
             <p className="error-boundary-message">
               {this.state.error?.message ?? i18n.t("unknownError", { ns: "error-boundary" })}
             </p>
@@ -66,7 +65,11 @@ export class ErrorBoundary extends Component<Props, State> {
               <button type="button" onClick={this.handleCopy} className="error-boundary-btn">
                 {i18n.t("copyStack", { ns: "error-boundary" })}
               </button>
-              <button type="button" onClick={this.handleReload} className="error-boundary-btn error-boundary-btn-primary">
+              <button
+                type="button"
+                onClick={this.handleReload}
+                className="error-boundary-btn error-boundary-btn-primary"
+              >
                 {i18n.t("reload", { ns: "error-boundary" })}
               </button>
             </div>

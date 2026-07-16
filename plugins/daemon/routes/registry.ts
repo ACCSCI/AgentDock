@@ -10,7 +10,7 @@
  * on every change. Used by kill-all.ts and external observers.
  */
 import { zValidator } from "@hono/zod-validator";
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import { z } from "zod";
 import type { DaemonContext } from "../context.js";
 import { zodErrorHandler } from "../middleware/error.js";
@@ -25,34 +25,26 @@ const UnregisterSchema = z.object({
 });
 
 export function registerRegistry(app: Hono, ctx: DaemonContext): void {
-  app.post(
-    "/register",
-    zValidator("json", RegisterSchema, zodErrorHandler),
-    (c) => {
-      const { dir, pid } = c.req.valid("json");
-      const existing = ctx.registry.get(dir);
-      if (existing && ctx.isProcessAlive(existing.pid)) {
-        return c.json(
-          { success: false, error: `Directory already registered by PID ${existing.pid}` },
-          409,
-        );
-      }
-      ctx.registry.set(dir, { dir, pid, startedAt: new Date().toISOString() });
-      ctx.saveRegistry();
-      return c.json({ success: true });
-    },
-  );
+  app.post("/register", zValidator("json", RegisterSchema, zodErrorHandler), (c) => {
+    const { dir, pid } = c.req.valid("json");
+    const existing = ctx.registry.get(dir);
+    if (existing && ctx.isProcessAlive(existing.pid)) {
+      return c.json(
+        { success: false, error: `Directory already registered by PID ${existing.pid}` },
+        409,
+      );
+    }
+    ctx.registry.set(dir, { dir, pid, startedAt: new Date().toISOString() });
+    ctx.saveRegistry();
+    return c.json({ success: true });
+  });
 
-  app.post(
-    "/unregister",
-    zValidator("json", UnregisterSchema, zodErrorHandler),
-    (c) => {
-      const { dir } = c.req.valid("json");
-      ctx.registry.delete(dir);
-      ctx.saveRegistry();
-      return c.json({ success: true });
-    },
-  );
+  app.post("/unregister", zValidator("json", UnregisterSchema, zodErrorHandler), (c) => {
+    const { dir } = c.req.valid("json");
+    ctx.registry.delete(dir);
+    ctx.saveRegistry();
+    return c.json({ success: true });
+  });
 
   app.get("/status", (c) => {
     const instances: Array<{

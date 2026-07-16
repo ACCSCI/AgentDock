@@ -1,17 +1,25 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { createSessionLifecycle, type PortService, type StepEvent } from "../session-lifecycle.js";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type PortService, type StepEvent, createSessionLifecycle } from "../session-lifecycle.js";
 
 const isWin = process.platform === "win32";
-function exitCmd(code: number) { return isWin ? `cmd /c exit ${code}` : `exit ${code}`; }
-function echoCmd(msg: string) { return `echo ${msg}`; }
+function assertDefined<T>(value: T | null | undefined): asserts value is T {
+  expect(value).toBeDefined();
+  if (value == null) throw new Error("Expected value to be defined");
+}
+function exitCmd(code: number) {
+  return isWin ? `cmd /c exit ${code}` : `exit ${code}`;
+}
 
 function tmpDir(): string {
-  const dir = path.join(os.tmpdir(), `lifecycle-rollback-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = path.join(
+    os.tmpdir(),
+    `lifecycle-rollback-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -35,7 +43,7 @@ function mockPortService(opts?: {
   return {
     released,
     service: {
-      async allocateSession({ sessionId }) {
+      async allocateSession() {
         if (opts?.allocateShouldFail) throw new Error("allocate failed");
         const base = portCounter;
         portCounter += 5;
@@ -104,9 +112,7 @@ describe("Session lifecycle rollback", () => {
 
     const config = {
       hooks: {
-        afterCreateSession: [
-          { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" },
-        ],
+        afterCreateSession: [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }],
       },
       resources: { sync: [] },
     } as any;
@@ -154,6 +160,7 @@ describe("Session lifecycle rollback", () => {
     expect(existsSync(result.worktreePath)).toBe(true);
 
     // Background hook should complete
+    assertDefined(result.backgroundHookPromise);
     const hookReport = await result.backgroundHookPromise;
     // Individual hook result should indicate failure
     expect(hookReport.results[0].success).toBe(false);
@@ -184,9 +191,7 @@ describe("Session lifecycle rollback", () => {
 
     const config = {
       hooks: {
-        afterCreateSession: [
-          { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" },
-        ],
+        afterCreateSession: [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }],
       },
       resources: { sync: [] },
     } as any;
@@ -210,9 +215,7 @@ describe("Session lifecycle rollback", () => {
 
     const config = {
       hooks: {
-        beforeCreateSession: [
-          { run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" },
-        ],
+        beforeCreateSession: [{ run: exitCmd(1), required: true, timeout: 30000, cwd: "worktree" }],
       },
       resources: { sync: [] },
     } as any;

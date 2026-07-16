@@ -15,11 +15,11 @@
  *     can `bash` invoke it without coupling the agent itself to Playwright.
  *   - Each tool is independently testable.
  */
-import { defineAgent } from '@flue/runtime';
-import { local } from '@flue/runtime/node';
+import { defineAgent } from "@flue/runtime";
+import { local } from "@flue/runtime/node";
 
 export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
+  model: "anthropic/claude-sonnet-4-6",
   // `sandbox: local()` runs bash/file tools on the developer's actual machine
   // (where flue run was invoked), not in an isolated Linux container. This is
   // essential because AgentDock + the target project live on the dev's

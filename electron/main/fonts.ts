@@ -12,9 +12,17 @@
  * so that a future release that ships new font files triggers a fresh copy.
  */
 
-import { app, protocol, type BrowserWindow } from "electron";
-import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { type BrowserWindow, app, protocol } from "electron";
 import { log } from "../../plugins/logger.js";
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -124,7 +132,9 @@ function copyBundledFonts(): void {
   // Validate source — if the build plugin didn't copy fonts, warn and
   // fall through silently so dev-mode (Vite serving public/fonts/) still works.
   if (!existsSync(srcDir)) {
-    log.warn(`bundled fonts not found at ${srcDir} — running in dev mode? fonts served from public/fonts/`);
+    log.warn(
+      `bundled fonts not found at ${srcDir} — running in dev mode? fonts served from public/fonts/`,
+    );
     return;
   }
 

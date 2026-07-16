@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * E2E Test: Full lifecycle — create + verify + delete (skipped: UI timing issues)
  *
@@ -6,29 +9,33 @@
  * with the test fixture (sidebar not rendering immediately after openProject).
  * Re-enable once the fixture timing is resolved.
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
-import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 function createTempProject(name: string): string {
   const projectPath = join("D:\\ProgramTest", name);
   if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true });
   mkdirSync(projectPath, { recursive: true });
   execSync("git init", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.email \"test@test.com\"", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.name \"Test\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.name "Test"', { cwd: projectPath, stdio: "ignore" });
   writeFileSync(join(projectPath, "README.md"), "# Test Project");
   execSync("git add .", { cwd: projectPath, stdio: "ignore" });
-  execSync("git commit -m \"init\"", { cwd: projectPath, stdio: "ignore" });
-  writeFileSync(join(projectPath, "agentdock.config.yaml"), "hooks:\n  afterCreateSession: []\n  afterDeleteSession: []\n");
+  execSync('git commit -m "init"', { cwd: projectPath, stdio: "ignore" });
+  writeFileSync(
+    join(projectPath, "agentdock.config.yaml"),
+    "hooks:\n  afterCreateSession: []\n  afterDeleteSession: []\n",
+  );
   return projectPath;
 }
 
 function cleanupTempProject(projectPath: string): void {
-  try { if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true }); } catch { /* */ }
+  try {
+    if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true });
+  } catch {
+    /* */
+  }
 }
 
 test.describe("Session lifecycle E2E (UI)", () => {

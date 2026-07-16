@@ -1,3 +1,5 @@
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 /**
  * User-data path resolution — picks per-user vs per-machine data location
  * based on the install location of the running binary.
@@ -21,14 +23,6 @@
  * once on the first launch after switching install mode.
  */
 import { app } from "electron";
-import { join } from "node:path";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  statSync,
-  copyFileSync,
-} from "node:fs";
 
 export type InstallMode = "perUser" | "perMachine";
 

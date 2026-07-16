@@ -1,3 +1,6 @@
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // @ts-nocheck
 /**
  * Raw E2E test — no fixture wrapping, direct electron.launch.
@@ -7,10 +10,6 @@
  *   npx tsx e2e/agent-e2e-raw.ts
  */
 import { _electron as electron } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 const ROOT = process.cwd();
 
@@ -53,7 +52,9 @@ function recordStep(
   if (status === "failed") {
     errors.push(`[${step}] ${detail}`);
   }
-  console.log(`[STEP] ${status.toUpperCase()}: ${step} — ${detail}${screenshot ? ` (screenshot: ${screenshot})` : ""}`);
+  console.log(
+    `[STEP] ${status.toUpperCase()}: ${step} — ${detail}${screenshot ? ` (screenshot: ${screenshot})` : ""}`,
+  );
 }
 
 async function main() {
@@ -152,7 +153,9 @@ async function main() {
     console.log("\n--- Step 3: Click Open Project button ---");
     try {
       await window.locator('[data-testid="home-open-project"]').click();
-      await window.locator('[data-testid="dir-modal"]').waitFor({ state: "visible", timeout: 10_000 });
+      await window
+        .locator('[data-testid="dir-modal"]')
+        .waitFor({ state: "visible", timeout: 10_000 });
       await sleep(1000);
       const ssModal = "02-modal-open.png";
       await window.screenshot({ path: screenshotPath(ssModal), fullPage: false });
@@ -165,9 +168,7 @@ async function main() {
     // ---------- Step 4: Navigate to Copilot-Switch project ----------
     console.log("\n--- Step 4: Navigate to target project ---");
     const targetPath = targetProject;
-    const segments = targetPath
-      .split(/[\\/]/)
-      .filter((s) => s.length > 0 && s !== ".");
+    const segments = targetPath.split(/[\\/]/).filter((s) => s.length > 0 && s !== ".");
 
     try {
       // Wait for initial dir listing
@@ -179,23 +180,27 @@ async function main() {
       }
 
       // Debug: print visible entries
-      const entryNames = await window.locator('[data-testid="dir-entry"] .dir-entry-name').allTextContents();
+      const entryNames = await window
+        .locator('[data-testid="dir-entry"] .dir-entry-name')
+        .allTextContents();
       console.log(`  Initial entries (${entryNames.length}):`, entryNames.slice(0, 10));
 
       // Helper: find an entry matching a segment name (flexible matching)
       async function findAndClickEntry(segName: string, doubleClick: boolean) {
+        const activeWindow = window;
+        if (!activeWindow) throw new Error("Electron window is not available");
         // Try exact match first, then case-insensitive, then contains
         const escaped = segName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const patterns = [
-          new RegExp(`^${escaped}\\s*$`, "i"),       // exact, case-insensitive
-          new RegExp(`^${escaped}\\s*$`),             // exact, case-sensitive
-          new RegExp(escaped, "i"),                   // contains, case-insensitive
+          new RegExp(`^${escaped}\\s*$`, "i"), // exact, case-insensitive
+          new RegExp(`^${escaped}\\s*$`), // exact, case-sensitive
+          new RegExp(escaped, "i"), // contains, case-insensitive
         ];
 
         for (const pattern of patterns) {
-          const entry = window
+          const entry = activeWindow
             .locator('[data-testid="dir-entry"]')
-            .filter({ has: window.locator(".dir-entry-name") })
+            .filter({ has: activeWindow.locator(".dir-entry-name") })
             .filter({ hasText: pattern })
             .first();
           try {
@@ -225,7 +230,9 @@ async function main() {
         if (process.platform === "win32" && /^[A-Za-z]:$/.test(seg)) {
           segVariants.push(`${seg}\\`, seg.toLowerCase(), seg.toUpperCase());
         }
-        console.log(`  Drilling into segment ${i}: "${seg}" (variants: ${JSON.stringify(segVariants)})`);
+        console.log(
+          `  Drilling into segment ${i}: "${seg}" (variants: ${JSON.stringify(segVariants)})`,
+        );
 
         // Try search first
         const searchInput = window.locator('[data-testid="dir-search-input"]');
@@ -253,8 +260,12 @@ async function main() {
         }
 
         if (!found) {
-          const currentEntries = await window.locator('[data-testid="dir-entry"] .dir-entry-name').allTextContents();
-          throw new Error(`Could not find entry for segment "${seg}". Visible entries: ${JSON.stringify(currentEntries.slice(0, 20))}`);
+          const currentEntries = await window
+            .locator('[data-testid="dir-entry"] .dir-entry-name')
+            .allTextContents();
+          throw new Error(
+            `Could not find entry for segment "${seg}". Visible entries: ${JSON.stringify(currentEntries.slice(0, 20))}`,
+          );
         }
 
         // Wait for next directory listing
@@ -280,8 +291,12 @@ async function main() {
         await sleep(300);
         const lastFound2 = await findAndClickEntry(last, false);
         if (!lastFound2) {
-          const currentEntries = await window.locator('[data-testid="dir-entry"] .dir-entry-name').allTextContents();
-          throw new Error(`Could not find entry for last segment "${last}". Visible entries: ${JSON.stringify(currentEntries.slice(0, 20))}`);
+          const currentEntries = await window
+            .locator('[data-testid="dir-entry"] .dir-entry-name')
+            .allTextContents();
+          throw new Error(
+            `Could not find entry for last segment "${last}". Visible entries: ${JSON.stringify(currentEntries.slice(0, 20))}`,
+          );
         }
       }
       await sleep(300);
@@ -289,7 +304,9 @@ async function main() {
       // Click confirm
       console.log("  Clicking confirm...");
       await window.locator('[data-testid="dir-confirm"]').click();
-      await window.locator('[data-testid="dir-modal"]').waitFor({ state: "hidden", timeout: 15_000 });
+      await window
+        .locator('[data-testid="dir-modal"]')
+        .waitFor({ state: "hidden", timeout: 15_000 });
       console.log("  Modal closed.");
 
       recordStep("导航到目标项目", "passed", `导航到 ${targetPath}`, "");
@@ -334,12 +351,16 @@ async function main() {
       // Collect existing sessions via db:projects:list
       const preInfo = await window.evaluate(async () => {
         try {
-          const projects = await ((window as any).api.db.projects.list());
+          const projects = await (window as any).api.db.projects.list();
           const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
           return {
             activeProjectId: active?.id ?? null,
             existingIds: (active?.sessions ?? []).map((s: any) => s.id),
-            allProjectIds: projects.map((p: any) => ({ id: p.id, name: p.name, sessionCount: p.sessions.length })),
+            allProjectIds: projects.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              sessionCount: p.sessions.length,
+            })),
           };
         } catch (e: any) {
           return { error: e.message };
@@ -362,7 +383,7 @@ async function main() {
       while (Date.now() - startTime < 60_000) {
         const info = await window.evaluate(async () => {
           try {
-            const projects = await ((window as any).api.db.projects.list());
+            const projects = await (window as any).api.db.projects.list();
             const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
             return {
               ids: (active?.sessions ?? []).map((s: any) => s.id),
@@ -379,14 +400,16 @@ async function main() {
           const newIds = info.ids.filter((id: string) => !existingIds.includes(id));
           if (newIds.length > 0) {
             console.log(`  New session in DB: ${newIds[0]} (total: ${info.count})`);
-            console.log(`  All statuses:`, JSON.stringify(info.statuses));
+            console.log("  All statuses:", JSON.stringify(info.statuses));
             cardAppeared = true;
 
             // Also check if card rendered in DOM
-            const domIds = await window.locator('[data-testid="session-card"][data-session-id]').evaluateAll(
-              (els) => els.map((el) => el.getAttribute("data-session-id")).filter(Boolean),
-            );
-            console.log(`  DOM card IDs:`, domIds);
+            const domIds = await window
+              .locator('[data-testid="session-card"][data-session-id]')
+              .evaluateAll((els) =>
+                els.map((el) => el.getAttribute("data-session-id")).filter(Boolean),
+              );
+            console.log("  DOM card IDs:", domIds);
             break;
           }
         }
@@ -396,12 +419,15 @@ async function main() {
       if (cardAppeared) {
         const ssSession = "04-session-created.png";
         await window.screenshot({ path: screenshotPath(ssSession), fullPage: false });
-        recordStep("创建Session", "passed", `新 session 已出现在 DB 中`, ssSession);
+        recordStep("创建Session", "passed", "新 session 已出现在 DB 中", ssSession);
       } else {
         const finalInfo = await window.evaluate(async () => {
-          const projects = await ((window as any).api.db.projects.list());
+          const projects = await (window as any).api.db.projects.list();
           const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
-          return { ids: (active?.sessions ?? []).map((s: any) => s.id), count: active?.sessions.length ?? 0 };
+          return {
+            ids: (active?.sessions ?? []).map((s: any) => s.id),
+            count: active?.sessions.length ?? 0,
+          };
         });
         recordStep("创建Session", "failed", `Session 未创建 (DB count: ${finalInfo.count})`, "");
       }
@@ -414,9 +440,9 @@ async function main() {
     await sleep(3000);
     try {
       // Get the latest list of session cards
-      const preDeleteIds = await window.locator('[data-testid="session-card"][data-session-id]').evaluateAll(
-        (els) => els.map((el) => el.getAttribute("data-session-id")).filter(Boolean),
-      );
+      const preDeleteIds = await window
+        .locator('[data-testid="session-card"][data-session-id]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-session-id")).filter(Boolean));
       console.log(`  Pre-delete sessions (${preDeleteIds.length}):`, preDeleteIds);
 
       if (preDeleteIds.length === 0) {
@@ -444,7 +470,7 @@ async function main() {
 
         // Capture the row's DB status before clicking confirm
         const beforeConfirm = await window.evaluate(async (sid) => {
-          const projects = await ((window as any).api.db.projects.list());
+          const projects = await (window as any).api.db.projects.list();
           const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
           const session = active?.sessions.find((s: any) => s.id === sid);
           return session ? { id: session.id, status: session.status } : { error: "not found" };
@@ -460,7 +486,7 @@ async function main() {
         // Check DB after the delete click to see if status changed to "deleting"
         await sleep(500);
         const afterClick = await window.evaluate(async (sid) => {
-          const projects = await ((window as any).api.db.projects.list());
+          const projects = await (window as any).api.db.projects.list();
           const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
           const session = active?.sessions.find((s: any) => s.id === sid);
           return session ? { id: session.id, status: session.status } : { deleted: true };
@@ -472,7 +498,7 @@ async function main() {
         let deleted = false;
         while (Date.now() - startTime < 90_000) {
           const dbInfo = await window.evaluate(async (sid) => {
-            const projects = await ((window as any).api.db.projects.list());
+            const projects = await (window as any).api.db.projects.list();
             const active = projects.find((p: any) => p.path.includes("Copilot-Switch"));
             const session = active?.sessions.find((s: any) => s.id === sid);
             return session ? { found: true, status: session.status } : { found: false };
@@ -484,8 +510,13 @@ async function main() {
             break;
           }
           // Print status every 5s
-          if (Math.floor((Date.now() - startTime) / 5000) !== Math.floor((Date.now() - startTime - 1000) / 5000)) {
-            console.log(`  ... waiting (${Math.floor((Date.now() - startTime) / 1000)}s elapsed), DB status: ${dbInfo.status}`);
+          if (
+            Math.floor((Date.now() - startTime) / 5000) !==
+            Math.floor((Date.now() - startTime - 1000) / 5000)
+          ) {
+            console.log(
+              `  ... waiting (${Math.floor((Date.now() - startTime) / 1000)}s elapsed), DB status: ${dbInfo.status}`,
+            );
           }
           await sleep(1000);
         }

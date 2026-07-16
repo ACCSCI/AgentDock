@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 // @ts-nocheck
 /**
  * 构建时将 daemon 预编译为 JS。
@@ -8,8 +10,6 @@
  * 运行编译后的 daemon。
  */
 import { build } from "esbuild";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(__dirname, "..");
@@ -23,9 +23,9 @@ async function main() {
     target: "node24",
     format: "cjs",
     external: [
-      "node-pty",       // 原生模块，不可打包
-      "electron",        // daemon 不需要 electron
-      "better-sqlite3",  // 原生模块
+      "node-pty", // 原生模块，不可打包
+      "electron", // daemon 不需要 electron
+      "better-sqlite3", // 原生模块
     ],
     sourcemap: false,
     minify: false,

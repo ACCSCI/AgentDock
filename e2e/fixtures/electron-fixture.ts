@@ -1,3 +1,7 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // @ts-nocheck
 /**
  * Electron test fixture — single source of truth for spinning up the
@@ -32,18 +36,14 @@
  *                                the test (useful for post-mortem inspection)
  */
 import {
-  _electron as electron,
-  test as base,
-  expect,
   type ConsoleMessage,
   type Dialog,
   type ElectronApplication,
   type Page,
+  test as base,
+  _electron as electron,
+  expect,
 } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const ROOT = process.cwd();
 
@@ -111,7 +111,7 @@ function getMainEntry(): Promise<string> {
       throw new Error(`electron-vite build failed: ${out}`);
     }
     const dir = join(ROOT, "out", "main");
-    if (!existsSync(dir)) throw new Error(`Build produced no out/main dir`);
+    if (!existsSync(dir)) throw new Error("Build produced no out/main dir");
     const candidates = readdirSync(dir).filter((f) => f.endsWith(".js"));
     if (candidates.length === 0) throw new Error(`No .js entry in ${dir}`);
     return join(dir, candidates[0]!);
@@ -377,7 +377,7 @@ export const test = base.extend<ElectronFixtures>({
         (e) =>
           e.type === "error" &&
           !e.text.includes("agentdock-fonts://") &&
-          !((e.location && e.location.url) || "").includes("agentdock-fonts://") &&
+          !(e.location?.url || "").includes("agentdock-fonts://") &&
           !e.text.includes("net::ERR_FAILED"),
       );
       if (errors.length > 0 || pageErrors.length > 0) {
@@ -425,10 +425,10 @@ let sharedDataDir: string | null = null;
 let sharedUserDataDir: string | null = null;
 let sharedMainEntry: string | null = null;
 let sharedChildProcess: ReturnType<ElectronApplication["process"]> | null = null;
-let sharedMainLog: string[] = [];
-let sharedRendererLog: RendererConsoleEntry[] = [];
-let sharedPageErrors: CapturedError[] = [];
-let sharedDialogs: DialogRecord[] = [];
+const sharedMainLog: string[] = [];
+const sharedRendererLog: RendererConsoleEntry[] = [];
+const sharedPageErrors: CapturedError[] = [];
+const sharedDialogs: DialogRecord[] = [];
 
 function getSharedLaunchConfig() {
   return {
@@ -457,9 +457,7 @@ function resetCaptures(): void {
   sharedDialogs.length = 0;
 }
 
-export const reuseTest = base.extend<
-  Omit<ElectronFixtures, "app"> & { app: ElectronApplication }
->({
+export const reuseTest = base.extend<Omit<ElectronFixtures, "app"> & { app: ElectronApplication }>({
   dataDir: async ({}, use) => {
     if (process.env.AGENTDOCK_E2E_REUSE !== "1") {
       throw new Error("reuseTest requires AGENTDOCK_E2E_REUSE=1");
@@ -467,10 +465,7 @@ export const reuseTest = base.extend<
 
     // First test: initialize shared directories and launch Electron.
     if (!sharedApp) {
-      sharedDataDir = join(
-        tmpdir(),
-        `agentdock-e2e-reuse-${process.pid}`,
-      );
+      sharedDataDir = join(tmpdir(), `agentdock-e2e-reuse-${process.pid}`);
       sharedUserDataDir = join(sharedDataDir, "electron-user-data");
       mkdirSync(sharedUserDataDir, { recursive: true });
 
@@ -538,9 +533,7 @@ export const reuseTest = base.extend<
         contentType: "text/plain",
       });
       await testInfo.attach("renderer.log", {
-        body: sharedRendererLog
-          .map((e) => `[${e.type}] ${e.text}`)
-          .join("\n"),
+        body: sharedRendererLog.map((e) => `[${e.type}] ${e.text}`).join("\n"),
         contentType: "text/plain",
       });
       await testInfo.attach("pageerrors.json", {
@@ -650,7 +643,7 @@ export const reuseTest = base.extend<
         (e) =>
           e.type === "error" &&
           !e.text.includes("agentdock-fonts://") &&
-          !((e.location && e.location.url) || "").includes("agentdock-fonts://") &&
+          !(e.location?.url || "").includes("agentdock-fonts://") &&
           !e.text.includes("net::ERR_FAILED"),
       );
       if (errors.length > 0 || pageErrors.length > 0) {

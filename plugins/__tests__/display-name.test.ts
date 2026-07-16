@@ -2,10 +2,7 @@
  * displayName 最小消毒 (新架构 §4.1 末段).
  */
 import { describe, expect, it } from "vitest";
-import {
-  sanitizeDisplayName,
-  DISPLAY_NAME_MAX_LENGTH,
-} from "../display-name.js";
+import { DISPLAY_NAME_MAX_LENGTH, sanitizeDisplayName } from "../display-name.js";
 
 describe("sanitizeDisplayName (新架构 §4.1)", () => {
   it("空字符串/空值 → ''", () => {
@@ -52,7 +49,7 @@ describe("sanitizeDisplayName (新架构 §4.1)", () => {
 
   it("控制字符 + 截断组合", () => {
     // 200 字符里塞了 5 个 \n — 净化后变 195, 截到 128
-    const s = "a".repeat(100) + "\n\n\n\n\n" + "b".repeat(95);
+    const s = `${"a".repeat(100)}\n\n\n\n\n${"b".repeat(95)}`;
     expect(sanitizeDisplayName(s).length).toBe(128);
   });
 

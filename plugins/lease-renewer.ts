@@ -1,3 +1,4 @@
+import { HEARTBEAT_TIMEOUT_MS, LEASE_RENEW_INTERVAL_MS, LEASE_TTL_MS } from "./constants.js";
 // @ts-nocheck
 /**
  * Lease renewer — keeps the daemon's per-session progress lease warm
@@ -25,11 +26,6 @@
  * 但不传播错误(主流程继续, 让 owner 后续 releaseSession 走 fresh daemon)。
  */
 import { log } from "./logger.js";
-import {
-  HEARTBEAT_TIMEOUT_MS,
-  LEASE_RENEW_INTERVAL_MS,
-  LEASE_TTL_MS,
-} from "./constants.js";
 
 /**
  * POST /session/heartbeat 入参 (新架构 §13.1).
@@ -88,7 +84,11 @@ const DEFAULT_FAILURE_BUDGET = 3;
  *   }
  */
 export function startLeaseRenewal(
-  args: { sessionId: string; fencingToken: number; phase: "creating" | "deleting" } & LeaseRenewerDeps,
+  args: {
+    sessionId: string;
+    fencingToken: number;
+    phase: "creating" | "deleting";
+  } & LeaseRenewerDeps,
 ): ActiveLease {
   const {
     sessionId,
@@ -176,7 +176,12 @@ export function startLeaseRenewal(
  * 续约期间任何阶段 throw 不会影响主流程错误传播 — 续约只关心 lease 本身。
  */
 export async function withLeaseRenewal<T>(
-  args: { sessionId: string; fencingToken: number; phase: "creating" | "deleting"; inner: () => Promise<T> } & LeaseRenewerDeps,
+  args: {
+    sessionId: string;
+    fencingToken: number;
+    phase: "creating" | "deleting";
+    inner: () => Promise<T>;
+  } & LeaseRenewerDeps,
 ): Promise<T> {
   const { inner, ...rest } = args;
   const lease = startLeaseRenewal(rest);

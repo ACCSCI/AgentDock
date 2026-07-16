@@ -18,14 +18,17 @@
  * `ipcRenderer.on(channel, listener)`. See `subscribeSession` and
  * `onTerminalPort` below for the typed wrappers.
  */
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { type IpcRendererEvent, contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS, type IpcChannel } from "./shared/api-types.js";
 
 function invoke<T = unknown>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(IPC_CHANNELS[channel], ...args) as Promise<T>;
 }
 
-function on<T = unknown>(channel: string, cb: (data: T, event: IpcRendererEvent) => void): () => void {
+function on<T = unknown>(
+  channel: string,
+  cb: (data: T, event: IpcRendererEvent) => void,
+): () => void {
   const handler = (_e: IpcRendererEvent, data: T) => cb(data, _e);
   ipcRenderer.on(channel, handler);
   return () => ipcRenderer.off(channel, handler);
@@ -89,19 +92,21 @@ const api = {
   },
 
   sync: {
-    project: () => invoke<{
-      inserted: number;
-      removed: number;
-      cleanedOrphans: number;
-      prunedRefs: number;
-      total: number;
-    }>("sync:project"),
+    project: () =>
+      invoke<{
+        inserted: number;
+        removed: number;
+        cleanedOrphans: number;
+        prunedRefs: number;
+        total: number;
+      }>("sync:project"),
   },
 
   sessions: {
     create: (params: { projectId: string; name: string; baseBranch?: string }) =>
       invoke<{ sessionId: string }>("sessions:create", params),
-    delete: (sessionId: string) => invoke<{ success: true; error?: string }>("sessions:delete", { sessionId }),
+    delete: (sessionId: string) =>
+      invoke<{ success: true; error?: string }>("sessions:delete", { sessionId }),
     rename: (sessionId: string, name: string) =>
       invoke<{ success: true }>("sessions:rename", { sessionId, name }),
     reassignPorts: (sessionId: string) =>
@@ -109,19 +114,17 @@ const api = {
     retryHooks: (sessionId: string) =>
       invoke<{ success: true; status: string }>("sessions:retryHooks", sessionId),
     stream: (sessionId: string) => ({
-      onStep: (cb: (step: { step: string; status: string; duration?: number; error?: string }) => void) =>
-        on(`session:${sessionId}:step`, cb),
+      onStep: (
+        cb: (step: { step: string; status: string; duration?: number; error?: string }) => void,
+      ) => on(`session:${sessionId}:step`, cb),
       onComplete: (cb: (result: { success: boolean; error?: string }) => void) =>
         on(`session:${sessionId}:complete`, cb),
     }),
-    bgHookStatus: (sessionId: string) =>
-      invoke<string | null>("sessions:bgHookStatus", sessionId),
-    hookErrors: (sessionId: string) =>
-      invoke<unknown[]>("sessions:hookErrors", sessionId),
+    bgHookStatus: (sessionId: string) => invoke<string | null>("sessions:bgHookStatus", sessionId),
+    hookErrors: (sessionId: string) => invoke<unknown[]>("sessions:hookErrors", sessionId),
     setUserStatus: (sessionId: string, status: string | null) =>
       invoke<{ success: true }>("sessions:setUserStatus", { sessionId, status }),
-    activate: (sessionId: string) =>
-      invoke<{ success: true }>("sessions:activate", { sessionId }),
+    activate: (sessionId: string) => invoke<{ success: true }>("sessions:activate", { sessionId }),
   },
 
   // [OLD-DAEMON] sessionsV2 channels — removed in single-instance architecture
@@ -211,9 +214,10 @@ const api = {
     browseDirs: (targetPath: string) =>
       invoke<Array<{ name: string; path: string }>>("fs:browseDirs", targetPath),
     files: (relPath: string) =>
-      invoke<
-        Array<{ name: string; path: string; isDir: boolean; size: number | null }>
-      >("fs:files", relPath),
+      invoke<Array<{ name: string; path: string; isDir: boolean; size: number | null }>>(
+        "fs:files",
+        relPath,
+      ),
   },
 
   config: {
@@ -239,9 +243,7 @@ const api = {
         }>
       >("worktree:orphans", projectId),
     deleteOrphans: (
-      body:
-        | { paths?: string[]; branches?: string[]; projectId?: string }
-        | string[],
+      body: { paths?: string[]; branches?: string[]; projectId?: string } | string[],
     ) =>
       invoke<{
         deleted: string[];
@@ -256,13 +258,14 @@ const api = {
   // surface the underlying message via toast.
   git: {
     isRepo: (dirPath: string) => invoke<boolean>("git:isRepo", dirPath),
-    init: (dirPath: string) =>
-      invoke<{ success: boolean; error?: string }>("git:init", dirPath),
+    init: (dirPath: string) => invoke<{ success: boolean; error?: string }>("git:init", dirPath),
   },
 
   shell: {
-    openExplorer: (targetPath: string) => invoke<{ success: true }>("shell:openExplorer", targetPath),
-    openTerminal: (targetPath: string) => invoke<{ success: true }>("shell:openTerminal", targetPath),
+    openExplorer: (targetPath: string) =>
+      invoke<{ success: true }>("shell:openExplorer", targetPath),
+    openTerminal: (targetPath: string) =>
+      invoke<{ success: true }>("shell:openTerminal", targetPath),
     openPullRequests: (projectId?: string) =>
       invoke<{ url: string }>("shell:openPullRequests", projectId),
   },
@@ -295,11 +298,11 @@ const api = {
   // 渲染进程可通过这些事件展示更新检查/下载/完成状态。
   updates: {
     onChecking: (cb: () => void) => on("update:checking", cb),
-    onAvailable: (cb: (info: unknown) => void) => on("update:available", cb),
-    onNotAvailable: (cb: (info: unknown) => void) => on("update:not-available", cb),
+    onAvailable: (cb: (info: { version?: string }) => void) => on("update:available", cb),
+    onNotAvailable: (cb: (info: { version?: string }) => void) => on("update:not-available", cb),
     onDownloadProgress: (cb: (progress: { percent: number }) => void) =>
       on("update:download-progress", cb),
-    onDownloaded: (cb: (info: unknown) => void) => on("update:downloaded", cb),
+    onDownloaded: (cb: (info: { version?: string }) => void) => on("update:downloaded", cb),
     onError: (cb: (err: { message: string }) => void) => on("update:error", cb),
   },
 
@@ -307,8 +310,7 @@ const api = {
   // The settings page uses these to display the current build and let
   // the user force a check outside the 4h interval kicked off at boot.
   app: {
-    version: () =>
-      invoke<{ version: string; isPackaged: boolean }>("app:version"),
+    version: () => invoke<{ version: string; isPackaged: boolean }>("app:version"),
     checkForUpdates: () =>
       invoke<
         | { status: "dev-mode" }
@@ -331,17 +333,31 @@ const api = {
   // Per-project todo list
   todos: {
     list: (projectId: string) =>
-      invoke<Array<{ id: string; projectId: string; content: string; status: string; sortOrder: number; createdAt: string; updatedAt: string }>>("todos:list", { projectId }),
+      invoke<
+        Array<{
+          id: string;
+          projectId: string;
+          content: string;
+          status: string;
+          sortOrder: number;
+          createdAt: string;
+          updatedAt: string;
+        }>
+      >("todos:list", { projectId }),
     create: (projectId: string, content: string) =>
-      invoke<{ id: string; projectId: string; content: string; status: string; sortOrder: number; createdAt: string; updatedAt: string }>("todos:create", { projectId, content }),
-    cycleStatus: (id: string) =>
-      invoke<void>("todos:cycleStatus", { id }),
-    update: (id: string, content: string) =>
-      invoke<void>("todos:update", { id, content }),
-    delete: (id: string) =>
-      invoke<void>("todos:delete", { id }),
-    reorder: (todoIds: string[]) =>
-      invoke<void>("todos:reorder", { todoIds }),
+      invoke<{
+        id: string;
+        projectId: string;
+        content: string;
+        status: string;
+        sortOrder: number;
+        createdAt: string;
+        updatedAt: string;
+      }>("todos:create", { projectId, content }),
+    cycleStatus: (id: string) => invoke<void>("todos:cycleStatus", { id }),
+    update: (id: string, content: string) => invoke<void>("todos:update", { id, content }),
+    delete: (id: string) => invoke<void>("todos:delete", { id }),
+    reorder: (todoIds: string[]) => invoke<void>("todos:reorder", { todoIds }),
   },
 
   // Renderer error reporting. Called from ErrorBoundary and the global

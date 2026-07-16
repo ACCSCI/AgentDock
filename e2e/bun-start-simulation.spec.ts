@@ -1,3 +1,4 @@
+import { join } from "node:path";
 /**
  * E2E Test: Full user simulation — bun start → open project → create → delete session
  *
@@ -6,10 +7,12 @@
  *
  * No IPC shortcuts — everything goes through the actual UI.
  */
-import { _electron as electron, test as base, type ElectronApplication, type Page } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+  type ElectronApplication,
+  type Page,
+  test as base,
+  _electron as electron,
+} from "@playwright/test";
 
 const ROOT = "F:\\ProgramPlayground\\JavaScript\\AgentDock\\.agentdock\\worktrees\\bed4c452-74d";
 const PROJECT_PATH = "F:\\ProgramPlayground\\JavaScript\\Copilot-Switch";
@@ -22,7 +25,8 @@ async function getMainEntry(): Promise<string> {
   const fs = await import("node:fs");
   const dir = join(ROOT, "out", "main");
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".js"));
-  if (files.length === 0) throw new Error("No main entry in out/main — run electron-vite build first");
+  if (files.length === 0)
+    throw new Error("No main entry in out/main — run electron-vite build first");
   builtEntry = join(dir, files[0]!);
   return builtEntry;
 }
@@ -36,7 +40,10 @@ const test = base.extend<{
     const app = await electron.launch({
       args: [mainEntry],
       cwd: ROOT,
-      env: { ...process.env, NODE_OPTIONS: (process.env.NODE_OPTIONS ?? "") + " --experimental-sqlite" },
+      env: {
+        ...process.env,
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --experimental-sqlite`,
+      },
       timeout: 30_000,
     });
     await use(app);
@@ -49,7 +56,9 @@ const test = base.extend<{
 });
 
 test.describe("Real bun start simulation", () => {
-  test("full user flow: open Copilot-Switch → create session → delete session", async ({ window }) => {
+  test("full user flow: open Copilot-Switch → create session → delete session", async ({
+    window,
+  }) => {
     // ── Wait for the app to fully load ──
     await window.waitForTimeout(5000);
 
@@ -62,7 +71,9 @@ test.describe("Real bun start simulation", () => {
       const all = await (window as any).api.db.projects.list();
       return all.map((p: any) => ({ id: p.id, name: p.name, path: p.path }));
     });
-    console.log(`Backend projects: ${JSON.stringify(backendProjects.map(p => p.name))}`);
+    console.log(
+      `Backend projects: ${JSON.stringify(backendProjects.map((p: { name: string }) => p.name))}`,
+    );
 
     // Pre-seed: open the project via direct IPC BEFORE clicking the UI button
     const projectExists = backendProjects.some((p: any) => p.path === PROJECT_PATH);
@@ -128,7 +139,12 @@ test.describe("Real bun start simulation", () => {
     // Instead of waiting for h2 (which won't appear if navigate failed),
     // load the project directly by clicking the expected tab.
     // But if tabs are empty, fallback to direct data check.
-    const tabVisible = await window.locator('[data-testid="project-tab"]').filter({ hasText: PROJECT_NAME }).first().isVisible().catch(() => false);
+    const tabVisible = await window
+      .locator('[data-testid="project-tab"]')
+      .filter({ hasText: PROJECT_NAME })
+      .first()
+      .isVisible()
+      .catch(() => false);
     console.log(`Copilot-Switch tab exists: ${tabVisible}`);
 
     // But if tabs are empty, fallback: the React Query staleTime issue.
@@ -150,7 +166,10 @@ test.describe("Real bun start simulation", () => {
     await window.waitForTimeout(5000);
 
     // After reload, the project tab should be visible
-    const tabEl = window.locator('[data-testid="project-tab"]').filter({ hasText: PROJECT_NAME }).first();
+    const tabEl = window
+      .locator('[data-testid="project-tab"]')
+      .filter({ hasText: PROJECT_NAME })
+      .first();
     await tabEl.waitFor({ state: "visible", timeout: 30000 });
     console.log("✓ Project tab visible after reload");
     await tabEl.click();
@@ -199,10 +218,16 @@ test.describe("Real bun start simulation", () => {
       await card.click({ button: "right" });
       await window.waitForTimeout(500);
 
-      const deleteOption = window.locator('[role="menuitem"]').filter({ hasText: /delete|删除/i }).first();
+      const deleteOption = window
+        .locator('[role="menuitem"]')
+        .filter({ hasText: /delete|删除/i })
+        .first();
       if (await deleteOption.isVisible({ timeout: 3000 }).catch(() => false)) {
         await deleteOption.click();
-        const confirmBtn = window.locator("button").filter({ hasText: /confirm|确认/i }).first();
+        const confirmBtn = window
+          .locator("button")
+          .filter({ hasText: /confirm|确认/i })
+          .first();
         if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
           await confirmBtn.click();
         }
@@ -213,7 +238,9 @@ test.describe("Real bun start simulation", () => {
       // ── STEP 6: Verify deleted ──
       await window.locator('[data-testid="rescan-disk"]').click();
       await window.waitForTimeout(3000);
-      const remaining = await window.locator(`[data-testid="session-card"][data-session-id="${sessionId}"]`).count();
+      const remaining = await window
+        .locator(`[data-testid="session-card"][data-session-id="${sessionId}"]`)
+        .count();
       console.log(`Session card remaining: ${remaining}`);
 
       if (remaining > 0) {

@@ -92,9 +92,11 @@ export function mergeEnv(
  * Serialize env config to .env format string.
  */
 export function writeEnv(env: Record<string, string>): string {
-  return Object.entries(env)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n") + (Object.keys(env).length > 0 ? "\n" : "");
+  return (
+    Object.entries(env)
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n") + (Object.keys(env).length > 0 ? "\n" : "")
+  );
 }
 
 /**
@@ -109,10 +111,7 @@ export function discoverPortKeysFromEnv(envPath: string): string[] {
 /**
  * Read .env file, merge updates, and write back.
  */
-export function updateEnvFile(
-  filePath: string,
-  updates: Record<string, string>,
-): void {
+export function updateEnvFile(filePath: string, updates: Record<string, string>): void {
   let existing: Record<string, string> = {};
   if (existsSync(filePath)) {
     existing = parseEnv(readFileSync(filePath, "utf-8"));
@@ -146,15 +145,11 @@ export function updateEnvFile(
  * @throws When the resolved file path does not exist on disk.
  */
 export function loadDotEnvIntoProcess(filePath?: string): void {
-  const resolved = filePath
-    ? path.resolve(filePath)
-    : path.join(process.cwd(), ".env");
+  const resolved = filePath ? path.resolve(filePath) : path.join(process.cwd(), ".env");
 
   if (!existsSync(resolved)) {
     throw new Error(
-      `[dev] .env not found at ${resolved} — create .env in your project/worktree root, ` +
-        `or set FRONTEND_PORT (and the rest of PORT_KEYS_DEFAULT) directly in the environment. ` +
-        `See .env.example for the expected schema.`,
+      `[dev] .env not found at ${resolved} — create .env in your project/worktree root, or set FRONTEND_PORT (and the rest of PORT_KEYS_DEFAULT) directly in the environment. See .env.example for the expected schema.`,
     );
   }
 

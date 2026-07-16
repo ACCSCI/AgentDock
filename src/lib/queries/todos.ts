@@ -11,7 +11,12 @@ export function useTodos(projectId: string | null) {
     queryKey: ["todos", projectId] as const,
     queryFn: async (): Promise<TodoItem[]> => {
       if (!projectId) return [];
-      return api().todos.list(projectId);
+      const todos = await api().todos.list(projectId);
+      return todos.map((todo) => ({
+        ...todo,
+        status: todo.status as TodoItem["status"],
+        order: todo.sortOrder,
+      }));
     },
     enabled: !!projectId,
   });

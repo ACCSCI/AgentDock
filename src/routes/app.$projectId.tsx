@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, useProjects } from "../lib/queries";
-import { useStore } from "../lib/store";
-import { TerminalManager } from "../components/TerminalManager";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { ConfigEditor } from "../components/ConfigEditor";
 import { HookErrorModal } from "../components/HookErrorModal";
+import { TerminalManager } from "../components/TerminalManager";
+import { queryKeys, useProjects } from "../lib/queries";
+import { useStore } from "../lib/store";
 
 export const Route = createFileRoute("/app/$projectId")({
   component: ProjectWorkspace,
@@ -79,19 +79,13 @@ function ProjectWorkspace() {
       )}
       <div className="workspace-content">
         {activeSession ? (
-          <TerminalManager
-            sessionId={activeSession.id}
-            worktreePath={activeSession.worktreePath}
-          />
+          <TerminalManager sessionId={activeSession.id} worktreePath={activeSession.worktreePath} />
         ) : (
           <ConfigEditor projectId={project.id} projectPath={project.path} />
         )}
       </div>
       {showHookErrors && activeSession && (
-        <HookErrorModal
-          sessionId={activeSession.id}
-          onClose={() => setShowHookErrors(false)}
-        />
+        <HookErrorModal sessionId={activeSession.id} onClose={() => setShowHookErrors(false)} />
       )}
     </div>
   );

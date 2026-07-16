@@ -1,21 +1,17 @@
 // @ts-nocheck
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
-  writeFileSync,
-  closeSync,
   unlinkSync,
-  unlink,
+  writeFileSync,
 } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { createServer } from "node:net";
-import {
-  BIND_PROBE_BACKOFF_MS,
-  BIND_PROBE_RETRY,
-} from "./constants.js";
+import os from "node:os";
+import path from "node:path";
+import { BIND_PROBE_BACKOFF_MS, BIND_PROBE_RETRY } from "./constants.js";
 
 // ============================================================
 // Constants
@@ -182,10 +178,10 @@ export class FilePortAllocator implements PortAllocator {
       process.kill(pid, 0);
       // Process is alive and the lock is fresh — NOT stale.
       return false;
-    } catch (err: any) {
+    } catch (err) {
       // ESRCH: no such process → dead holder → stale.
       // EPERM: process exists but owned by another user → treat as alive.
-      if (err?.code === "EPERM") {
+      if (err instanceof Error && "code" in err && err.code === "EPERM") {
         return false;
       }
       return true;
@@ -225,8 +221,8 @@ export class FilePortAllocator implements PortAllocator {
             // Another process may have cleaned it up
           }
         }
-      } catch (err: any) {
-        if (err.code === "EEXIST") {
+      } catch (err) {
+        if (err instanceof Error && "code" in err && err.code === "EEXIST") {
           // Lock held — if it is stale, break it and retry immediately.
           if (this.isLockStale()) {
             try {
@@ -304,7 +300,9 @@ const EADDRINUSE = "EADDRINUSE";
  *   - { ok: false, code: "EADDRINUSE" } — port is in use
  *   - { ok: false, code: "TRANSIENT", err } — try again later
  */
-function tryBindOnce(port: number): Promise<
+function tryBindOnce(
+  port: number,
+): Promise<
   { ok: true } | { ok: false; code: "EADDRINUSE" } | { ok: false; code: "TRANSIENT"; err: unknown }
 > {
   return new Promise((resolve) => {
@@ -412,9 +410,7 @@ export async function pickFreePort(
       server.close(() => resolve());
     });
   }
-  throw new Error(
-    `pickFreePort: failed to find a free port in ${maxAttempts} attempts`,
-  );
+  throw new Error(`pickFreePort: failed to find a free port in ${maxAttempts} attempts`);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -450,10 +446,7 @@ export async function allocateNFreePorts(
   const closeAll: Array<() => Promise<void>> = [];
   try {
     for (let i = 0; i < count; i++) {
-      const { port, closeServer } = await pickFreePort(
-        [...excluded],
-        maxAttempts,
-      );
+      const { port, closeServer } = await pickFreePort([...excluded], maxAttempts);
       result.push(port);
       excluded.add(port);
       closeAll.push(closeServer);

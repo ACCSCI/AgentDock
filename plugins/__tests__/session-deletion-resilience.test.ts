@@ -1,12 +1,12 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
-import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
-import { removeOrphanDir } from "../orphan.js";
+import path from "node:path";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentDockConfig } from "../config.js";
+import { removeOrphanDir } from "../orphan.js";
+import { type PortService, createSessionLifecycle } from "../session-lifecycle.js";
 
 let projectDir: string;
 let portCounter = 0;
@@ -36,7 +36,7 @@ function initGitRepo(dir: string) {
   execSync("git config user.name Test", { cwd: dir, stdio: "pipe" });
   writeFileSync(path.join(dir, "README.md"), "# test\n");
   execSync("git add .", { cwd: dir, stdio: "pipe" });
-  execSync('git commit -m init', { cwd: dir, stdio: "pipe" });
+  execSync("git commit -m init", { cwd: dir, stdio: "pipe" });
 }
 
 function defaultConfig(): AgentDockConfig {
@@ -54,7 +54,10 @@ function sleepCmd(seconds: number): string {
 }
 
 beforeEach(() => {
-  projectDir = path.join(os.tmpdir(), `ad-resilience-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  projectDir = path.join(
+    os.tmpdir(),
+    `ad-resilience-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(projectDir, { recursive: true });
   initGitRepo(projectDir);
   portCounter = 0;
@@ -78,13 +81,15 @@ afterEach(async () => {
 describe("remove — 进程锁定场景", () => {
   it("D36: 异步 hook 子进程运行中，删除 session 成功", { timeout: 120000 }, async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: sleepCmd(30),
-      required: false,
-      timeout: 60000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: sleepCmd(30),
+        required: false,
+        timeout: 60000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
@@ -111,13 +116,15 @@ describe("remove — 进程锁定场景", () => {
 
   it("D37: 异步 hook 还在运行时立即删除 session（竞态条件）", { timeout: 120000 }, async () => {
     const config = defaultConfig();
-    config.hooks.afterCreateSession = [{
-      run: sleepCmd(30),
-      required: false,
-      timeout: 60000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.afterCreateSession = [
+      {
+        run: sleepCmd(30),
+        required: false,
+        timeout: 60000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
@@ -196,19 +203,24 @@ describe("remove — 进程锁定场景", () => {
 
   it("D40: beforeDeleteSession hook 在进程锁定场景仍执行", { timeout: 120000 }, async () => {
     const config = defaultConfig();
-    config.hooks.beforeDeleteSession = [{
-      run: "echo before-delete",
-      required: false,
-      timeout: 10000,
-      cwd: "project",
-    }];
-    config.hooks.afterCreateSession = [{
-      run: sleepCmd(30),
-      required: false,
-      timeout: 60000,
-      cwd: "worktree",
-      async: true,
-    }];
+    config.hooks.beforeDeleteSession = [
+      {
+        run: "echo before-delete",
+        required: false,
+        timeout: 10000,
+        cwd: "project",
+        async: false,
+      },
+    ];
+    config.hooks.afterCreateSession = [
+      {
+        run: sleepCmd(30),
+        required: false,
+        timeout: 60000,
+        cwd: "worktree",
+        async: true,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
@@ -231,12 +243,15 @@ describe("remove — 进程锁定场景", () => {
 
   it("D41: afterDeleteSession hook 在删除后执行（即使目录已被清理）", async () => {
     const config = defaultConfig();
-    config.hooks.afterDeleteSession = [{
-      run: "echo after-delete",
-      required: false,
-      timeout: 10000,
-      cwd: "project",
-    }];
+    config.hooks.afterDeleteSession = [
+      {
+        run: "echo after-delete",
+        required: false,
+        timeout: 10000,
+        cwd: "project",
+        async: false,
+      },
+    ];
 
     const lifecycle = createSessionLifecycle({ portService: mockPortService() });
     const created = await lifecycle.create({
@@ -309,7 +324,9 @@ describe("removeOrphanDir — 孤儿目录清理", () => {
     await removeOrphanDir(orphanDir);
     expect(existsSync(orphanDir)).toBe(false);
 
-    try { child?.kill(); } catch {}
+    try {
+      child?.kill();
+    } catch {}
   });
 
   it("D45: 嵌套子目录递归删除", async () => {
@@ -341,9 +358,14 @@ describe("removeOrphanDir — 孤儿目录清理", () => {
     await expect(removeOrphanDir(orphanDir)).rejects.toThrow();
     expect(existsSync(orphanDir)).toBe(true);
 
-    try { child?.kill(); child?.unref(); } catch {}
+    try {
+      child?.kill();
+      child?.unref();
+    } catch {}
     // 清理
-    try { rmSync(orphanDir, { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(orphanDir, { recursive: true, force: true });
+    } catch {}
   });
 
   it("D47: 不存在的路径静默返回", async () => {

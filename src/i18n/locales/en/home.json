@@ -1,4 +1,15 @@
 {
   "openProject": "Open Project",
-  "selectProject": "Select a project directory to get started"
+  "selectProject": "Select a project directory to get started",
+  "openProjectFailed": "Failed to open project: {{message}}",
+  "loadProjectsFailed": "Failed to load projects: {{message}}",
+  "notGitRepository": "Not a Git repository",
+  "notGitRepositoryDescription": "The selected directory {{path}} is not a Git repository.",
+  "gitRequiredDescription": "AgentDock uses Git worktrees to manage sessions. Initialize it now with",
+  "cancel": "Cancel",
+  "close": "Close",
+  "initializingGit": "Initializing...",
+  "gitInitFailed": "Failed to initialize Git: {{message}}",
+  "gitInitSuccess": "Git repository initialized",
+  "unknownError": "Unknown error"
 }

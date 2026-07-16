@@ -12,7 +12,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { classifyFailure, type FailureClassification } from "./failure-classifier.js";
+import { type FailureClassification, classifyFailure } from "./failure-classifier.js";
 
 const ROOT = process.cwd();
 const REPORT_PATH = join(ROOT, "e2e/reports/latest.json");
@@ -118,10 +118,12 @@ function main(): void {
   console.log(`\n🔍 Classification Results (${results.length} failure(s))\n`);
   const grouped = results.reduce(
     (acc, r) => {
-      (acc[r.classification.type] ??= []).push(r);
+      const group = acc[r.classification.type] ?? [];
+      group.push(r);
+      acc[r.classification.type] = group;
       return acc;
     },
-    {} as Record<string, ClassificationResult[]>
+    {} as Record<string, ClassificationResult[]>,
   );
 
   for (const [type, items] of Object.entries(grouped)) {

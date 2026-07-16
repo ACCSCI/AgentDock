@@ -19,7 +19,7 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TerminalPage } from "./pages/terminal";
@@ -28,16 +28,15 @@ import { TID } from "./pages/testids";
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeProjectWithSlowHook(dir: string): void {
   // ~1 s afterCreateSession hook → background activity while user
   // interacts. Long enough that delete-during-hook is realistic.
-  writeFileSync(join(dir, "slow-hook.js"), `setTimeout(() => {}, 1000);`, "utf-8");
+  writeFileSync(join(dir, "slow-hook.js"), "setTimeout(() => {}, 1000);", "utf-8");
   writeFileSync(
     join(dir, "agentdock.config.yaml"),
     [
@@ -90,7 +89,9 @@ test.describe("real user interaction sequence", () => {
     expect(session1Id).toBeTruthy();
     // Soft-assert ports visibility — the bug check is the React
     // infinite-loop, not the port panel render.
-    await expect(card1.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {});
+    await expect(card1.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
 
     // 3. ★ Click the card to activate it — this mounts TerminalManager
     //   and triggers useSessionTerminals + the auto-select-first
@@ -164,14 +165,13 @@ test.describe("real user interaction sequence", () => {
     //   protocol may not resolve in test environments where fonts
     //   haven't been downloaded yet. These are benign.
     const errors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
-    const maxDepth = errors.filter((e) =>
-      /Maximum update depth exceeded/i.test(e.text),
-    );
+    const maxDepth = errors.filter((e) => /Maximum update depth exceeded/i.test(e.text));
     expect(
       maxDepth,
       `React infinite-loop detected:\n${maxDepth.map((e) => e.text).join("\n---\n")}`,
@@ -180,9 +180,6 @@ test.describe("real user interaction sequence", () => {
       errors,
       `unexpected renderer console.error logs:\n${errors.map((e) => `[${e.type}] ${e.text}`).join("\n---\n")}`,
     ).toHaveLength(0);
-    expect(
-      pageErrors,
-      `renderer pageerrors:\n${JSON.stringify(pageErrors)}`,
-    ).toHaveLength(0);
+    expect(pageErrors, `renderer pageerrors:\n${JSON.stringify(pageErrors)}`).toHaveLength(0);
   });
 });

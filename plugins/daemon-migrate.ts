@@ -44,13 +44,11 @@ export const SUPPORTED_VERSIONS: readonly number[] = Object.keys(MIGRATIONS)
  * @returns the migrated state object
  */
 export function migrateToCurrent(raw: AnyState): AnyState {
-  const fromVersion =
-    typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1;
+  const fromVersion = typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1;
 
   if (fromVersion > CURRENT_SCHEMA_VERSION) {
     throw new Error(
-      `Refusing to downgrade: WAL schemaVersion=${fromVersion} > current=${CURRENT_SCHEMA_VERSION}. ` +
-        `This file was written by a newer daemon. Aborting to prevent data loss.`,
+      `Refusing to downgrade: WAL schemaVersion=${fromVersion} > current=${CURRENT_SCHEMA_VERSION}. This file was written by a newer daemon. Aborting to prevent data loss.`,
     );
   }
   if (fromVersion === CURRENT_SCHEMA_VERSION) {
@@ -123,7 +121,7 @@ interface V1Serialized {
 function migrate_v1_to_v2(raw: AnyState): AnyState {
   const v1 = raw as unknown as Partial<V1Serialized>;
   const sessions = v1.sessions ?? {};
-  const clients = v1.clients ?? {};
+  const _clients = v1.clients ?? {};
   const v1Allocated = new Set(v1.allocatedPorts ?? []);
 
   const ports: Record<number, unknown> = {};
@@ -207,7 +205,7 @@ function migrate_v1_to_v2(raw: AnyState): AnyState {
   };
 }
 
-function deriveDisplayName(sessionId: string, entry: V1SessionEntry): string {
+function deriveDisplayName(sessionId: string, _entry: V1SessionEntry): string {
   // v1 had no displayName. Use first 8 chars of sessionId as a stable
   // identifier so UI has SOMETHING to show. Caller can rename later.
   return sessionId.slice(0, 8);

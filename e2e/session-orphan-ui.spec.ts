@@ -22,17 +22,16 @@
 import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -44,11 +43,10 @@ function writeEmptyConfig(dir: string): void {
 }
 
 function listAgentdockBranches(projectPath: string): string[] {
-  const out = execFileSync(
-    "git",
-    ["branch", "--list", "agentdock/*"],
-    { cwd: projectPath, encoding: "utf-8" },
-  );
+  const out = execFileSync("git", ["branch", "--list", "agentdock/*"], {
+    cwd: projectPath,
+    encoding: "utf-8",
+  });
   return out
     .split(/\r?\n/)
     .map((l) => l.replace(/^[*+]?\s+/, "").trim())
@@ -111,9 +109,7 @@ test.describe("OrphanCleanModal real clicks", () => {
     // The success path triggers no alert (modal stays open with empty
     // list). The failure path WOULD pop an alert; we capture them via
     // the fixture and assert none happened.
-    const errorAlerts = dialogs.filter(
-      (d) => d.type === "alert" && /失败/.test(d.message),
-    );
+    const errorAlerts = dialogs.filter((d) => d.type === "alert" && /失败/.test(d.message));
     expect(
       errorAlerts,
       `unexpected delete-failure alerts: ${JSON.stringify(errorAlerts)}`,
@@ -152,7 +148,9 @@ test.describe("OrphanCleanModal real clicks", () => {
     // The reason attribute sits ON the orphan-item itself, not a child,
     // so target by combined selector instead of `.filter({has:...})`.
     const dirItem = window.locator('[data-testid="orphan-item"][data-orphan-reason="no-git-file"]');
-    const branchItem = window.locator('[data-testid="orphan-item"][data-orphan-reason="orphan-branch"]');
+    const branchItem = window.locator(
+      '[data-testid="orphan-item"][data-orphan-reason="orphan-branch"]',
+    );
     await expect(dirItem).toHaveCount(1);
     await expect(branchItem).toHaveCount(1);
 
@@ -168,9 +166,7 @@ test.describe("OrphanCleanModal real clicks", () => {
     const { existsSync } = await import("node:fs");
     expect(existsSync(fakeWtDir)).toBe(false);
 
-    const errorAlerts = dialogs.filter(
-      (d) => d.type === "alert" && /失败/.test(d.message),
-    );
+    const errorAlerts = dialogs.filter((d) => d.type === "alert" && /失败/.test(d.message));
     expect(errorAlerts).toHaveLength(0);
   });
 });

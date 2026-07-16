@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, useCreateTerminal, useDeleteTerminal, useRenameTerminal, useSessionTerminals } from "../lib/queries";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "../i18n/react";
+import {
+  queryKeys,
+  useCreateTerminal,
+  useDeleteTerminal,
+  useRenameTerminal,
+  useSessionTerminals,
+} from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { TerminalDefaultAction } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
 import { TerminalSettingsBar } from "./TerminalSettingsBar";
-import { useTranslation } from "../i18n/react";
 
 interface TerminalManagerProps {
   sessionId: string;
@@ -19,7 +25,12 @@ interface MenuState {
   terminalId: string;
 }
 
-const ACTION_ITEMS: { key: TerminalDefaultAction; label: string; icon: string; command?: string }[] = [
+const ACTION_ITEMS: {
+  key: TerminalDefaultAction;
+  label: string;
+  icon: string;
+  command?: string;
+}[] = [
   { key: "terminal", label: "Terminal", icon: ">" },
   { key: "claude", label: "Claude", icon: "◆", command: "claude" },
   { key: "copilot", label: "Copilot", icon: "⟡", command: "copilot" },
@@ -27,7 +38,8 @@ const ACTION_ITEMS: { key: TerminalDefaultAction; label: string; icon: string; c
 
 export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProps) {
   const { t } = useTranslation("terminal");
-  const { setActiveTerminal, getActiveTerminal, terminalDefaultAction, setTerminalDefaultAction } = useStore();
+  const { setActiveTerminal, getActiveTerminal, terminalDefaultAction, setTerminalDefaultAction } =
+    useStore();
   const activeTerminalId = getActiveTerminal(sessionId);
   const { data: terminals = [] } = useSessionTerminals(sessionId);
   const [loading, setLoading] = useState(false);
@@ -125,12 +137,19 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
 
   // Single effect for terminal selection
   useEffect(() => {
-    if (justCreatedRef.current && terminals.find((term) => term.terminalId === justCreatedRef.current)) {
+    if (
+      justCreatedRef.current &&
+      terminals.find((term) => term.terminalId === justCreatedRef.current)
+    ) {
       justCreatedRef.current = null;
     }
     const justCreated = justCreatedRef.current;
     const isJustCreatedActive = justCreated && activeTerminalId === justCreated;
-    if (!isJustCreatedActive && activeTerminalId && !terminals.find((term) => term.terminalId === activeTerminalId)) {
+    if (
+      !isJustCreatedActive &&
+      activeTerminalId &&
+      !terminals.find((term) => term.terminalId === activeTerminalId)
+    ) {
       setActiveTerminal(sessionId, null);
       return;
     }
@@ -160,48 +179,63 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
 
   // --- Terminal creation ---
 
-  const createTerminalWithAction = useCallback(async (action: TerminalDefaultAction) => {
-    setLoading(true);
-    try {
-      const terminal = await createTerminal.mutateAsync({ sessionId });
-      justCreatedRef.current = terminal.terminalId;
-      setActiveTerminal(sessionId, terminal.terminalId);
+  const createTerminalWithAction = useCallback(
+    async (action: TerminalDefaultAction) => {
+      setLoading(true);
+      try {
+        const terminal = await createTerminal.mutateAsync({ sessionId });
+        justCreatedRef.current = terminal.terminalId;
+        setActiveTerminal(sessionId, terminal.terminalId);
 
-      // Auto-rename tab based on action
-      if (action !== "terminal") {
-        const label = ACTION_ITEMS.find((a) => a.key === action)?.label ?? action;
-        renameTerminal.mutateAsync({ terminalId: terminal.terminalId, name: label });
-      }
+        // Auto-rename tab based on action
+        if (action !== "terminal") {
+          const label = ACTION_ITEMS.find((a) => a.key === action)?.label ?? action;
+          renameTerminal.mutateAsync({ terminalId: terminal.terminalId, name: label });
+        }
 
-      // Inject command for claude/copilot (\r = Enter key on Windows terminal)
-      const cmd = ACTION_ITEMS.find((a) => a.key === action)?.command;
-      if (cmd) {
-        terminalCache.sendText(terminal.terminalId, cmd + "\r");
+        // Inject command for claude/copilot (\r = Enter key on Windows terminal)
+        const cmd = ACTION_ITEMS.find((a) => a.key === action)?.command;
+        if (cmd) {
+          terminalCache.sendText(terminal.terminalId, `${cmd}\r`);
+        }
+      } catch (err) {
+        alert(`${t("createFailed")}: ${err instanceof Error ? err.message : t("unknownError")}`);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      alert(`${t("createFailed")}: ${err instanceof Error ? err.message : t("unknownError")}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [createTerminal, sessionId, setActiveTerminal, renameTerminal]);
+    },
+    [createTerminal, sessionId, setActiveTerminal, renameTerminal, t],
+  );
 
   const handleAddClick = useCallback(() => {
     // Clean up any pending hover timers
-    if (addHoverTimer.current) { clearTimeout(addHoverTimer.current); addHoverTimer.current = null; }
-    if (addLeaveTimer.current) { clearTimeout(addLeaveTimer.current); addLeaveTimer.current = null; }
+    if (addHoverTimer.current) {
+      clearTimeout(addHoverTimer.current);
+      addHoverTimer.current = null;
+    }
+    if (addLeaveTimer.current) {
+      clearTimeout(addLeaveTimer.current);
+      addLeaveTimer.current = null;
+    }
     setShowAddMenu(false);
     createTerminalWithAction(terminalDefaultAction);
   }, [createTerminalWithAction, terminalDefaultAction]);
 
-  const handleMenuItemClick = useCallback((action: TerminalDefaultAction) => {
-    setShowAddMenu(false);
-    createTerminalWithAction(action);
-  }, [createTerminalWithAction]);
+  const handleMenuItemClick = useCallback(
+    (action: TerminalDefaultAction) => {
+      setShowAddMenu(false);
+      createTerminalWithAction(action);
+    },
+    [createTerminalWithAction],
+  );
 
-  const handlePin = useCallback((action: TerminalDefaultAction, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setTerminalDefaultAction(action);
-  }, [setTerminalDefaultAction]);
+  const handlePin = useCallback(
+    (action: TerminalDefaultAction, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setTerminalDefaultAction(action);
+    },
+    [setTerminalDefaultAction],
+  );
 
   // --- Tab actions ---
 
@@ -211,7 +245,9 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       await deleteTerminal.mutateAsync(terminalId);
       terminalCache.dispose(terminalId);
       if (activeTerminalId === terminalId) {
-        const remaining = terminals.filter((term) => term.terminalId !== terminalId && term.status !== "exited");
+        const remaining = terminals.filter(
+          (term) => term.terminalId !== terminalId && term.status !== "exited",
+        );
         setActiveTerminal(sessionId, remaining.length > 0 ? remaining[0].terminalId : null);
       }
     } catch {
@@ -230,13 +266,16 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     setMenu({ x: e.clientX, y: e.clientY, terminalId });
   };
 
-  const handleStartRename = useCallback((terminalId: string) => {
-    const terminal = terminals.find((term) => term.terminalId === terminalId);
-    if (!terminal) return;
-    setMenu(null);
-    setEditValue(terminal.name);
-    setEditingId(terminalId);
-  }, [terminals]);
+  const handleStartRename = useCallback(
+    (terminalId: string) => {
+      const terminal = terminals.find((term) => term.terminalId === terminalId);
+      if (!terminal) return;
+      setMenu(null);
+      setEditValue(terminal.name);
+      setEditingId(terminalId);
+    },
+    [terminals],
+  );
 
   const handleConfirmRename = useCallback(() => {
     if (!editingId) return;
@@ -269,18 +308,21 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     setDragActive(false);
   }, []);
 
-  const handleTabDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, terminalId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (terminalId === draggedIdRef.current) return;
-    const target = e.currentTarget;
-    const rect = target.getBoundingClientRect();
-    const midX = rect.left + rect.width / 2;
-    const nextPosition = e.clientX < midX ? "left" : "right";
-    // Only re-render when target or position actually changes
-    setDragOverTerminalId((prev) => (prev !== terminalId ? terminalId : prev));
-    setDragPosition((prev) => (prev !== nextPosition ? nextPosition : prev));
-  }, []);
+  const handleTabDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, terminalId: string) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (terminalId === draggedIdRef.current) return;
+      const target = e.currentTarget;
+      const rect = target.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const nextPosition = e.clientX < midX ? "left" : "right";
+      // Only re-render when target or position actually changes
+      setDragOverTerminalId((prev) => (prev !== terminalId ? terminalId : prev));
+      setDragPosition((prev) => (prev !== nextPosition ? nextPosition : prev));
+    },
+    [],
+  );
 
   const handleTabDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     // Only clear if actually leaving the tab (not entering a child)
@@ -314,7 +356,9 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
 
       // Update React Query cache (side effect outside state updater)
       const terminalMap = new Map(terminals.map((term) => [term.terminalId, term]));
-      const reordered = next.map((id) => terminalMap.get(id)).filter((term): term is NonNullable<typeof term> => term != null);
+      const reordered = next
+        .map((id) => terminalMap.get(id))
+        .filter((term): term is NonNullable<typeof term> => term != null);
       queryClient.setQueryData(queryKeys.terminals(sessionId), reordered);
 
       setDragOverTerminalId(null);
@@ -335,9 +379,18 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
       {/* Terminal tab bar */}
       <div
         className={`terminal-tab-bar ${dragActive ? "drag-active" : ""}`}
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-        onDrop={() => { setDragOverTerminalId(null); setDragActive(false); draggedIdRef.current = null; }}
-        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverTerminalId(null); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={() => {
+          setDragOverTerminalId(null);
+          setDragActive(false);
+          draggedIdRef.current = null;
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverTerminalId(null);
+        }}
       >
         {displayTerminals.map((term) => (
           <div
@@ -347,12 +400,20 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
               term.terminalId === activeTerminalId ? "terminal-tab-active" : "",
               term.status === "exited" ? "terminal-tab-exited" : "",
               draggedIdRef.current === term.terminalId ? "dragging" : "",
-              dragOverTerminalId === term.terminalId ? (dragPosition === "left" ? "drag-over-left" : "drag-over-right") : "",
-            ].filter(Boolean).join(" ")}
+              dragOverTerminalId === term.terminalId
+                ? dragPosition === "left"
+                  ? "drag-over-left"
+                  : "drag-over-right"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             draggable={true}
             onClick={() => handleTabClick(term.terminalId)}
             onContextMenu={(e) => handleContextMenu(e, term.terminalId)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleTabClick(term.terminalId); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleTabClick(term.terminalId);
+            }}
             onDragStart={() => handleDragStart(term.terminalId)}
             onDragEnd={handleDragEnd}
             onDragOver={(e) => handleTabDragOver(e, term.terminalId)}
@@ -364,9 +425,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             data-testid="terminal-tab"
             data-terminal-id={term.terminalId}
           >
-            <span className="terminal-tab-icon">
-              {term.status === "exited" ? "○" : "●"}
-            </span>
+            <span className="terminal-tab-icon">{term.status === "exited" ? "○" : "●"}</span>
             {editingId === term.terminalId ? (
               <input
                 ref={inputRef}
@@ -416,6 +475,14 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
                   key={item.key}
                   className={`terminal-add-dropdown-item ${isDefault(item.key) ? "terminal-add-dropdown-item-default" : ""}`}
                   onClick={() => handleMenuItemClick(item.key)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleMenuItemClick(item.key);
+                    }
+                  }}
+                  role="menuitem"
+                  tabIndex={0}
                 >
                   <span className="terminal-add-dropdown-icon">{item.icon}</span>
                   <span className="terminal-add-dropdown-label">{item.label}</span>
@@ -436,22 +503,24 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
 
       {/* Context menu (right-click on tab) */}
       {menu && (
-        <div
-          className="terminal-context-menu"
-          style={{ left: menu.x, top: menu.y }}
-        >
-          <div
+        <div className="terminal-context-menu" style={{ left: menu.x, top: menu.y }}>
+          <button
+            type="button"
             className="terminal-context-menu-item"
             onClick={() => handleStartRename(menu.terminalId)}
           >
             {t("rename")}
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             className="terminal-context-menu-item terminal-context-menu-item-danger"
-            onClick={() => { setMenu(null); handleCloseTerminal(menu.terminalId); }}
+            onClick={() => {
+              setMenu(null);
+              handleCloseTerminal(menu.terminalId);
+            }}
           >
             {t("closeTerminal")}
-          </div>
+          </button>
         </div>
       )}
 

@@ -1,21 +1,25 @@
 // @ts-nocheck
-import { spawn, type ChildProcess } from "node:child_process";
-import path from "node:path";
+import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  FOLLOWER_BACKOFF_MS,
+  FOLLOWER_RETRY_MAX,
+  LEADER_LOCK_TIMEOUT_MS,
+  SPAWN_JITTER_MS,
+} from "./constants.js";
 import { DaemonClient } from "./daemon-client.js";
 import {
-  readDaemonInfo,
-  isProcessAlive,
-  deleteDaemonInfo,
-  writeDaemonInfo,
-  DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_STARTUP_POLL_MS,
+  DAEMON_STARTUP_TIMEOUT_MS,
   FOLLOWER_STARTUP_TIMEOUT_MS,
+  deleteDaemonInfo,
+  isProcessAlive,
+  readDaemonInfo,
 } from "./daemon-discovery.js";
-import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
-import { FOLLOWER_BACKOFF_MS, FOLLOWER_RETRY_MAX, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MS } from "./constants.js";
 import { log } from "./logger.js";
+import { LockAcquisitionError, acquireLock } from "./os-file-lock.js";
 
 // ============================================================
 // Types
@@ -183,9 +187,8 @@ export class DaemonManager {
         "Follower: leader daemon did not become ready — re-entering EnsureRunning",
       );
       // 退避 (从 0 起, 每轮 ×2, 封顶 LEADER_LOCK_TIMEOUT_MS)
-      backoffMs = backoffMs === 0
-        ? FOLLOWER_BACKOFF_MS
-        : Math.min(backoffMs * 2, LEADER_LOCK_TIMEOUT_MS);
+      backoffMs =
+        backoffMs === 0 ? FOLLOWER_BACKOFF_MS : Math.min(backoffMs * 2, LEADER_LOCK_TIMEOUT_MS);
       await sleep(backoffMs);
       // 重新进入 Leader 选举 — 顶层入口会再次走 Phase 1 (重读 daemon.json
       // + TCP 探活), 然后 Phase 2 (抢锁). 这样:
@@ -200,9 +203,7 @@ export class DaemonManager {
     );
   }
 
-  private async spawnDaemonAsLeader(
-    onDone: () => void,
-  ): Promise<DaemonManagerResult> {
+  private async spawnDaemonAsLeader(onDone: () => void): Promise<DaemonManagerResult> {
     // Random jitter to reduce thundering herd if multiple instances
     // somehow pass the lock simultaneously
     const jitter = Math.random() * SPAWN_JITTER_MS;
@@ -371,9 +372,7 @@ export class DaemonManager {
       await sleep(STARTUP_POLL_MS);
     }
 
-    throw new Error(
-      `Daemon did not start within ${SELF_STARTUP_TIMEOUT_MS}ms`,
-    );
+    throw new Error(`Daemon did not start within ${SELF_STARTUP_TIMEOUT_MS}ms`);
   }
 }
 
@@ -418,5 +417,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function deleteDaemonInfoQuiet(): void {
-  try { deleteDaemonInfo(); } catch { /* ignore */ }
+  try {
+    deleteDaemonInfo();
+  } catch {
+    /* ignore */
+  }
 }

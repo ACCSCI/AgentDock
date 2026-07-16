@@ -26,7 +26,7 @@ export const DISPLAY_NAME_MAX_LENGTH = 128;
 export function sanitizeDisplayName(input: string | null | undefined): string {
   if (!input) return "";
   // 去控制字符 (\x00-\x1F + \x7F)
-  let cleaned = input.replace(/[\x00-\x1F\x7F]/g, "");
+  let cleaned = input.replace(/\p{Cc}/gu, "");
   // trim 首尾空白
   cleaned = cleaned.trim();
   // 长度截断

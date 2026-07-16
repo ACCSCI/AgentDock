@@ -1,16 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GitPullRequest, Plus, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchSessionTerminals, queryKeys, useActivateSession, useCreateSessionSSE, useDeleteSessionSSE, useProjects, useReassignPorts, useRenameSession, useReorderSessions, useRetryHook, useSetSessionUserStatus, useSyncProject } from "../lib/queries";
+import { GitPullRequest, Plus, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchSessionTerminals,
+  queryKeys,
+  useActivateSession,
+  useCreateSessionSSE,
+  useDeleteSessionSSE,
+  useProjects,
+  useReassignPorts,
+  useRenameSession,
+  useReorderSessions,
+  useRetryHook,
+  useSetSessionUserStatus,
+  useSyncProject,
+} from "../lib/queries";
 import type { SessionUserStatus } from "../lib/queries";
-import { useStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "../lib/store";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useStore } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { toast } from "../lib/toast";
-import { SessionCard } from "./SessionCard";
 import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
+import { SessionCard } from "./SessionCard";
 
 export function SessionSidebar() {
-  const { activeProjectId, activeSessionId, setActiveSession, sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useStore();
+  const {
+    activeProjectId,
+    activeSessionId,
+    setActiveSession,
+    sidebarCollapsed,
+    toggleSidebar,
+    sidebarWidth,
+    setSidebarWidth,
+  } = useStore();
 
   // Single-instance: use only useProjects (no v2 state)
   const { data: projects } = useProjects();
@@ -37,34 +58,40 @@ export function SessionSidebar() {
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
 
-  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
+  const onResizeStart = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const el = e.currentTarget;
+      el.setPointerCapture(e.pointerId);
 
-    const startX = e.clientX;
-    const startWidth = sidebarWidthRef.current;
+      const startX = e.clientX;
+      const startWidth = sidebarWidthRef.current;
 
-    const cleanup = () => {
-      el.removeEventListener("pointermove", onPointerMove);
-      el.removeEventListener("pointerup", cleanup);
-      el.removeEventListener("pointercancel", cleanup);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
+      const cleanup = () => {
+        el.removeEventListener("pointermove", onPointerMove);
+        el.removeEventListener("pointerup", cleanup);
+        el.removeEventListener("pointercancel", cleanup);
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+      };
 
-    const onPointerMove = (ev: PointerEvent) => {
-      const delta = ev.clientX - startX;
-      const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + delta));
-      setSidebarWidth(newWidth);
-    };
+      const onPointerMove = (ev: PointerEvent) => {
+        const delta = ev.clientX - startX;
+        const newWidth = Math.min(
+          SIDEBAR_MAX_WIDTH,
+          Math.max(SIDEBAR_MIN_WIDTH, startWidth + delta),
+        );
+        setSidebarWidth(newWidth);
+      };
 
-    el.addEventListener("pointermove", onPointerMove);
-    el.addEventListener("pointerup", cleanup);
-    el.addEventListener("pointercancel", cleanup);
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-  }, [setSidebarWidth]);
+      el.addEventListener("pointermove", onPointerMove);
+      el.addEventListener("pointerup", cleanup);
+      el.addEventListener("pointercancel", cleanup);
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "col-resize";
+    },
+    [setSidebarWidth],
+  );
 
   const activeProject = projects?.find((p) => p.id === activeProjectId);
   const sessions = activeProject?.sessions ?? [];
@@ -137,9 +164,15 @@ export function SessionSidebar() {
         return;
       }
       const target = (e.target as HTMLElement).closest("[data-session-id]") as HTMLElement | null;
-      if (!target) { setDragOverSessionId(null); return; }
+      if (!target) {
+        setDragOverSessionId(null);
+        return;
+      }
       const targetId = target.dataset.sessionId;
-      if (!targetId || targetId === draggedId) { setDragOverSessionId(null); return; }
+      if (!targetId || targetId === draggedId) {
+        setDragOverSessionId(null);
+        return;
+      }
 
       setLocalOrder((prevOrder) => {
         const order = prevOrder ?? visibleSessionIds;
@@ -148,7 +181,8 @@ export function SessionSidebar() {
         let insertAt = next.indexOf(targetId);
         if (dragPosition === "after") insertAt += 1;
         next.splice(insertAt, 0, draggedId);
-        reorderSessions.mutateAsync({ projectId: activeProject.id, sessionIds: next })
+        reorderSessions
+          .mutateAsync({ projectId: activeProject.id, sessionIds: next })
           .catch(() => setLocalOrder(null));
         return next;
       });
@@ -172,7 +206,9 @@ export function SessionSidebar() {
       console.error("SessionSidebar: activeProject is null");
       return;
     }
-    console.log(`SessionSidebar: creating session for project ${activeProject.id} (${activeProject.name})`);
+    console.log(
+      `SessionSidebar: creating session for project ${activeProject.id} (${activeProject.name})`,
+    );
     const now = Date.now();
     if (now - lastCreateAtRef.current < CREATE_COOLDOWN_MS) return;
     lastCreateAtRef.current = now;
@@ -305,102 +341,124 @@ export function SessionSidebar() {
   if (sidebarCollapsed) {
     return (
       <div className="session-sidebar session-sidebar-collapsed">
-        <button type="button" className="session-sidebar-expand-btn" onClick={toggleSidebar} title="展开 Session 侧栏">▶</button>
+        <button
+          type="button"
+          className="session-sidebar-expand-btn"
+          onClick={toggleSidebar}
+          title="展开 Session 侧栏"
+        >
+          ▶
+        </button>
       </div>
     );
   }
 
   return (
     <>
-    <div className="session-sidebar" style={{ width: sidebarWidth }} data-testid="session-sidebar">
-      <div className="session-sidebar-header">
-        <span className="session-sidebar-title">Sessions</span>
-        <button
-          type="button"
-          className="session-sidebar-rescan-btn"
-          onClick={handleRescanDisk}
-          disabled={rescan.isPending}
-          title="扫描磁盘 worktree"
-          data-testid="rescan-disk"
-        >
-          {rescan.isPending ? <span className="step-spinner" /> : <RefreshCw size={16} />}
-        </button>
-        <button
-          type="button"
-          className="session-sidebar-pr-btn"
-          onClick={handleOpenPullRequests}
-          disabled={prLoading}
-          title="查看 Pull Requests"
-          data-testid="open-pull-requests"
-        >
-          <GitPullRequest size={16} />
-        </button>
-        <button
-          type="button"
-          className="session-sidebar-new-btn"
-          onClick={handleNewSession}
-          disabled={createSession.isPending}
-          title="新建 Session"
-          data-testid="new-session"
-        >
-          {createSession.isPending ? <span className="step-spinner" /> : <Plus size={16} />}
-        </button>
-        <button type="button" className="session-sidebar-collapse-btn" onClick={toggleSidebar} title="收起侧栏">◀</button>
-      </div>
       <div
-        ref={listRef}
-        className={`session-list ${dragOverSessionId ? "drag-active" : ""}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        className="session-sidebar"
+        style={{ width: sidebarWidth }}
+        data-testid="session-sidebar"
       >
-        {sortedVisibleSessions.map((session) => (
-          <div
-            key={session.id}
-            data-session-id={session.id}
-            data-testid="session-card"
-            className={
-              dragOverSessionId === session.id
-                ? `session-card-wrapper ${dragPosition === "before" ? "drop-before" : "drop-after"}`
-                : "session-card-wrapper"
-            }
+        <div className="session-sidebar-header">
+          <span className="session-sidebar-title">Sessions</span>
+          <button
+            type="button"
+            className="session-sidebar-rescan-btn"
+            onClick={handleRescanDisk}
+            disabled={rescan.isPending}
+            title="扫描磁盘 worktree"
+            data-testid="rescan-disk"
           >
-            {dragOverSessionId === session.id && dragPosition === "before" && <div className="session-drop-indicator" />}
-            <SessionCard
-              session={session}
-              isActive={session.id === activeSessionId}
-              onSelect={setActiveSession}
-              onRequestDelete={handleRequestDelete}
-              onRename={handleRenameSession}
-              onOpenInExplorer={handleOpenInExplorer}
-              onOpenInTerminal={handleOpenInTerminal}
-              onReassignPorts={handleReassignPorts}
-              onRetryHooks={handleRetryHooks}
-              onSetUserStatus={handleSetUserStatus}
-              onActivate={handleActivate}
-              onHover={prefetchTerminals}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-            />
-            {dragOverSessionId === session.id && dragPosition === "after" && <div className="session-drop-indicator" />}
-          </div>
-        ))}
+            {rescan.isPending ? <span className="step-spinner" /> : <RefreshCw size={16} />}
+          </button>
+          <button
+            type="button"
+            className="session-sidebar-pr-btn"
+            onClick={handleOpenPullRequests}
+            disabled={prLoading}
+            title="查看 Pull Requests"
+            data-testid="open-pull-requests"
+          >
+            <GitPullRequest size={16} />
+          </button>
+          <button
+            type="button"
+            className="session-sidebar-new-btn"
+            onClick={handleNewSession}
+            disabled={createSession.isPending}
+            title="新建 Session"
+            data-testid="new-session"
+          >
+            {createSession.isPending ? <span className="step-spinner" /> : <Plus size={16} />}
+          </button>
+          <button
+            type="button"
+            className="session-sidebar-collapse-btn"
+            onClick={toggleSidebar}
+            title="收起侧栏"
+          >
+            ◀
+          </button>
+        </div>
+        <div
+          ref={listRef}
+          className={`session-list ${dragOverSessionId ? "drag-active" : ""}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {sortedVisibleSessions.map((session) => (
+            <div
+              key={session.id}
+              data-session-id={session.id}
+              data-testid="session-card"
+              className={
+                dragOverSessionId === session.id
+                  ? `session-card-wrapper ${dragPosition === "before" ? "drop-before" : "drop-after"}`
+                  : "session-card-wrapper"
+              }
+            >
+              {dragOverSessionId === session.id && dragPosition === "before" && (
+                <div className="session-drop-indicator" />
+              )}
+              <SessionCard
+                session={session}
+                isActive={session.id === activeSessionId}
+                onSelect={setActiveSession}
+                onRequestDelete={handleRequestDelete}
+                onRename={handleRenameSession}
+                onOpenInExplorer={handleOpenInExplorer}
+                onOpenInTerminal={handleOpenInTerminal}
+                onReassignPorts={handleReassignPorts}
+                onRetryHooks={handleRetryHooks}
+                onSetUserStatus={handleSetUserStatus}
+                onActivate={handleActivate}
+                onHover={prefetchTerminals}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              />
+              {dragOverSessionId === session.id && dragPosition === "after" && (
+                <div className="session-drop-indicator" />
+              )}
+            </div>
+          ))}
+        </div>
+        <div
+          ref={handleRef}
+          className="session-sidebar-resize-handle"
+          onPointerDown={onResizeStart}
+          title="拖拽调整宽度"
+        >
+          <span className="session-sidebar-resize-dots" />
+        </div>
       </div>
-      <div
-        ref={handleRef}
-        className="session-sidebar-resize-handle"
-        onPointerDown={onResizeStart}
-        title="拖拽调整宽度"
-      >
-        <span className="session-sidebar-resize-dots" />
-      </div>
-    </div>
-    <ConfirmDeleteModal
-      open={deletingSessionId !== null}
-      sessionName={sessions.find((s) => s.id === deletingSessionId)?.name ?? ""}
-      onConfirm={() => deletingSessionId && handleDeleteSession(deletingSessionId)}
-      onCancel={() => setDeletingSessionId(null)}
-    />
+      <ConfirmDeleteModal
+        open={deletingSessionId !== null}
+        sessionName={sessions.find((s) => s.id === deletingSessionId)?.name ?? ""}
+        onConfirm={() => deletingSessionId && handleDeleteSession(deletingSessionId)}
+        onCancel={() => setDeletingSessionId(null)}
+      />
     </>
   );
 }

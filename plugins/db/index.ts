@@ -143,7 +143,9 @@ const MIGRATIONS: Array<(sqlite: DatabaseSync) => void> = [
       DROP TABLE todos;
       ALTER TABLE todos_new RENAME TO todos;
 
-      DROP TABLE IF EXISTS projects;
+      -- Keep the legacy projects table until its rows have been copied into
+      -- the global projects DB. Dropping it here made that one-time migration
+      -- impossible and permanently lost project registrations.
       PRAGMA foreign_keys = ON;
     `);
   },
@@ -193,9 +195,7 @@ function addColumnIfMissing(
  * row with a single column whose name matches the pragma.
  */
 function getUserVersion(sqlite: DatabaseSync): number {
-  const row = sqlite.prepare("PRAGMA user_version").get() as
-    | { user_version: number }
-    | undefined;
+  const row = sqlite.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   return row?.user_version ?? 0;
 }
 
@@ -214,9 +214,11 @@ export function setDbBasePath(basePath: string): void {
   dbBasePath = basePath;
 }
 
-export function getDbPath(_projectPath?: string): string {
-  // Single-DB architecture: always use the install directory
-  const base = dbBasePath ?? process.cwd();
+export function getDbPath(projectPath?: string): string {
+  // Electron sets dbBasePath once, preserving the production single-DB
+  // architecture. Tests and standalone callers that have no Electron app can
+  // pass an explicit isolated base path instead of silently sharing cwd/data.
+  const base = dbBasePath ?? projectPath ?? process.cwd();
   return path.join(base, DB_DIR, DB_FILE);
 }
 
@@ -229,11 +231,11 @@ export function getDbPath(_projectPath?: string): string {
  * teardown. The legacy `createDb(projectPath)` helper below returns just
  * the Drizzle wrapper for backward compatibility with the unit tests.
  */
-export function openDb(_projectPath?: string): {
+export function openDb(projectPath?: string): {
   db: ReturnType<typeof drizzle<typeof schema>>;
   sqlite: DatabaseSync;
 } {
-  const dbPath = getDbPath();
+  const dbPath = getDbPath(projectPath);
   const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
@@ -311,9 +313,7 @@ export function getActiveProjectPath(): string | null {
 
 export function requireActiveDb(): DrizzleDb {
   if (!activeDb) {
-    throw new Error(
-      "DB not initialized: call db:init with a projectPath first",
-    );
+    throw new Error("DB not initialized: call db:init with a projectPath first");
   }
   return activeDb;
 }

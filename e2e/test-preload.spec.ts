@@ -1,7 +1,7 @@
-import { test as base, expect, _electron as electron } from "@playwright/test";
-import { join } from "node:path";
-import { existsSync, readdirSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test as base, _electron as electron } from "@playwright/test";
 
 const ROOT = process.cwd();
 
@@ -28,14 +28,16 @@ test_("debug: what is window.api", async () => {
 
   // Print what's in window
   const windowKeys = await window.evaluate(() => {
-    return Object.keys(window).filter(k => k.includes('api') || k === 'api' || k === 'electron');
+    return Object.keys(window).filter((k) => k.includes("api") || k === "api" || k === "electron");
   });
   console.log("Window keys with 'api':", windowKeys);
 
   const apiType = await window.evaluate(() => typeof (window as { api?: unknown }).api);
   console.log("typeof window.api:", apiType);
 
-  const electronType = await window.evaluate(() => typeof (window as { electron?: unknown }).electron);
+  const electronType = await window.evaluate(
+    () => typeof (window as { electron?: unknown }).electron,
+  );
   console.log("typeof window.electron:", electronType);
 
   await app.close();

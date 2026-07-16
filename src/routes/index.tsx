@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { DirBrowserModal } from "../components/DirBrowserModal";
 import { GitInitConfirmModal } from "../components/GitInitConfirmModal";
-import { useOpenProject } from "../hooks/useOpenProject";
 import { IconSidebar } from "../components/IconSidebar";
+import { useOpenProject } from "../hooks/useOpenProject";
 
 export const Route = createFileRoute("/")({
   component: HomeComponent,
 });
 
 function HomeComponent() {
+  const { t } = useTranslation("home");
   const {
     openProject,
     modalOpen,
@@ -32,7 +34,7 @@ function HomeComponent() {
             onClick={openProject}
             data-testid="home-open-project"
           >
-            打开项目
+            {t("openProject")}
           </button>
           <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
           <GitInitConfirmModal

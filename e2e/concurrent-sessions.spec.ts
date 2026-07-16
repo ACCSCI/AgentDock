@@ -8,20 +8,19 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TerminalPage } from "./pages/terminal";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -37,7 +36,6 @@ test.describe("concurrent sessions", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -49,7 +47,7 @@ test.describe("concurrent sessions", () => {
     const sidebar = new SidebarPage(window);
     const terminalPage = new TerminalPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     // 1. Open project.
     await home.openProject(projectPath);
@@ -67,15 +65,15 @@ test.describe("concurrent sessions", () => {
     await sidebar.clickNewSession();
 
     // 3. Wait for all 3 cards to appear.
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 45_000 })
-      .toBe(3);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 45_000 }).toBe(3);
 
     // 4. Wait for ports to appear on all cards (best-effort).
     const allCards = window.locator(`[data-testid="${TID.sessionCard}"]`);
     for (let i = 0; i < 3; i++) {
       const card = allCards.nth(i);
-      await expect(card.locator(".session-ports")).toBeVisible({ timeout: 30_000 }).catch(() => {});
+      await expect(card.locator(".session-ports"))
+        .toBeVisible({ timeout: 30_000 })
+        .catch(() => {});
     }
 
     // 5. Collect session IDs and verify uniqueness.
@@ -107,9 +105,7 @@ test.describe("concurrent sessions", () => {
     }
 
     // 8. All cards should be gone.
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 45_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 45_000 }).toBe(0);
 
     // 9. No renderer errors.
     expect(pageErrors).toHaveLength(0);
@@ -117,10 +113,11 @@ test.describe("concurrent sessions", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

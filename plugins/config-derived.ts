@@ -15,10 +15,7 @@ export function branchForSession(sessionId: string): string {
 }
 
 /** Worktree path derived from sessionId + projectRoot — §4.1 derived fields. */
-export function worktreePathFor(
-  projectRoot: string,
-  sessionId: string,
-): string {
+export function worktreePathFor(projectRoot: string, sessionId: string): string {
   if (!SESSION_ID_RE.test(sessionId)) {
     throw new Error(`Invalid sessionId: ${sessionId}`);
   }

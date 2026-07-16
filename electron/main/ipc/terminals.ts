@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 /**
  * Terminal IPC handlers.
  *
@@ -7,12 +8,11 @@
  */
 import { MessageChannelMain } from "electron";
 import { ipcMain } from "electron";
-import { eq } from "drizzle-orm";
-import { IPC_CHANNELS } from "../../shared/api-types.js";
-import { terminalManager } from "../../../plugins/terminal-manager.js";
 import { getActiveDb } from "../../../plugins/db/index.js";
 import * as schema from "../../../plugins/db/schema.js";
 import { log } from "../../../plugins/logger.js";
+import { terminalManager } from "../../../plugins/terminal-manager.js";
+import { IPC_CHANNELS } from "../../shared/api-types.js";
 
 /**
  * Look up a session's `worktreePath` from the active DB. node-pty needs a
@@ -38,30 +38,33 @@ function resolveSessionWorktree(sessionId: string): string {
 }
 
 export function registerTerminals(): void {
-  ipcMain.handle(IPC_CHANNELS["terminals:create"], async (_e, params: { sessionId: string; shell?: string }) => {
-    if (!params?.sessionId) {
-      throw new Error("sessionId required");
-    }
-    const { sessionId, shell } = params;
-    const worktreePath = resolveSessionWorktree(sessionId);
-    // Use a default cols/rows; the renderer can resize via the message port.
-    const terminal = await terminalManager.create({
-      sessionId,
-      worktreePath,
-      shell: shell ?? "default",
-      cols: 80,
-      rows: 24,
-    });
-    return {
-      terminalId: terminal.terminalId,
-      sessionId: terminal.sessionId,
-      shell: terminal.shell,
-      name: terminal.name,
-      status: terminal.status,
-      pid: terminal.pid,
-      createdAt: new Date().toISOString(),
-    };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS["terminals:create"],
+    async (_e, params: { sessionId: string; shell?: string }) => {
+      if (!params?.sessionId) {
+        throw new Error("sessionId required");
+      }
+      const { sessionId, shell } = params;
+      const worktreePath = resolveSessionWorktree(sessionId);
+      // Use a default cols/rows; the renderer can resize via the message port.
+      const terminal = await terminalManager.create({
+        sessionId,
+        worktreePath,
+        shell: shell ?? "default",
+        cols: 80,
+        rows: 24,
+      });
+      return {
+        terminalId: terminal.terminalId,
+        sessionId: terminal.sessionId,
+        shell: terminal.shell,
+        name: terminal.name,
+        status: terminal.status,
+        pid: terminal.pid,
+        createdAt: new Date().toISOString(),
+      };
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS["terminals:list"], (_e, sessionId: string) => {
     if (!sessionId) {
@@ -79,13 +82,16 @@ export function registerTerminals(): void {
     }));
   });
 
-  ipcMain.handle(IPC_CHANNELS["terminals:rename"], (_e, params: { terminalId: string; name: string }) => {
-    if (!params?.terminalId || !params?.name) {
-      throw new Error("terminalId and name required");
-    }
-    terminalManager.rename(params.terminalId, params.name);
-    return { success: true };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS["terminals:rename"],
+    (_e, params: { terminalId: string; name: string }) => {
+      if (!params?.terminalId || !params?.name) {
+        throw new Error("terminalId and name required");
+      }
+      terminalManager.rename(params.terminalId, params.name);
+      return { success: true };
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS["terminals:delete"], async (_e, terminalId: string) => {
     if (!terminalId) {
@@ -95,13 +101,16 @@ export function registerTerminals(): void {
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS["terminals:write"], (_e, params: { terminalId: string; data: string }) => {
-    if (!params?.terminalId || typeof params?.data !== "string") {
-      throw new Error("terminalId and data required");
-    }
-    terminalManager.write(params.terminalId, params.data);
-    return { success: true };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS["terminals:write"],
+    (_e, params: { terminalId: string; data: string }) => {
+      if (!params?.terminalId || typeof params?.data !== "string") {
+        throw new Error("terminalId and data required");
+      }
+      terminalManager.write(params.terminalId, params.data);
+      return { success: true };
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS["terminals:open"], (event, terminalId: string) => {
     if (!terminalId) {

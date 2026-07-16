@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * syncProject orphan cleanup unit tests.
  *
@@ -6,10 +9,7 @@
  * 2. `git worktree prune` cleans stale refs in .git/worktrees/.
  * 3. SyncReport is returned correctly.
  */
-import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { beforeEach, describe, expect, it } from "vitest";
 
 describe("git worktree prune cleans stale refs", () => {
   let project: string;
@@ -19,10 +19,10 @@ describe("git worktree prune cleans stale refs", () => {
     project = join(root, "project");
     mkdirSync(project);
     execSync("git init -q -b main", { cwd: project, stdio: "pipe" });
-    execSync(
-      "git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init",
-      { cwd: project, stdio: "pipe" },
-    );
+    execSync("git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init", {
+      cwd: project,
+      stdio: "pipe",
+    });
     mkdirSync(join(project, ".agentdock", "worktrees"), { recursive: true });
   });
 

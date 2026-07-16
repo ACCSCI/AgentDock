@@ -1,4 +1,4 @@
-import type { Page, Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { TID } from "./testids";
 
 /**
@@ -41,9 +41,7 @@ export class HomePage {
     await this.openProjectButton.click();
     await this.modal.waitFor({ state: "visible" });
 
-    const segments = absolutePath
-      .split(/[\\/]/)
-      .filter((s) => s.length > 0 && s !== ".");
+    const segments = absolutePath.split(/[\\/]/).filter((s) => s.length > 0 && s !== ".");
     if (segments.length === 0) throw new Error(`Empty path: ${absolutePath}`);
 
     // On Windows the first segment is the drive letter ("C:"); the
@@ -121,9 +119,7 @@ export class HomePage {
    */
   async navigateModalTo(absolutePath: string): Promise<void> {
     await this.modal.waitFor({ state: "visible" });
-    const segments = absolutePath
-      .split(/[\\/]/)
-      .filter((s) => s.length > 0 && s !== ".");
+    const segments = absolutePath.split(/[\\/]/).filter((s) => s.length > 0 && s !== ".");
     if (segments.length === 0) throw new Error(`Empty path: ${absolutePath}`);
 
     if (process.platform === "win32" && /^[A-Za-z]:$/.test(segments[0]!)) {
@@ -165,7 +161,11 @@ export class HomePage {
     // is the row (data-testid="dir-entry").
     return this.page
       .locator(`[data-testid="${TID.dirEntry}"]`)
-      .filter({ has: this.page.locator(".dir-entry-name", { hasText: new RegExp(`^${escapeRegex(name)}$`) }) })
+      .filter({
+        has: this.page.locator(".dir-entry-name", {
+          hasText: new RegExp(`^${escapeRegex(name)}$`),
+        }),
+      })
       .first();
   }
 }
