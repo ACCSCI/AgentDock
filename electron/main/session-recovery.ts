@@ -7,6 +7,7 @@ import type { SessionManager } from "./session-manager.js";
 export interface SessionRecoveryResult {
   restored: number;
   skipped: number;
+  staleCreatingSessionIds: string[];
 }
 
 function parsePersistedPorts(raw: string | null): SessionPorts | null {
@@ -44,10 +45,16 @@ export function restorePersistedSessions(
   const projectPaths = new Map(projectRows.map((project) => [project.id, project.path]));
   let restored = 0;
   let skipped = 0;
+  const staleCreatingSessionIds: string[] = [];
 
   for (const row of sessionRows) {
     const projectPath = projectPaths.get(row.projectId);
     const ports = parsePersistedPorts(row.ports);
+    if (row.status === "creating" && !ports) {
+      staleCreatingSessionIds.push(row.id);
+      skipped++;
+      continue;
+    }
     if (!projectPath || !ports || !pathExists(row.worktreePath)) {
       skipped++;
       continue;
@@ -71,5 +78,5 @@ export function restorePersistedSessions(
     }
   }
 
-  return { restored, skipped };
+  return { restored, skipped, staleCreatingSessionIds };
 }

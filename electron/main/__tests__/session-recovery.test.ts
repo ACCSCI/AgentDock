@@ -36,7 +36,7 @@ describe("restorePersistedSessions", () => {
       () => true,
     );
 
-    expect(result).toEqual({ restored: 1, skipped: 0 });
+    expect(result).toEqual({ restored: 1, skipped: 0, staleCreatingSessionIds: [] });
     expect(manager.getSession("persisted")).not.toBeNull();
     const fresh = await manager.createSession({
       sessionId: "fresh",
@@ -63,6 +63,25 @@ describe("restorePersistedSessions", () => {
 
     expect(
       restorePersistedSessions(rows, [{ id: "project", path: "C:/project" }], manager, () => false),
-    ).toEqual({ restored: 0, skipped: 1 });
+    ).toEqual({ restored: 0, skipped: 1, staleCreatingSessionIds: [] });
+  });
+
+  it("reports interrupted creating sessions without committed ports for cleanup", () => {
+    const pool = createPortPool({ start: 35000, end: 35009 });
+    const manager = createSessionManager(pool);
+    const row = {
+      id: "interrupted",
+      projectId: "project",
+      name: "Interrupted",
+      worktreePath: "C:/project/.agentdock/worktrees/interrupted",
+      ports: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+    };
+
+    expect(
+      restorePersistedSessions([row], [{ id: "project", path: "C:/project" }], manager, () => true),
+    ).toEqual({ restored: 0, skipped: 1, staleCreatingSessionIds: ["interrupted"] });
+    expect(manager.getSession("interrupted")).toBeNull();
   });
 });

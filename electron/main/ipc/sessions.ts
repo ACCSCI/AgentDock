@@ -616,6 +616,10 @@ export function registerSessions(deps: SessionsDeps): void {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
+    const projectPath = deps.getProjectPath();
+    if (!projectPath) {
+      throw new Error("project not initialized");
+    }
 
     const previousPorts = sessionManager.getSession(sessionId)?.ports;
     try {
@@ -626,7 +630,7 @@ export function registerSessions(deps: SessionsDeps): void {
           .where(eq(schema.sessions.id, sessionId))
           .run();
         if (existsSync(session.worktreePath)) {
-          writePortsToEnv(session.worktreePath, ports);
+          writePortsToEnv(session.worktreePath, ports, projectPath);
         }
       } catch (persistError) {
         if (previousPorts) {
@@ -636,7 +640,7 @@ export function registerSessions(deps: SessionsDeps): void {
             .where(eq(schema.sessions.id, sessionId))
             .run();
           if (existsSync(session.worktreePath)) {
-            writePortsToEnv(session.worktreePath, previousPorts);
+            writePortsToEnv(session.worktreePath, previousPorts, projectPath);
           }
         }
         throw persistError;

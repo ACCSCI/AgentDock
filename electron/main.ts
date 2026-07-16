@@ -1,6 +1,7 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 /**
  * Electron Main Process Entry — Single-Instance Architecture
  *
@@ -186,6 +187,13 @@ async function bootstrap() {
         persistedProjects,
         sessionManager,
       );
+      for (const sessionId of recovery.staleCreatingSessionIds) {
+        persistedDb.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+        log.warn(
+          { sessionId },
+          "removed interrupted creating session without committed ports during recovery",
+        );
+      }
       log.info(recovery, "persisted session ownership restored");
     } finally {
       sqlite.close();

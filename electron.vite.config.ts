@@ -122,7 +122,7 @@ export default defineConfig({
     server: {
       port: (() => {
         const p = Number(process.env.FRONTEND_PORT ?? "5200");
-        if (!p || p < 1 || p > 65535) {
+        if (!Number.isInteger(p) || p < 1 || p > 65535) {
           throw new Error("FRONTEND_PORT must be an integer between 1 and 65535");
         }
         return p;
