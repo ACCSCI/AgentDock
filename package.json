@@ -12,7 +12,7 @@
     "build": "tsc -b && electron-vite build",
     "typecheck": "tsc -b --noEmit",
     "start": "cross-env NODE_OPTIONS=--experimental-sqlite electron-vite preview",
-    "dist:win": "electron-vite build && electron-builder --win --x64 --config electron-builder.yml",
+    "dist:win": "electron-vite build && electron-builder --win --x64 --config electron-builder.yml --publish never",
     "pack": "electron-vite build && electron-builder --win --x64 --config electron-builder.yml --publish never",
     "dist:win:publish": "electron-vite build && electron-builder --win --x64 --config electron-builder.yml --publish always",
     "bump": "bun run scripts/bump-version.ts",
