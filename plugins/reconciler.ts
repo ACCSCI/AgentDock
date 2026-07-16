@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 // @ts-nocheck
 /**
  * Reconciler — 三表对账 (新架构 §4.3, C1-C5 残缺态分类).
@@ -35,16 +36,10 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
-import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { log } from "./logger.js";
-import {
-  HEARTBEAT_TIMEOUT_MS,
-  LEASE_TTL_MS,
-  RECOVERING_HARD_MAX_MS,
-} from "./constants.js";
+import { HEARTBEAT_TIMEOUT_MS, LEASE_TTL_MS, RECOVERING_HARD_MAX_MS } from "./constants.js";
 import type { DaemonStateV2 } from "./daemon-state-v2.js";
+import { log } from "./logger.js";
 
 const execFileAsync = promisify(execFile) as (
   cmd: string,
@@ -187,7 +182,14 @@ export function createReconciler(deps: ReconcileDeps): Reconciler {
     for (const s of deps.stateV2.listSessions()) {
       if (s.status === "creating") {
         stats.creatingChecked++;
-        const action = await classifyCreating(s.sessionId, s.projectRoot, s.leaseExpiresAt, deps.stateV2, exists, read);
+        const action = await classifyCreating(
+          s.sessionId,
+          s.projectRoot,
+          s.leaseExpiresAt,
+          deps.stateV2,
+          exists,
+          read,
+        );
         await dispatchAction(action, deps);
         actions.push(action);
       } else if (s.status === "deleting") {
@@ -368,7 +370,10 @@ async function dispatchAction(action: ReconcileAction, deps: ReconcileDeps): Pro
       deps.emitOrphan?.(action);
       return;
     case "C1-rollback":
-      log.info({ sessionId: action.sessionId, reason: action.reason }, "C1 rollback (failed commit point)");
+      log.info(
+        { sessionId: action.sessionId, reason: action.reason },
+        "C1 rollback (failed commit point)",
+      );
       try {
         await deps.rollbackCreate?.(action.sessionId);
       } catch (err) {
@@ -384,7 +389,10 @@ async function dispatchAction(action: ReconcileAction, deps: ReconcileDeps): Pro
       }
       return;
     case "C3-orphan":
-      log.info({ sessionId: action.sessionId, projectRoot: action.projectRoot }, "C3 active session has no worktree");
+      log.info(
+        { sessionId: action.sessionId, projectRoot: action.projectRoot },
+        "C3 active session has no worktree",
+      );
       deps.emitOrphan?.(action);
       return;
     case "C4-orphan-dir":

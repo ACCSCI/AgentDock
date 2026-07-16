@@ -130,10 +130,14 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
       // 1. Use handle64 (Sysinternals) if available — finds exact PIDs with
       //    open handles in the target dir. Preferred because it's precise.
       try {
-        const { stdout } = await execFileAsync("handle64", ["-accepteula", "-nobanner", "-p", normalized], {
-          encoding: "utf-8",
-          timeout: 5000,
-        });
+        const { stdout } = await execFileAsync(
+          "handle64",
+          ["-accepteula", "-nobanner", "-p", normalized],
+          {
+            encoding: "utf-8",
+            timeout: 5000,
+          },
+        );
         const pids = new Set<string>();
         for (const line of stdout.split("\n")) {
           const m = line.match(/pid:\s*(\d+)/i);
@@ -153,16 +157,24 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
       //    the target dir (from hook child processes).
       try {
         const escapedPath = normalized.replace(/\\/g, "\\\\");
-        const { stdout } = await execFileAsync("wmic", [
-          "process", "where",
-          `CommandLine like '%${escapedPath}%'`,
-          "get", "ProcessId", "/format:list",
-        ], { encoding: "utf-8", timeout: 5000 });
+        const { stdout } = await execFileAsync(
+          "wmic",
+          [
+            "process",
+            "where",
+            `CommandLine like '%${escapedPath}%'`,
+            "get",
+            "ProcessId",
+            "/format:list",
+          ],
+          { encoding: "utf-8", timeout: 5000 },
+        );
         for (const line of stdout.split("\n")) {
           const m = line.match(/ProcessId=(\d+)/);
           if (m) {
             await execFileAsync("taskkill", ["/F", "/PID", m[1]], {
-              encoding: "utf-8", timeout: 5000,
+              encoding: "utf-8",
+              timeout: 5000,
             }).catch(() => {});
           }
         }
@@ -174,10 +186,21 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else {
       // Unix: lsof to find PIDs with open files under the dir, then SIGKILL.
-      const { stdout } = await execFileAsync("sh", ["-c", `lsof -t +D "${normalized}" 2>/dev/null || true`], {
-        encoding: "utf-8",
-      });
-      const pids = [...new Set(stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
+      const { stdout } = await execFileAsync(
+        "sh",
+        ["-c", `lsof -t +D "${normalized}" 2>/dev/null || true`],
+        {
+          encoding: "utf-8",
+        },
+      );
+      const pids = [
+        ...new Set(
+          stdout
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean),
+        ),
+      ];
       for (const pid of pids) {
         try {
           process.kill(Number(pid), "SIGKILL");
@@ -191,7 +214,10 @@ export async function killProcessesUnderPath(dirPath: string): Promise<void> {
   }
 }
 
-export async function isRegisteredWorktree(projectPath: string, worktreePath: string): Promise<boolean> {
+export async function isRegisteredWorktree(
+  projectPath: string,
+  worktreePath: string,
+): Promise<boolean> {
   try {
     const { stdout } = await execAsync("git worktree list --porcelain", {
       cwd: projectPath,
@@ -245,21 +271,24 @@ export function createWorktree(
   return { worktreePath, branch };
 }
 
-let _rimraf: ((p: string) => Promise<void>) | null = null;
-const _rmFallback = (p: string) => rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+let _rimraf: ((p: string) => Promise<unknown>) | null = null;
+const _rmFallback = (p: string) =>
+  rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 export async function rimrafOrFallback(dirPath: string): Promise<void> {
   if (!_rimraf) {
     try {
-      const mod = await import("rimraf") as any;
+      const mod = (await import("rimraf")) as {
+        rimraf?: (path: string) => Promise<unknown>;
+        default?: (path: string) => Promise<unknown>;
+      };
       const candidate = mod.rimraf ?? mod.default ?? null;
-      _rimraf = (typeof candidate === "function" && candidate.length <= 2)
-        ? candidate
-        : _rmFallback;
+      _rimraf = typeof candidate === "function" && candidate.length <= 2 ? candidate : _rmFallback;
     } catch {
       _rimraf = _rmFallback;
     }
   }
-  await _rimraf(dirPath);
+  const remove = _rimraf ?? _rmFallback;
+  await remove(dirPath);
 }
 
 export async function removeWorktree(
@@ -269,11 +298,9 @@ export async function removeWorktree(
 ): Promise<{ removed: string }> {
   // Accept the legacy positional-boolean form so older callers
   // (`removeWorktree(p, id, true)`) keep working. Internally normalize.
-  const opts =
-    typeof options === "boolean" ? { force: options } : options;
+  const opts = typeof options === "boolean" ? { force: options } : options;
   const force = opts.force ?? false;
-  const branchToDelete =
-    opts.currentBranch ?? `agentdock/${sessionId}`;
+  const branchToDelete = opts.currentBranch ?? `agentdock/${sessionId}`;
 
   validateSessionId(sessionId);
   validateBranchName(branchToDelete);
@@ -288,7 +315,9 @@ export async function removeWorktree(
   if (!force) {
     try {
       const status = execSync("git status --porcelain", {
-        cwd: worktreePath, encoding: "utf-8", stdio: "pipe",
+        cwd: worktreePath,
+        encoding: "utf-8",
+        stdio: "pipe",
       });
       if (status.trim().length > 0) {
         throw new Error("Worktree has uncommitted changes. Use force=true to override.");
@@ -316,7 +345,9 @@ export async function removeWorktree(
   if (force && isRegistered && existsSync(path.join(worktreePath, ".git"))) {
     try {
       await execAsync("git checkout .", {
-        cwd: worktreePath, encoding: "utf-8", stdio: "pipe", timeout: 15_000,
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 15_000,
       });
     } catch {
       // Non-fatal: rimraf will handle whatever checkout couldn't revert.
@@ -332,7 +363,9 @@ export async function removeWorktree(
     // have been discarded via `git checkout .` above.
     try {
       await execAsync(`git worktree remove "${worktreePath}"`, {
-        cwd: projectPath, encoding: "utf-8", timeout: 15_000,
+        cwd: projectPath,
+        encoding: "utf-8",
+        timeout: 15_000,
       });
     } catch {
       // Fallback: force directory deletion below.
@@ -351,9 +384,21 @@ export async function removeWorktree(
   // First prune stale git worktree registrations so git doesn't think the
   // branch is still checked out by a phantom worktree.
   if (isRegistered) {
-    try { await execAsync("git worktree prune", { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
+    try {
+      await execAsync("git worktree prune", {
+        cwd: projectPath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      });
+    } catch {}
   }
-  try { await execAsync(`git branch -D "${branchToDelete}"`, { cwd: projectPath, encoding: "utf-8", timeout: 10_000 }); } catch {}
+  try {
+    await execAsync(`git branch -D "${branchToDelete}"`, {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 10_000,
+    });
+  } catch {}
 
   return { removed: worktreePath };
 }

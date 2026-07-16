@@ -3,17 +3,17 @@
  * displayName isolation E2E — §11.4 script #7.
  *
  * Verifies that a Unicode displayName is correctly round-tripped through
- * the v2 daemon API without leaking into the git branch name:
+ * the main-process lifecycle without leaking into the git branch name:
  *
  *   1. Create a session via the full UI flow with displayName "我的中文名"
- *   2. Assert the daemon v2 state stores the displayName correctly
+ *   2. Assert persisted session state stores the displayName correctly
  *   3. Assert the branch is "agentdock/<sessionId>" (not derived from displayName)
  *   4. Assert the sidebar renders the display name (session.name)
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import {
   awaitSessionComplete,
   createProject,
@@ -27,7 +27,17 @@ function prepareGitRepo(dir: string): void {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   execFileSync(
     "git",
-    ["-c", "user.email=e2e@local", "-c", "user.name=E2E", "commit", "--allow-empty", "-q", "-m", "init"],
+    [
+      "-c",
+      "user.email=e2e@local",
+      "-c",
+      "user.name=E2E",
+      "commit",
+      "--allow-empty",
+      "-q",
+      "-m",
+      "init",
+    ],
     { cwd: dir },
   );
 }
@@ -55,7 +65,7 @@ test.describe("displayName isolation (§11.4 #7)", () => {
     // here — that flow uses db:projects:create internally and asserts on
     // the post-navigation state, which adds a flaky dependency on the
     // SessionSidebar being expanded. The displayName-isolation concern
-    // is purely about the daemon + git round-trip, not the UI.
+    // is purely about the lifecycle + git round-trip, not the UI.
     await initDb(window, projectPath);
     const project = await createProject(window, {
       name: "display-name-project",
@@ -81,18 +91,17 @@ test.describe("displayName isolation (§11.4 #7)", () => {
     //    session — its `name` is the displayName we set.
     const projects = await listProjects(window);
     expect(projects).toHaveLength(1);
-    expect(projects[0]!.sessions).toHaveLength(1);
-    expect(projects[0]!.sessions[0]!.name).toBe(displayName);
+    expect(projects[0]?.sessions).toHaveLength(1);
+    expect(projects[0]?.sessions[0]?.name).toBe(displayName);
 
     // 3. Verify the branch is "agentdock/<sessionId>" — NOT derived from
     //    the displayName. This is the critical isolation assertion: no
     //    matter how exotic the displayName is, the branch stays ASCII-safe.
     const expectedBranch = `agentdock/${sessionId}`;
-    const gitBranches = execFileSync(
-      "git",
-      ["branch", "--list", "agentdock/*"],
-      { cwd: projectPath, encoding: "utf-8" },
-    );
+    const gitBranches = execFileSync("git", ["branch", "--list", "agentdock/*"], {
+      cwd: projectPath,
+      encoding: "utf-8",
+    });
     expect(gitBranches).toContain(expectedBranch);
     // Must NOT contain the displayName as a branch segment.
     expect(gitBranches).not.toContain("我的中文名");

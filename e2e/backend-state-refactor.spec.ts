@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * E2E Tests: Backend State Refactor Verification
  *
@@ -17,12 +20,9 @@
  * - Most tests FAIL, demonstrating the gaps
  * - Some tests PASS because the frontend compensation logic works
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
-import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 // ============================================================
 // Test project setup/teardown
@@ -35,11 +35,11 @@ function createTempProject(name: string, slowHook = false): string {
   }
   mkdirSync(projectPath, { recursive: true });
   execSync("git init", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.email \"test@test.com\"", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.name \"Test\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.name "Test"', { cwd: projectPath, stdio: "ignore" });
   writeFileSync(join(projectPath, "README.md"), "# Test Project");
   execSync("git add .", { cwd: projectPath, stdio: "ignore" });
-  execSync("git commit -m \"init\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git commit -m "init"', { cwd: projectPath, stdio: "ignore" });
 
   // slowHook: add slow hooks to make lifecycle observable
   // Use powershell Start-Sleep for delay
@@ -68,7 +68,9 @@ function cleanupTempProject(projectPath: string): void {
     if (existsSync(projectPath)) {
       rmSync(projectPath, { recursive: true, force: true });
     }
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function cleanupDbProject(window: any, projectPath: string): Promise<void> {
@@ -83,7 +85,9 @@ async function cleanupDbProject(window: any, projectPath: string): Promise<void>
         }, project.id);
       }
     }
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ============================================================
@@ -103,9 +107,7 @@ test.describe("Backend state refactor — session status", () => {
     await cleanupDbProject(window, projectPath);
   });
 
-  test("PASSING: backend returns status='creating' for in-flight session", async ({
-    window,
-  }) => {
+  test("PASSING: backend returns status='creating' for in-flight session", async ({ window }) => {
     // Verifies backend persists "creating" status immediately after IPC call.
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
@@ -264,9 +266,7 @@ test.describe("Backend state refactor — background hooks", () => {
     await cleanupDbProject(window, projectPath);
   });
 
-  test("PASSING: backend pushes background hook status when hook runs", async ({
-    window,
-  }) => {
+  test("PASSING: backend pushes background hook status when hook runs", async ({ window }) => {
     // Verifies backend persists backgroundHookStatus when afterCreateSession hook runs.
     // With slow hook (5s), we can check status while hook is running.
     const home = new HomePage(window);
@@ -314,9 +314,7 @@ test.describe("Backend state refactor — deletion progress", () => {
     await cleanupDbProject(window, projectPath);
   });
 
-  test("PASSING: backend returns status='deleting' during deletion", async ({
-    window,
-  }) => {
+  test("PASSING: backend returns status='deleting' during deletion", async ({ window }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
@@ -331,9 +329,13 @@ test.describe("Backend state refactor — deletion progress", () => {
     // Get session ID
     const sessions = await window.evaluate(async () => {
       const projects = await (window as any).api.db.projects.list();
-      return projects.flatMap((p: any) => p.sessions.map((s: any) => ({
-        id: s.id, name: s.name, status: s.status,
-      })));
+      return projects.flatMap((p: any) =>
+        p.sessions.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          status: s.status,
+        })),
+      );
     });
     console.log("Sessions:", sessions);
     const sessionId = sessions[0]?.id;

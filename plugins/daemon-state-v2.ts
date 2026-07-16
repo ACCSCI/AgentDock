@@ -176,9 +176,7 @@ export class DaemonStateV2 {
     const s = this.sessions.get(sessionId);
     if (!s) throw new Error(`Session ${sessionId} not found`);
     if (s.status !== "creating") {
-      throw new Error(
-        `Session ${sessionId} cannot activate from status=${s.status}`,
-      );
+      throw new Error(`Session ${sessionId} cannot activate from status=${s.status}`);
     }
     s.status = "active";
     s.leaseExpiresAt = null;
@@ -366,12 +364,7 @@ export class DaemonStateV2 {
     }
   }
 
-  setOwner(
-    sessionId: string,
-    clientId: string,
-    pid: number,
-    fencingToken: number,
-  ): void {
+  setOwner(sessionId: string, clientId: string, pid: number, fencingToken: number): void {
     this.owners.set(sessionId, { clientId, pid, fencingToken });
   }
 
@@ -485,9 +478,7 @@ export class DaemonStateV2 {
   static deserialize(json: string): DaemonStateV2 {
     const raw = JSON.parse(json) as Partial<SerializedV2>;
     if (raw.schemaVersion !== 2) {
-      throw new Error(
-        `Cannot deserialize: schemaVersion=${raw.schemaVersion}, expected 2`,
-      );
+      throw new Error(`Cannot deserialize: schemaVersion=${raw.schemaVersion}, expected 2`);
     }
     const state = new DaemonStateV2();
     for (const [portStr, rec] of Object.entries(raw.ports ?? {})) {
@@ -575,9 +566,7 @@ export class SessionNotDeletableError extends Error {
     public readonly sessionId: string,
     public readonly currentStatus: SessionStatus | "missing",
   ) {
-    super(
-      `Session ${sessionId} is not deletable (current status: ${currentStatus})`,
-    );
+    super(`Session ${sessionId} is not deletable (current status: ${currentStatus})`);
     this.name = "SessionNotDeletableError";
   }
 }
@@ -614,9 +603,7 @@ export class SessionBusyError extends Error {
     public readonly sessionId: string,
     public readonly leaseExpiresAt: number,
   ) {
-    super(
-      `Session ${sessionId} is busy (lease expires at ${leaseExpiresAt})`,
-    );
+    super(`Session ${sessionId} is busy (lease expires at ${leaseExpiresAt})`);
     this.name = "SessionBusyError";
   }
 }

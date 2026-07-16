@@ -19,24 +19,17 @@
 import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { awaitSessionComplete, createSession, deleteOrphans, listOrphans } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
-import {
-  createSession,
-  listOrphans,
-  deleteOrphans,
-  awaitSessionComplete,
-} from "./helpers/ipc";
-import { TID } from "./pages/testids";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -50,20 +43,21 @@ function writeEmptyConfig(dir: string): void {
 function listAgentdockBranches(projectPath: string): string[] {
   // execFile (no shell) — Windows cmd mangles the `'agentdock/*'`
   // glob via its single-quote handling otherwise.
-  const out = execFileSync(
-    "git",
-    ["branch", "--list", "agentdock/*"],
-    { cwd: projectPath, encoding: "utf-8" },
+  const out = execFileSync("git", ["branch", "--list", "agentdock/*"], {
+    cwd: projectPath,
+    encoding: "utf-8",
+  });
+  return (
+    out
+      .split(/\r?\n/)
+      // `git branch --list` prefixes each line with a status marker:
+      //   "  branch"   = local
+      //   "* branch"   = current branch (HEAD)
+      //   "+ branch"   = checked out in a registered worktree
+      // Strip whichever marker is present plus the trailing space.
+      .map((l) => l.replace(/^[*+]?\s+/, "").trim())
+      .filter((l) => l.length > 0)
   );
-  return out
-    .split(/\r?\n/)
-    // `git branch --list` prefixes each line with a status marker:
-    //   "  branch"   = local
-    //   "* branch"   = current branch (HEAD)
-    //   "+ branch"   = checked out in a registered worktree
-    // Strip whichever marker is present plus the trailing space.
-    .map((l) => l.replace(/^[*+]?\s+/, "").trim())
-    .filter((l) => l.length > 0);
 }
 
 test.describe("orphan branch scan + delete", () => {
@@ -96,12 +90,13 @@ test.describe("orphan branch scan + delete", () => {
     )) as Array<{ id: string; path: string; sessions: unknown[] }>;
     const project = projects.find((p) => p.path === projectPath);
     expect(project, `project ${projectPath} not found in DB`).toBeDefined();
+    if (!project) throw new Error(`project ${projectPath} not found in DB`);
 
     // 3. Create a live session through the IPC helper — this gives us
     //    a real `agentdock/<sessionId>` branch that should NOT show
     //    up in the orphans scan.
     const { sessionId } = await createSession(window, {
-      projectId: project!.id,
+      projectId: project.id,
       name: "live",
     });
     const { result } = await awaitSessionComplete(window, sessionId, 30_000);
@@ -124,7 +119,7 @@ test.describe("orphan branch scan + delete", () => {
     //    Pass the projectId explicitly — the handler's "active project"
     //    fallback points at launch cwd, not at the user-chosen project,
     //    so multi-project setups need the explicit param to scope.
-    const orphans = await listOrphans(window, project!.id);
+    const orphans = await listOrphans(window, project?.id);
     const orphanBranches = orphans.filter((o) => o.reason === "orphan-branch");
     expect(
       orphanBranches.map((o) => o.branch),
@@ -139,7 +134,7 @@ test.describe("orphan branch scan + delete", () => {
     //    the previous Electron version refused (it only took `paths`).
     const delResult = await deleteOrphans(window, {
       branches: [danglingBranch],
-      projectId: project!.id,
+      projectId: project?.id,
     });
     expect(delResult.deleted).toContain(danglingBranch);
     expect(
@@ -153,7 +148,7 @@ test.describe("orphan branch scan + delete", () => {
     expect(allAfter).not.toContain(danglingBranch);
 
     // 8. Another scan should now return empty for orphan-branches.
-    const orphansAfter = await listOrphans(window, project!.id);
+    const orphansAfter = await listOrphans(window, project?.id);
     expect(orphansAfter.filter((o) => o.reason === "orphan-branch")).toHaveLength(0);
 
     // 9. Safety: deleteOrphans must REFUSE non-agentdock branches
@@ -162,9 +157,11 @@ test.describe("orphan branch scan + delete", () => {
     execFileSync("git", ["branch", "rogue/sneaky", "main"], { cwd: projectPath });
     const rogueDelete = await deleteOrphans(window, {
       branches: ["rogue/sneaky"],
-      projectId: project!.id,
+      projectId: project?.id,
     });
-    expect(rogueDelete.deleted, "rogue branch should NOT have been deleted").not.toContain("rogue/sneaky");
+    expect(rogueDelete.deleted, "rogue branch should NOT have been deleted").not.toContain(
+      "rogue/sneaky",
+    );
     expect(rogueDelete.failed.find((f) => f.branch === "rogue/sneaky")).toBeDefined();
     expect(
       listAgentdockBranches(projectPath).concat(

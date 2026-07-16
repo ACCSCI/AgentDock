@@ -25,8 +25,8 @@ export const sessions = sqliteTable("sessions", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   // v11: lifecycle status and step progress
-  status: text("status"),  // "creating" | "active" | "deleting" | null
-  steps: text("steps"),    // JSON: [{ step, status, duration?, error? }]
+  status: text("status"), // "creating" | "active" | "deleting" | null
+  steps: text("steps"), // JSON: [{ step, status, duration?, error? }]
 });
 
 export type ProjectRow = typeof projects.$inferSelect;

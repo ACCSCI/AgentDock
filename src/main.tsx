@@ -1,15 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRouter,
-} from "@tanstack/react-router";
+import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { routeTree } from "./routeTree.gen";
 import { ToastContainer } from "./components/Toast";
 import i18n from "./i18n";
 import { I18nextProvider } from "./i18n/react";
+import { routeTree } from "./routeTree.gen";
 import "./styles/globals.css";
 import "./styles/toast.css";
 

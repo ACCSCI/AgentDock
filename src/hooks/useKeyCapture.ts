@@ -22,9 +22,7 @@ interface UseKeyCaptureReturn {
  * The `onCapture` callback fires once per successful capture and
  * is expected to call `cancel()` or the hook resets automatically.
  */
-export function useKeyCapture(
-  onCapture: (combo: string) => void,
-): UseKeyCaptureReturn {
+export function useKeyCapture(onCapture: (combo: string) => void): UseKeyCaptureReturn {
   const [isCapturing, setIsCapturing] = useState(false);
   const onCaptureRef = useRef(onCapture);
   onCaptureRef.current = onCapture;

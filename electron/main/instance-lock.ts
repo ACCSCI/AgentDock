@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 /**
  * Global Instance Lock — ensures only one AgentDock process runs at a time.
  *
@@ -6,9 +8,7 @@
  * is skipped to allow multiple dev windows.
  */
 import { app } from "electron";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { tryAcquireLock, type FileLock } from "../../plugins/os-file-lock.js";
+import { type FileLock, tryAcquireLock } from "../../plugins/os-file-lock.js";
 
 export type { FileLock };
 

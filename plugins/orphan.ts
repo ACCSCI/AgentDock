@@ -14,14 +14,14 @@ import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { log } from "./logger.js";
 import {
   getWorktreeBase,
-  listWorktrees,
   killProcessesUnderPath,
-  validateBranchName,
+  listWorktrees,
   rimrafOrFallback,
+  validateBranchName,
 } from "./worktree.js";
-import { log } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -127,10 +127,7 @@ export async function removeOrphanDir(dirPath: string): Promise<void> {
  * branches that currently back a registered git worktree (callers build
  * it). Anything matching `refs/heads/agentdock/` outside that set counts.
  */
-export function scanOrphanBranches(
-  projectPath: string,
-  knownBranches: Set<string>,
-): OrphanDir[] {
+export function scanOrphanBranches(projectPath: string, knownBranches: Set<string>): OrphanDir[] {
   let raw: string;
   try {
     raw = execFileSync(
@@ -147,9 +144,7 @@ export function scanOrphanBranches(
     const branch = line.trim();
     if (!branch) continue;
     if (knownBranches.has(branch)) continue;
-    const sessionId = branch.startsWith("agentdock/")
-      ? branch.slice("agentdock/".length)
-      : branch;
+    const sessionId = branch.startsWith("agentdock/") ? branch.slice("agentdock/".length) : branch;
     result.push({ sessionId, worktreePath: "", reason: "orphan-branch", branch });
   }
   return result;
@@ -160,10 +155,7 @@ export function scanOrphanBranches(
  * agentdock prefix and validates the branch name first (block flag-style
  * argument injection via `validateBranchName`).
  */
-export async function removeOrphanBranch(
-  projectPath: string,
-  branch: string,
-): Promise<void> {
+export async function removeOrphanBranch(projectPath: string, branch: string): Promise<void> {
   validateBranchName(branch);
   if (!branch.startsWith("agentdock/")) {
     throw new Error(`Refusing to delete non-agentdock branch: ${branch}`);
@@ -205,28 +197,28 @@ export async function removeOrphanBranch(
  *     真三向比对, 派发到正确的清理手段.
  */
 export type OrphanKind =
-  | "filesystem-orphan"      // 目录在 .agentdock/worktrees/ 但 git/registry 都不认
-  | "git-metadata-orphan"    // git worktree + branch 还有, 但目录已删
-  | "orphan-session"         // 目录+git 注册都在, registry 没有 (会话未注册)
-  | "branch-orphan"          // 纯分支残留: branch 在但既无 worktree 也无 registry
-  | "registry-stale"         // registry 有但 worktree 没了 (UI 处理, 不静默删)
-  | "registry-stale-git";    // registry 有, git 注册没了, 目录还在 (git prune → C3)
+  | "filesystem-orphan" // 目录在 .agentdock/worktrees/ 但 git/registry 都不认
+  | "git-metadata-orphan" // git worktree + branch 还有, 但目录已删
+  | "orphan-session" // 目录+git 注册都在, registry 没有 (会话未注册)
+  | "branch-orphan" // 纯分支残留: branch 在但既无 worktree 也无 registry
+  | "registry-stale" // registry 有但 worktree 没了 (UI 处理, 不静默删)
+  | "registry-stale-git"; // registry 有, git 注册没了, 目录还在 (git prune → C3)
 
 export interface OrphanItem {
   sessionId: string;
-  worktreePath: string;        // git-metadata-orphan / registry-stale 可为空字符串
-  branch: string | null;       // agentdock/* 分支名 (如有)
+  worktreePath: string; // git-metadata-orphan / registry-stale 可为空字符串
+  branch: string | null; // agentdock/* 分支名 (如有)
   kind: OrphanKind;
   /** 原始 git worktree 登记 (含 head commit) — 仅 orphan-session / registry-stale-git 有 */
   gitWorktree?: { path: string; head: string };
 }
 
 export interface ClassifiedOrphans {
-  filesystemOrphans: OrphanItem[];   // → killProcessesUnderPath + rm
-  gitMetadataOrphans: OrphanItem[];  // → git worktree prune + git branch -D
-  orphanSessions: OrphanItem[];      // → git worktree remove --force + rm
-  branchOrphans: OrphanItem[];       // → git branch -D
-  registryStale: OrphanItem[];       // → 不自动删, 仅上报
+  filesystemOrphans: OrphanItem[]; // → killProcessesUnderPath + rm
+  gitMetadataOrphans: OrphanItem[]; // → git worktree prune + git branch -D
+  orphanSessions: OrphanItem[]; // → git worktree remove --force + rm
+  branchOrphans: OrphanItem[]; // → git branch -D
+  registryStale: OrphanItem[]; // → 不自动删, 仅上报
 }
 
 export interface CleanupResult {
@@ -246,7 +238,7 @@ export interface CleanupResult {
 export function classifyOrphans(
   projectPath: string,
   knownSessionIds: Set<string>,
-  knownBranches: Set<string>,
+  _knownBranches: Set<string>,
 ): ClassifiedOrphans {
   // 1. Filesystem 状态: 读 .agentdock/worktrees/ 目录
   const fsDirs = new Map<string, string>(); // sessionId -> absolutePath
@@ -337,9 +329,11 @@ export function classifyOrphans(
     if (inReg && !inGit && inFs) {
       // ✅❌✅ — registry stale + git 登记丢失: prune → C3
       // 实际上目录还在, 由 git prune 后转 C3; 但不在这次清理范围
+      const worktreePath = fsDirs.get(sessionId);
+      if (!worktreePath) continue;
       result.registryStale.push({
         sessionId,
-        worktreePath: fsDirs.get(sessionId)!,
+        worktreePath,
         branch: null,
         kind: "registry-stale-git",
       });
@@ -350,7 +344,7 @@ export function classifyOrphans(
       // ❌✅✅ — orphan session: 完整 worktree 但 registry 没记录
       result.orphanSessions.push({
         sessionId,
-        worktreePath: gitWorktrees.get(sessionId)!.path,
+        worktreePath: gitWorktrees.get(sessionId)?.path,
         branch,
         kind: "orphan-session",
         gitWorktree: gitWorktrees.get(sessionId),
@@ -374,9 +368,11 @@ export function classifyOrphans(
       // Look up the actual branch (if any) — the branch may survive
       // even when git worktree registration is lost.
       const fsBranch = `agentdock/${sessionId}`;
+      const worktreePath = fsDirs.get(sessionId);
+      if (!worktreePath) continue;
       result.filesystemOrphans.push({
         sessionId,
-        worktreePath: fsDirs.get(sessionId)!,
+        worktreePath,
         branch: gitBranches.has(fsBranch) ? fsBranch : null,
         kind: "filesystem-orphan",
       });
@@ -391,7 +387,6 @@ export function classifyOrphans(
         branch,
         kind: "branch-orphan",
       });
-      continue;
     }
   }
 

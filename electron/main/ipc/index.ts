@@ -1,3 +1,7 @@
+import { type DrizzleDb, getActiveDb } from "../../../plugins/db/index.js";
+import { type BootstrapDeps, registerBootstrap } from "../bootstrap.js";
+import type { SessionManager } from "../session-manager.js";
+import { registerApp } from "./app.js";
 /**
  * IPC registration entry point — called once at app startup.
  *
@@ -7,17 +11,13 @@
  *
  * Single-instance architecture: no daemon, no SSE, no v2 service.
  */
-import { registerDb, type DbContext } from "./db.js";
-import { registerSessions, type SessionsDeps } from "./sessions.js";
-import { registerTerminals } from "./terminals.js";
+import { type DbContext, registerDb } from "./db.js";
 import { registerFsAndConfig } from "./fs-config.js";
-import { registerWorktreeAndShell } from "./worktree-shell.js";
 import { registerGit } from "./git.js";
+import { type SessionsDeps, registerSessions } from "./sessions.js";
+import { registerTerminals } from "./terminals.js";
 import { registerTodos } from "./todos.js";
-import { registerBootstrap, type BootstrapDeps } from "../bootstrap.js";
-import { registerApp } from "./app.js";
-import { getActiveDb, type DrizzleDb } from "../../../plugins/db/index.js";
-import type { SessionManager } from "../session-manager.js";
+import { registerWorktreeAndShell } from "./worktree-shell.js";
 
 export interface AllIpcDeps {
   getProjectPath: () => string | null;

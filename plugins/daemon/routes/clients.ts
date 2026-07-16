@@ -14,12 +14,9 @@
  * lives in /sessions/allocate, not here — clients don't carry that field.
  */
 import { zValidator } from "@hono/zod-validator";
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import { z } from "zod";
-import {
-  HEARTBEAT_PERSIST_INTERVAL_MS,
-  type DaemonContext,
-} from "../context.js";
+import { type DaemonContext, HEARTBEAT_PERSIST_INTERVAL_MS } from "../context.js";
 import { zodErrorHandler } from "../middleware/error.js";
 
 const RegisterSchema = z.object({
@@ -33,53 +30,41 @@ const ClientIdSchema = z.object({
 });
 
 export function registerClients(app: Hono, ctx: DaemonContext): void {
-  app.post(
-    "/client/register",
-    zValidator("json", RegisterSchema, zodErrorHandler),
-    async (c) => {
-      const { clientId, pid, projectPaths } = c.req.valid("json");
-      await ctx.mutex.runExclusive("state", () => {
-        ctx.state.registerClient(clientId, pid, projectPaths);
-        ctx.lastPersistedHeartbeatAt.set(
-          clientId,
-          ctx.state.getClient(clientId)?.lastHeartbeat ?? Date.now(),
-        );
-        ctx.wal.persist(ctx.state);
-      });
-      return c.json({ success: true });
-    },
-  );
+  app.post("/client/register", zValidator("json", RegisterSchema, zodErrorHandler), async (c) => {
+    const { clientId, pid, projectPaths } = c.req.valid("json");
+    await ctx.mutex.runExclusive("state", () => {
+      ctx.state.registerClient(clientId, pid, projectPaths);
+      ctx.lastPersistedHeartbeatAt.set(
+        clientId,
+        ctx.state.getClient(clientId)?.lastHeartbeat ?? Date.now(),
+      );
+      ctx.wal.persist(ctx.state);
+    });
+    return c.json({ success: true });
+  });
 
-  app.post(
-    "/client/unregister",
-    zValidator("json", ClientIdSchema, zodErrorHandler),
-    async (c) => {
-      const { clientId } = c.req.valid("json");
-      await ctx.mutex.runExclusive("state", () => {
-        ctx.state.unregisterClient(clientId);
-        ctx.lastPersistedHeartbeatAt.delete(clientId);
-        ctx.wal.persist(ctx.state);
-      });
-      return c.json({ success: true });
-    },
-  );
+  app.post("/client/unregister", zValidator("json", ClientIdSchema, zodErrorHandler), async (c) => {
+    const { clientId } = c.req.valid("json");
+    await ctx.mutex.runExclusive("state", () => {
+      ctx.state.unregisterClient(clientId);
+      ctx.lastPersistedHeartbeatAt.delete(clientId);
+      ctx.wal.persist(ctx.state);
+    });
+    return c.json({ success: true });
+  });
 
-  app.post(
-    "/client/heartbeat",
-    zValidator("json", ClientIdSchema, zodErrorHandler),
-    async (c) => {
-      const { clientId } = c.req.valid("json");
-      await ctx.mutex.runExclusive("state", () => {
-        const before = ctx.state.getClient(clientId)?.lastHeartbeat ?? 0;
-        ctx.state.heartbeat(clientId);
-        const after = ctx.state.getClient(clientId)?.lastHeartbeat ?? before;
-        const lastPersisted = ctx.lastPersistedHeartbeatAt.get(clientId) ?? 0;
-        if (after > before && after - lastPersisted >= HEARTBEAT_PERSIST_INTERVAL_MS) {
-          ctx.lastPersistedHeartbeatAt.set(clientId, after);
-          ctx.wal.persist(ctx.state);
-        }
-      });
-      return c.json({ success: true });
-    },
-  );
+  app.post("/client/heartbeat", zValidator("json", ClientIdSchema, zodErrorHandler), async (c) => {
+    const { clientId } = c.req.valid("json");
+    await ctx.mutex.runExclusive("state", () => {
+      const before = ctx.state.getClient(clientId)?.lastHeartbeat ?? 0;
+      ctx.state.heartbeat(clientId);
+      const after = ctx.state.getClient(clientId)?.lastHeartbeat ?? before;
+      const lastPersisted = ctx.lastPersistedHeartbeatAt.get(clientId) ?? 0;
+      if (after > before && after - lastPersisted >= HEARTBEAT_PERSIST_INTERVAL_MS) {
+        ctx.lastPersistedHeartbeatAt.set(clientId, after);
+        ctx.wal.persist(ctx.state);
+      }
+    });
+    return c.json({ success: true });
+  });
 }

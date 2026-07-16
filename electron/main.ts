@@ -1,3 +1,6 @@
+import { existsSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 /**
  * Electron Main Process Entry — Single-Instance Architecture
  *
@@ -13,25 +16,24 @@
  *
  * Prod mode: loadFile from the renderer dist (dist/index.html).
  */
-import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
-import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
-import { existsSync, unlinkSync } from "node:fs";
-import { IPC_CHANNEL_COUNT } from "./shared/api-types.js";
-import { registerAllIpc, type AllIpcDeps } from "./main/ipc/index.js";
+import { BrowserWindow, app, dialog, ipcMain, protocol } from "electron";
+import { migrateProjectsToGlobal, openGlobalDb } from "../plugins/db/global.js";
+import { getDbPath, openDb, setDbBasePath } from "../plugins/db/index.js";
+import * as schema from "../plugins/db/schema.js";
 import { log } from "../plugins/logger.js";
-import { openGlobalDb } from "../plugins/db/global.js";
-import { setDbBasePath } from "../plugins/db/index.js";
-import { registerE2eReset } from "./main/e2e-reset.js";
-import { registerFontProtocol, ensureFontsReady } from "./main/fonts.js";
 import { initAutoUpdater } from "./main/auto-updater.js";
+import { registerE2eReset } from "./main/e2e-reset.js";
+import { ensureFontsReady, registerFontProtocol } from "./main/fonts.js";
+import { type AllIpcDeps, registerAllIpc } from "./main/ipc/index.js";
 import { createWindow } from "./main/window.js";
+import { IPC_CHANNEL_COUNT } from "./shared/api-types.js";
 
-// --- New single-instance imports ---
-import { acquireInstanceLock, type FileLock } from "./main/instance-lock.js";
-import { createPortPool, type PortPoolInternal } from "./main/port-pool.js";
-import { createSessionManager, type SessionManager } from "./main/session-manager.js";
 import { initGlobalSettings } from "../plugins/global-settings.js";
+// --- New single-instance imports ---
+import { type FileLock, acquireInstanceLock } from "./main/instance-lock.js";
+import { type PortPoolInternal, createPortPool } from "./main/port-pool.js";
+import { type SessionManager, createSessionManager } from "./main/session-manager.js";
+import { restorePersistedSessions } from "./main/session-recovery.js";
 
 // Resolve paths relative to this file (works in both dev and prod).
 const __filename = fileURLToPath(import.meta.url);
@@ -167,6 +169,31 @@ async function bootstrap() {
     globalDbHandle = openGlobalDb(userDataDir);
   }
 
+  // Rehydrate every persisted worktree's port ownership before any renderer
+  // request can create a new session. The project DB is process-global in the
+  // single-instance architecture, so this must cover all projects, not only
+  // the currently selected one.
+  try {
+    const { db: persistedDb, sqlite } = openDb();
+    try {
+      if (globalDbHandle) {
+        migrateProjectsToGlobal(globalDbHandle.db, getDbPath());
+      }
+      const persistedSessions = persistedDb.select().from(schema.sessions).all();
+      const persistedProjects = globalDbHandle?.db.select().from(schema.projects).all() ?? [];
+      const recovery = restorePersistedSessions(
+        persistedSessions,
+        persistedProjects,
+        sessionManager,
+      );
+      log.info(recovery, "persisted session ownership restored");
+    } finally {
+      sqlite.close();
+    }
+  } catch (err) {
+    log.warn({ err }, "persisted session ownership restore failed");
+  }
+
   // 4. Register ALL IPC handlers
   const ipcDeps: AllIpcDeps = {
     getProjectPath: () => activeProjectPath,
@@ -205,14 +232,20 @@ async function bootstrap() {
   // E2E reset handler (simplified — no daemon to reset)
   registerE2eReset({
     getProjectPath: () => activeProjectPath,
-    setProjectPath: (p) => { activeProjectPath = p; },
+    setProjectPath: (p) => {
+      activeProjectPath = p;
+    },
   });
 
   log.info({ ipcChannels: IPC_CHANNEL_COUNT }, "IPC handlers registered");
 
   // 4. Create the window and load the renderer
-  const win = createWindow((w) => { mainWindow = w; });
-  win.on("closed", () => { mainWindow = null; });
+  const win = createWindow((w) => {
+    mainWindow = w;
+  });
+  win.on("closed", () => {
+    mainWindow = null;
+  });
 
   // Kick off background font download — non-blocking, notifies renderer when done.
   void ensureFontsReady(win);
@@ -266,7 +299,7 @@ protocol.registerSchemesAsPrivileged([
 //
 // The decision is made here — before app.whenReady — so every IPC handler
 // that reads the DB path sees the right location.
-import { resolveUserDataPath, migrateLegacyUserData, detectInstallMode } from "./main/userdata.js";
+import { detectInstallMode, migrateLegacyUserData, resolveUserDataPath } from "./main/userdata.js";
 
 if (process.env.AGENTDOCK_USER_DATA_DIR) {
   app.setPath("userData", resolve(process.env.AGENTDOCK_USER_DATA_DIR));
@@ -279,10 +312,7 @@ if (process.env.AGENTDOCK_USER_DATA_DIR) {
   if (app.isPackaged) {
     const { migratedFrom } = migrateLegacyUserData(userDataPath);
     if (migratedFrom) {
-      log.info(
-        { userDataPath, migratedFrom },
-        "migrated legacy userData into new location",
-      );
+      log.info({ userDataPath, migratedFrom }, "migrated legacy userData into new location");
     }
   }
 }
@@ -291,31 +321,34 @@ if (process.env.AGENTDOCK_USER_DATA_DIR) {
 // App startup — singleton lock + bootstrap
 // ============================================================
 
-app.whenReady().then(async () => {
-  // [NEW] Global singleton lock (production only)
-  const lockHandle = await acquireInstanceLock();
-  if (!lockHandle) {
-    // Another instance is running (or dev mode — lockHandle is null but allowed)
-    // In dev mode (lockHandle === null from acquireInstanceLock), proceed.
-    // In prod mode (lockHandle === null means lock held), show dialog and exit.
-    if (app.isPackaged && !process.env.AGENTDOCK_DEV_INSTANCE) {
-      await dialog.showMessageBox({
-        type: "info",
-        title: "AgentDock",
-        message: "AgentDock is already running.",
-      });
-      app.exit(0);
-      return;
+app
+  .whenReady()
+  .then(async () => {
+    // [NEW] Global singleton lock (production only)
+    const lockHandle = await acquireInstanceLock();
+    if (!lockHandle) {
+      // Another instance is running (or dev mode — lockHandle is null but allowed)
+      // In dev mode (lockHandle === null from acquireInstanceLock), proceed.
+      // In prod mode (lockHandle === null means lock held), show dialog and exit.
+      if (app.isPackaged && !process.env.AGENTDOCK_DEV_INSTANCE) {
+        await dialog.showMessageBox({
+          type: "info",
+          title: "AgentDock",
+          message: "AgentDock is already running.",
+        });
+        app.exit(0);
+        return;
+      }
     }
-  }
-  instanceLock = lockHandle;
+    instanceLock = lockHandle;
 
-  registerFontProtocol();
-  await bootstrap();
-}).catch((err) => {
-  log.error({ err }, "bootstrap failed");
-  app.exit(1);
-});
+    registerFontProtocol();
+    await bootstrap();
+  })
+  .catch((err) => {
+    log.error({ err }, "bootstrap failed");
+    app.exit(1);
+  });
 
 // ============================================================
 // Shutdown
@@ -348,8 +381,12 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    const win = createWindow((w) => { mainWindow = w; });
-    win.on("closed", () => { mainWindow = null; });
+    const win = createWindow((w) => {
+      mainWindow = w;
+    });
+    win.on("closed", () => {
+      mainWindow = null;
+    });
   }
 });
 
@@ -407,5 +444,9 @@ process.on("unhandledRejection", (reason) => {
 export const __test__ = {
   getMainWindow: () => mainWindow,
   getSessionManager: () => sessionManager,
-  countIpcHandlers: () => Object.keys((ipcMain as unknown as { _invokeHandlers: Map<string, unknown> })._invokeHandlers ?? new Map()).length,
+  countIpcHandlers: () =>
+    Object.keys(
+      (ipcMain as unknown as { _invokeHandlers: Map<string, unknown> })._invokeHandlers ??
+        new Map(),
+    ).length,
 };

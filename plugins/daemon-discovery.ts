@@ -1,10 +1,17 @@
 // @ts-nocheck
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection } from "node:net";
-import { acquireLock, LockAcquisitionError } from "./os-file-lock.js";
+import os from "node:os";
+import path from "node:path";
 import { FOLLOWER_WAIT_TIMEOUT_MS, LEADER_LOCK_TIMEOUT_MS, SPAWN_JITTER_MS } from "./constants.js";
+import { LockAcquisitionError, acquireLock } from "./os-file-lock.js";
 
 // ============================================================
 // Constants
@@ -149,7 +156,11 @@ export function writeDaemonInfo(pid: number, port: number): void {
         // Fallback: direct write. This is fine because we're the only
         // writer (the manager has already acquired the leader lock).
         writeFileSync(infoPath, payload, "utf-8");
-        try { unlinkSync(tmpPath); } catch { /* ignore */ }
+        try {
+          unlinkSync(tmpPath);
+        } catch {
+          /* ignore */
+        }
       }
       // Verify the write actually landed before declaring success —
       // catches the rare case where writeFileSync silently no-ops due
@@ -164,7 +175,9 @@ export function writeDaemonInfo(pid: number, port: number): void {
       if (attempt < MAX_ATTEMPTS) {
         // Brief sleep via sync busy-wait (we're in a sync context).
         const wait = Date.now() + 50;
-        while (Date.now() < wait) { /* spin */ }
+        while (Date.now() < wait) {
+          /* spin */
+        }
         continue;
       }
       throw err;
@@ -177,7 +190,11 @@ export function writeDaemonInfo(pid: number, port: number): void {
  */
 export function deleteDaemonInfo(): void {
   const infoPath = getDaemonInfoPath();
-  try { unlinkSync(infoPath); } catch { /* ignore */ }
+  try {
+    unlinkSync(infoPath);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -188,10 +205,10 @@ export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
+  } catch (err) {
     // ESRCH = no such process (dead)
     // EPERM = process exists but owned by another user (alive)
-    if (err?.code === "EPERM") return true;
+    if (err instanceof Error && "code" in err && err.code === "EPERM") return true;
     return false;
   }
 }
@@ -235,7 +252,7 @@ export async function electLeader(): Promise<LeaderElectionResult> {
         deleteDaemonInfo();
       },
     };
-  } catch (err: any) {
+  } catch (err) {
     // If we can't acquire the lock, another instance is the leader
     if (err instanceof LockAcquisitionError) {
       return {
@@ -300,7 +317,7 @@ export async function discoverDaemon(
   // Re-check: the daemon might have been started by another instance
   // between our election and now (in case we had to wait for the lock)
   info = readDaemonInfo();
-  if (info && isProcessAlive(info.pid) && await isDaemonListening(info.port)) {
+  if (info && isProcessAlive(info.pid) && (await isDaemonListening(info.port))) {
     await release();
     return { alive: true, info, isLeader: false };
   }
@@ -313,7 +330,7 @@ export async function discoverDaemon(
   const deadline = Date.now() + DAEMON_STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
     info = readDaemonInfo();
-    if (info && isProcessAlive(info.pid) && await isDaemonListening(info.port)) {
+    if (info && isProcessAlive(info.pid) && (await isDaemonListening(info.port))) {
       await release();
       return { alive: true, info, isLeader: true };
     }
@@ -322,9 +339,7 @@ export async function discoverDaemon(
 
   // Timeout — clean up
   await release();
-  throw new Error(
-    `Daemon did not become ready within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-  );
+  throw new Error(`Daemon did not become ready within ${DAEMON_STARTUP_TIMEOUT_MS}ms`);
 }
 
 /**
@@ -353,7 +368,11 @@ function atomicRename(from: string, to: string): void {
     renameSync(from, to);
   } catch {
     // On Windows, rename fails if target exists — unlink then retry
-    try { unlinkSync(to); } catch { /* ignore */ }
+    try {
+      unlinkSync(to);
+    } catch {
+      /* ignore */
+    }
     renameSync(from, to);
   }
 }

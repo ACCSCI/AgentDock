@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { useProjectFiles, type FileEntry } from "../lib/queries";
 import { useTranslation } from "../i18n/react";
+import { type FileEntry, useProjectFiles } from "../lib/queries";
 
 interface FilePickerProps {
   open: boolean;
@@ -80,6 +80,7 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   }, []);
 
   // Restore scroll position when data for the new directory is ready
+  // biome-ignore lint/correctness/useExhaustiveDependencies: entries changing means the directory listing has finished refreshing and its scroll position can be restored.
   useLayoutEffect(() => {
     if (!isLoading && listRef.current) {
       const saved = scrollPositions.current.get(currentPath);
@@ -95,11 +96,18 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   if (!open) return null;
 
   return (
-    <div className="file-picker-overlay" onClick={onCancel}>
-      <div className="file-picker-modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="file-picker-overlay"
+      role="presentation"
+      onClick={(event) => event.target === event.currentTarget && onCancel()}
+      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    >
+      <div className="file-picker-modal">
         <div className="file-picker-header">
           <h3>{t("filePicker.title")}</h3>
-          <button type="button" className="file-picker-close" onClick={onCancel}>×</button>
+          <button type="button" className="file-picker-close" onClick={onCancel}>
+            ×
+          </button>
         </div>
 
         {/* Breadcrumb navigation */}
@@ -146,7 +154,8 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
             <div className="file-picker-empty">{t("noMatch", { ns: "common" })}</div>
           ) : (
             displayEntries.map((entry) => (
-              <div
+              <button
+                type="button"
                 key={entry.path}
                 className={`file-picker-entry ${selected === entry.path ? "file-picker-entry-selected" : ""}`}
                 onClick={() => handleNavigate(entry)}
@@ -154,14 +163,9 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
                   if (!entry.isDir) onConfirm(entry.path);
                 }}
               >
-                <span className="file-picker-entry-icon">
-                  {entry.isDir ? "📁" : "📄"}
-                </span>
+                <span className="file-picker-entry-icon">{entry.isDir ? "📁" : "📄"}</span>
                 <span className="file-picker-entry-name">{entry.name}</span>
-                <span className={`file-picker-git-badge ${entry.status !== "untracked" ? "file-picker-git-tracked" : "file-picker-git-untracked"}`}>
-                  {entry.status !== "untracked" ? "已跟踪" : "未跟踪"}
-                </span>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -170,7 +174,11 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         <div className="file-picker-footer">
           {currentPath && (
             <>
-              <button type="button" className="file-picker-btn file-picker-btn-back" onClick={handleBack}>
+              <button
+                type="button"
+                className="file-picker-btn file-picker-btn-back"
+                onClick={handleBack}
+              >
                 ← 返回上级
               </button>
               <button
@@ -183,7 +191,11 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
             </>
           )}
           <div className="file-picker-footer-right">
-            <button type="button" className="file-picker-btn file-picker-btn-cancel" onClick={onCancel}>
+            <button
+              type="button"
+              className="file-picker-btn file-picker-btn-cancel"
+              onClick={onCancel}
+            >
               {t("filePicker.cancel")}
             </button>
             <button

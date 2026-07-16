@@ -1,8 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
-import path from "node:path";
+import { type ServerResponse, createServer } from "node:http";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 function json(res: ServerResponse, status: number, data: unknown) {
   res.statusCode = status;
@@ -32,14 +32,20 @@ function startTestServer(port: number): Promise<void> {
             if (process.platform === "win32") {
               for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
                 const drive = `${letter}:\\`;
-                try { await fs.access(drive); roots.push({ name: drive, path: drive }); } catch {}
+                try {
+                  await fs.access(drive);
+                  roots.push({ name: drive, path: drive });
+                } catch {}
               }
             } else {
               roots.push({ name: "/", path: "/" });
             }
             const home = process.env.HOME || process.env.USERPROFILE || "";
             if (home) {
-              try { await fs.access(home); roots.push({ name: "~ (Home)", path: home }); } catch {}
+              try {
+                await fs.access(home);
+                roots.push({ name: "~ (Home)", path: home });
+              } catch {}
             }
             json(res, 200, { entries: roots });
             return;
@@ -47,9 +53,13 @@ function startTestServer(port: number): Promise<void> {
           const resolved = nodePath.resolve(targetPath);
           try {
             const stat = await fs.stat(resolved);
-            if (!stat.isDirectory()) { json(res, 400, { error: "Path is not an existing directory" }); return; }
+            if (!stat.isDirectory()) {
+              json(res, 400, { error: "Path is not an existing directory" });
+              return;
+            }
           } catch {
-            json(res, 400, { error: "Path is not an existing directory" }); return;
+            json(res, 400, { error: "Path is not an existing directory" });
+            return;
           }
           const entries: Array<{ name: string; path: string }> = [];
           const parent = nodePath.dirname(resolved);
@@ -88,7 +98,9 @@ beforeEach(async () => {
 
 afterEach(() => {
   server?.close();
-  try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("GET /api/browse-dirs", () => {
@@ -118,7 +130,9 @@ describe("GET /api/browse-dirs", () => {
   });
 
   it("returns error for non-existent path", async () => {
-    const res = await fetch(`${baseUrl}/api/browse-dirs?path=${encodeURIComponent("/nonexistent")}`);
+    const res = await fetch(
+      `${baseUrl}/api/browse-dirs?path=${encodeURIComponent("/nonexistent")}`,
+    );
     const data = await res.json();
     expect(res.status).toBe(400);
     expect(data.error).toContain("not an existing directory");

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 interface GitInitConfirmModalProps {
   open: boolean;
@@ -22,6 +23,7 @@ export function GitInitConfirmModal({
   onCancel,
   loading = false,
 }: GitInitConfirmModalProps) {
+  const { t } = useTranslation("home");
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -34,33 +36,32 @@ export function GitInitConfirmModal({
   if (!open) return null;
 
   return (
-    <div className="dir-modal-overlay" onClick={loading ? undefined : onCancel}>
-      <div
-        className="dir-modal git-init-modal"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="git-init-modal"
-      >
+    <div
+      className="dir-modal-overlay"
+      onMouseDown={(event) => {
+        if (!loading && event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <div className="dir-modal git-init-modal" data-testid="git-init-modal">
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
-            <h3>不是 Git 仓库</h3>
+            <h3>{t("notGitRepository")}</h3>
           </div>
           <button
             type="button"
             className="dir-modal-close"
             onClick={onCancel}
             disabled={loading}
+            aria-label={t("close")}
           >
             ✕
           </button>
         </div>
 
         <div className="git-init-description">
+          <p>{t("notGitRepositoryDescription", { path: dirPath })}</p>
           <p>
-            选择的目录 <strong>{dirPath}</strong> 不是一个 Git 仓库。
-          </p>
-          <p>
-            AgentDock 需要 Git 来管理项目会话（worktree）。
-            是否自动执行 <code>git init</code>？
+            {t("gitRequiredDescription")} <code>git init</code>?
           </p>
         </div>
 
@@ -72,7 +73,7 @@ export function GitInitConfirmModal({
             disabled={loading}
             data-testid="git-init-cancel"
           >
-            取消
+            {t("cancel")}
           </button>
           <button
             type="button"
@@ -81,7 +82,7 @@ export function GitInitConfirmModal({
             disabled={loading}
             data-testid="git-init-confirm"
           >
-            {loading ? "初始化中..." : "git init"}
+            {loading ? t("initializingGit") : "git init"}
           </button>
         </div>
       </div>

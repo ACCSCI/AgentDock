@@ -8,7 +8,7 @@
  *
  * Streaming twist: `sessions:create` returns immediately with `{sessionId}`
  * but the real result arrives over `session:<id>:step` (per-step) and
- * `session:<id>:complete` (terminal). The renderer's `useCreateSessionSSE`
+ * `session:<id>:complete` (terminal). The renderer's session mutation hook
  * subscribes via `window.api.sessions.stream(id).on{Step,Complete}`. We
  * can't subscribe before the id exists, so we install a one-time wrapper
  * around `window.api.sessions.create` that stashes events on
@@ -78,39 +78,32 @@ export interface CreateSessionHandle {
 // ============================================================
 
 export async function bootstrapHealth(window: Page): Promise<{
-  daemon: string;
   vite: string;
   ipc: number;
 }> {
   return await window.evaluate(() =>
     (
       window as unknown as {
-        api: { bootstrap: { health: () => Promise<{ daemon: string; vite: string; ipc: number }> } };
+        api: { bootstrap: { health: () => Promise<{ vite: string; ipc: number }> } };
       }
     ).api.bootstrap.health(),
   );
 }
 
 /**
- * Wait for the daemon to reach "ready" state. Essential before session
- * creation in tests — the daemon needs to be fully initialized to handle
- * `/sessions/allocate` and other v2 endpoints.
+ * Wait for the Electron main process to finish registering IPC handlers.
  */
-export async function waitForDaemonReady(
-  window: Page,
-  timeoutMs = 30_000,
-): Promise<void> {
+export async function waitForAppReady(window: Page, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ready = await window.evaluate(async () => {
       try {
         const health = await (
           window as unknown as {
-            api: { daemon: { health: () => Promise<{ state?: string; lifecycleState?: string }> } };
+            api: { bootstrap: { health: () => Promise<{ vite: string; ipc: number }> } };
           }
-        ).api.daemon.health();
-        const state = health.lifecycleState ?? health.state ?? "";
-        return state === "ready" || state === "READY";
+        ).api.bootstrap.health();
+        return health.ipc > 0;
       } catch {
         return false;
       }
@@ -118,7 +111,7 @@ export async function waitForDaemonReady(
     if (ready) return;
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`waitForDaemonReady: daemon not READY after ${timeoutMs}ms`);
+  throw new Error(`waitForAppReady: Electron IPC was not ready after ${timeoutMs}ms`);
 }
 
 // ============================================================
@@ -128,7 +121,9 @@ export async function waitForDaemonReady(
 export async function initDb(window: Page, projectPath: string): Promise<void> {
   await window.evaluate(
     (p: string) =>
-      (window as unknown as { api: { db: { init: (p: string) => Promise<unknown> } } }).api.db.init(p),
+      (window as unknown as { api: { db: { init: (p: string) => Promise<unknown> } } }).api.db.init(
+        p,
+      ),
     projectPath,
   );
 }
@@ -137,7 +132,7 @@ export async function createProject(
   window: Page,
   params: { name: string; path: string },
 ): Promise<ProjectSummary> {
-  return await window.evaluate(
+  return (await window.evaluate(
     (args: { name: string; path: string }) =>
       (
         window as unknown as {
@@ -145,7 +140,7 @@ export async function createProject(
         }
       ).api.db.projects.create(args.name, args.path),
     params,
-  ) as ProjectSummary;
+  )) as ProjectSummary;
 }
 
 export async function listProjects(window: Page): Promise<ProjectWithSessions[]> {
@@ -197,37 +192,35 @@ export async function createSession(
   // Subscribe + create in one evaluate so the listener is registered
   // in the same microtask the promise resolves. Subscribing in a
   // *separate* evaluate would race main's async step emissions.
-  const { sessionId } = (await window.evaluate(
-    (p: typeof params) => {
-      interface ApiLike {
-        sessions: {
-          create: (p: unknown) => Promise<{ sessionId: string }>;
-          stream: (id: string) => {
-            onStep: (cb: (e: unknown) => void) => () => void;
-            onComplete: (cb: (e: unknown) => void) => () => void;
-          };
+  const { sessionId } = (await window.evaluate((p: typeof params) => {
+    interface ApiLike {
+      sessions: {
+        create: (p: unknown) => Promise<{ sessionId: string }>;
+        stream: (id: string) => {
+          onStep: (cb: (e: unknown) => void) => () => void;
+          onComplete: (cb: (e: unknown) => void) => () => void;
         };
-      }
-      const w = window as unknown as {
-        api: ApiLike;
-        __e2eSessionEvents?: Record<string, { steps: unknown[]; complete?: unknown }>;
       };
-      const store = (w.__e2eSessionEvents ??= {});
-      return w.api.sessions.create(p).then((r) => {
-        const slot: { steps: unknown[]; complete?: unknown } = { steps: [] };
-        store[r.sessionId] = slot;
-        const stream = w.api.sessions.stream(r.sessionId);
-        stream.onStep((step: unknown) => {
-          slot.steps.push(step);
-        });
-        stream.onComplete((complete: unknown) => {
-          slot.complete = complete;
-        });
-        return r;
+    }
+    const w = window as unknown as {
+      api: ApiLike;
+      __e2eSessionEvents?: Record<string, { steps: unknown[]; complete?: unknown }>;
+    };
+    w.__e2eSessionEvents ??= {};
+    const store = w.__e2eSessionEvents;
+    return w.api.sessions.create(p).then((r) => {
+      const slot: { steps: unknown[]; complete?: unknown } = { steps: [] };
+      store[r.sessionId] = slot;
+      const stream = w.api.sessions.stream(r.sessionId);
+      stream.onStep((step: unknown) => {
+        slot.steps.push(step);
       });
-    },
-    params,
-  )) as { sessionId: string };
+      stream.onComplete((complete: unknown) => {
+        slot.complete = complete;
+      });
+      return r;
+    });
+  }, params)) as { sessionId: string };
   return { sessionId, steps: [] };
 }
 
@@ -235,10 +228,7 @@ export async function createSession(
  * Take a snapshot of the steps streamed for a given session so far.
  * Returns a fresh array each call (so a test can diff between polls).
  */
-export async function getSessionSteps(
-  window: Page,
-  sessionId: string,
-): Promise<StepEvent[]> {
+export async function getSessionSteps(window: Page, sessionId: string): Promise<StepEvent[]> {
   return (await window.evaluate(
     (id: string) =>
       ((window as unknown as { __e2eSessionEvents?: Record<string, { steps: unknown[] }> })
@@ -268,14 +258,17 @@ export async function awaitSessionComplete(
   while (Date.now() < deadline) {
     const snap = (await window.evaluate(
       (id: string) =>
-        ((window as unknown as { __e2eSessionEvents?: Record<string, { steps: unknown[]; complete?: unknown }> })
-          .__e2eSessionEvents?.[id] ?? null) as {
+        ((
+          window as unknown as {
+            __e2eSessionEvents?: Record<string, { steps: unknown[]; complete?: unknown }>;
+          }
+        ).__e2eSessionEvents?.[id] ?? null) as {
           steps: unknown[];
           complete?: unknown;
         } | null,
       sessionId,
     )) as { steps: StepEvent[]; complete?: SessionCompleteEvent } | null;
-    if (snap && snap.complete) {
+    if (snap?.complete) {
       return { steps: snap.steps, result: snap.complete };
     }
     await new Promise((r) => setTimeout(r, pollMs));
@@ -338,10 +331,7 @@ export async function reorderSessions(
   );
 }
 
-export async function bgHookStatus(
-  window: Page,
-  sessionId: string,
-): Promise<string | null> {
+export async function bgHookStatus(window: Page, sessionId: string): Promise<string | null> {
   return (await window.evaluate(
     (id: string) =>
       (

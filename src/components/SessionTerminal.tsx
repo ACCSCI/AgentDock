@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { terminalCache, type TerminalCacheStatus } from "../lib/terminal-cache";
 import { useStore } from "../lib/store";
+import { type TerminalCacheStatus, terminalCache } from "../lib/terminal-cache";
 import "@xterm/xterm/css/xterm.css";
 
 interface ContextMenuState {
@@ -51,7 +51,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
       unsub();
       terminalCache.detach(terminalId);
     };
-  }, [terminalId, sessionId]);
+  }, [terminalId, sessionId, terminalPrefs]);
 
   // Cache selection text on right-click mousedown — xterm.js clears the
   // internal selection during mousedown processing, so by the time the
@@ -107,12 +107,14 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
     // Clamp to viewport so the menu never overflows off-screen
     const menuWidth = 180;
     const menuHeight = 160;
-    const x = e.clientX + menuWidth > window.innerWidth
-      ? Math.max(0, window.innerWidth - menuWidth - 10)
-      : e.clientX;
-    const y = e.clientY + menuHeight > window.innerHeight
-      ? Math.max(0, window.innerHeight - menuHeight - 10)
-      : e.clientY;
+    const x =
+      e.clientX + menuWidth > window.innerWidth
+        ? Math.max(0, window.innerWidth - menuWidth - 10)
+        : e.clientX;
+    const y =
+      e.clientY + menuHeight > window.innerHeight
+        ? Math.max(0, window.innerHeight - menuHeight - 10)
+        : e.clientY;
     setCtxMenu({ x, y, hasSelection });
   }, []);
 
@@ -186,11 +188,7 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
         onContextMenu={handleContextMenu}
       />
       {ctxMenu && (
-        <div
-          ref={ctxMenuRef}
-          className="context-menu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-        >
+        <div ref={ctxMenuRef} className="context-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
           <button
             type="button"
             className="context-menu-item"
@@ -199,26 +197,14 @@ export function SessionTerminal({ terminalId, sessionId }: SessionTerminalProps)
           >
             Copy
           </button>
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={handlePaste}
-          >
+          <button type="button" className="context-menu-item" onClick={handlePaste}>
             Paste
           </button>
           <div className="context-menu-separator" />
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={handleSelectAll}
-          >
+          <button type="button" className="context-menu-item" onClick={handleSelectAll}>
             Select All
           </button>
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={handleClearSelection}
-          >
+          <button type="button" className="context-menu-item" onClick={handleClearSelection}>
             Clear Selection
           </button>
         </div>

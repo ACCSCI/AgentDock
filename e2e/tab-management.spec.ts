@@ -11,20 +11,19 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TabBarPage } from "./pages/tab-bar";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -40,7 +39,6 @@ test.describe("tab management", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -55,7 +53,7 @@ test.describe("tab management", () => {
     const tabBar = new TabBarPage(window);
     const sidebar = new SidebarPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     // 1. Open project A from the home page.
     await expect(home.openProjectButton).toBeVisible();
@@ -78,9 +76,7 @@ test.describe("tab management", () => {
 
     // Both tabs should be visible.
     const allTabs = window.locator(`[data-testid="${TID.projectTab}"]`);
-    await expect
-      .poll(() => allTabs.count(), { timeout: 10_000 })
-      .toBeGreaterThanOrEqual(2);
+    await expect.poll(() => allTabs.count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
 
     // Find project B's tab.
     const tabs = await allTabs.all();
@@ -114,9 +110,7 @@ test.describe("tab management", () => {
     await window.waitForTimeout(500);
 
     // Only one tab (A) should remain.
-    await expect
-      .poll(() => allTabs.count(), { timeout: 5_000 })
-      .toBe(1);
+    await expect.poll(() => allTabs.count(), { timeout: 5_000 }).toBe(1);
 
     // A's tab should still be visible and active.
     await expect(tabA).toBeVisible();
@@ -128,9 +122,7 @@ test.describe("tab management", () => {
     await home.navigateModalTo(projectBPath);
 
     // Two tabs should be visible again.
-    await expect
-      .poll(() => allTabs.count(), { timeout: 10_000 })
-      .toBeGreaterThanOrEqual(2);
+    await expect.poll(() => allTabs.count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
 
     // 8. Find the re-opened B's project ID.
     const tabsAfterReopen = await allTabs.all();
@@ -167,10 +159,11 @@ test.describe("tab management", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

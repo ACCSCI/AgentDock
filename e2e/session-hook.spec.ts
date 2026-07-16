@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 /**
  * Real hook execution E2E.
  *
@@ -17,9 +18,9 @@
  * subsequent `sessions:retryHooks` re-runs the (now-fixed) hook.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { dumpDb } from "./helpers/dump";
 import {
   awaitSessionComplete,
   createProject,
@@ -27,15 +28,13 @@ import {
   deleteSession,
   listProjects,
 } from "./helpers/ipc";
-import { dumpDb } from "./helpers/dump";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeHookConfig(
@@ -87,10 +86,7 @@ function writeHookScript(projectDir: string, name: string, body: string): string
 }
 
 test.describe("afterCreateSession hook (real execution)", () => {
-  test("sync hook writes marker file before create completes", async ({
-    window,
-    dataDir,
-  }) => {
+  test("sync hook writes marker file before create completes", async ({ window, dataDir }) => {
     const projectPath = join(dataDir, "hook-sync");
     prepareGitRepo(projectPath);
     // Hook runs with `cwd: project` (set by writeHookConfig) so
@@ -217,7 +213,7 @@ test.describe("afterCreateSession hook (real execution)", () => {
 
     const failedRow = dumpDb(dataDir).sessions.find((s) => s.id === sessionId);
     expect(failedRow?.background_hook_errors).toBeTruthy();
-    const errors = JSON.parse(failedRow!.background_hook_errors!) as Array<{
+    const errors = JSON.parse(failedRow?.background_hook_errors!) as Array<{
       exitCode: number | null;
       stderr?: string;
     }>;

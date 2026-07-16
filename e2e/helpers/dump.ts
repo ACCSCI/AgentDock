@@ -127,9 +127,7 @@ export interface DaemonStateSnapshot {
  * The daemon URL is whatever the renderer's `bootstrap:health` reports
  * (the test passes it in so we don't duplicate discovery here).
  */
-export async function dumpDaemonState(
-  daemonBaseUrl: string,
-): Promise<DaemonStateSnapshot> {
+export async function dumpDaemonState(daemonBaseUrl: string): Promise<DaemonStateSnapshot> {
   const res = await fetch(`${daemonBaseUrl}/sessions/list`);
   if (!res.ok) {
     throw new Error(`daemon /sessions/list failed: ${res.status}`);

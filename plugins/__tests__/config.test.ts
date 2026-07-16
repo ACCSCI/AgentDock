@@ -1,18 +1,21 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import path from "node:path";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  loadConfig,
   AgentDockConfigSchema,
-  ResourceDefinitionSchema,
   HookDefinitionSchema,
+  ResourceDefinitionSchema,
+  loadConfig,
 } from "../config.js";
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = path.join(os.tmpdir(), `agentdock-config-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  tmpDir = path.join(
+    os.tmpdir(),
+    `agentdock-config-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(tmpDir, { recursive: true });
 });
 
@@ -85,9 +88,7 @@ resources:
   });
 
   it("A5: 非法 strategy 拒绝", () => {
-    expect(() =>
-      ResourceDefinitionSchema.parse({ source: "x", strategy: "copy" }),
-    ).toThrow();
+    expect(() => ResourceDefinitionSchema.parse({ source: "x", strategy: "copy" })).toThrow();
   });
 });
 
@@ -197,15 +198,11 @@ hooks:
 // ============================================================
 describe("校验边界", () => {
   it("A10: source 为空字符串拒绝", () => {
-    expect(() =>
-      ResourceDefinitionSchema.parse({ source: "" }),
-    ).toThrow();
+    expect(() => ResourceDefinitionSchema.parse({ source: "" })).toThrow();
   });
 
   it("A11: run 为空字符串拒绝", () => {
-    expect(() =>
-      HookDefinitionSchema.parse({ run: "" }),
-    ).toThrow();
+    expect(() => HookDefinitionSchema.parse({ run: "" })).toThrow();
   });
 
   it("A12: 空 YAML 返回默认配置", () => {

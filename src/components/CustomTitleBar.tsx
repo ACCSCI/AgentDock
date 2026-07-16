@@ -2,34 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { TodoDropdown } from "./TodoDropdown";
 
-declare global {
-  interface Window {
-    api: {
-      windowControls: {
-        minimize: () => Promise<void>;
-        maximize: () => Promise<void>;
-        close: () => Promise<void>;
-        isMaximized: () => Promise<boolean>;
-        platform: () => Promise<string>;
-        onMaximizeChange: (cb: (maximized: boolean) => void) => () => void;
-      };
-      todos: {
-        list: (projectId: string) => Promise<Array<{
-          id: string; projectId: string; content: string;
-          completed: boolean; sortOrder: number; createdAt: string; updatedAt: string;
-        }>>;
-        create: (projectId: string, content: string) => Promise<{
-          id: string; projectId: string; content: string;
-          completed: boolean; sortOrder: number; createdAt: string; updatedAt: string;
-        }>;
-        toggle: (id: string, completed: boolean) => Promise<void>;
-        update: (id: string, content: string) => Promise<void>;
-        delete: (id: string) => Promise<void>;
-      };
-    };
-  }
-}
-
 export function CustomTitleBar() {
   const [platform, setPlatform] = useState<string>("win32");
   const [isMaximized, setIsMaximized] = useState(false);
@@ -133,12 +105,7 @@ export function CustomTitleBar() {
           </>
         )}
       </div>
-      {todoOpen && (
-        <TodoDropdown
-          projectId={activeProjectId}
-          onClose={handleTodoClose}
-        />
-      )}
+      {todoOpen && <TodoDropdown projectId={activeProjectId} onClose={handleTodoClose} />}
     </>
   );
 }

@@ -1,3 +1,8 @@
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-sqlite";
 /**
  * db:projects:create fuzzy dedup unit tests.
  *
@@ -7,12 +12,7 @@
  * The path-healing step (writing the caller's spelling on fuzzy
  * match) is also verified.
  */
-import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { drizzle } from "drizzle-orm/node-sqlite";
-import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it } from "vitest";
 import * as schema from "../db/schema.js";
 
 /**
@@ -24,7 +24,7 @@ function normalize(p: string): string {
   return p
     .replace(/\\/g, "/")
     .replace(/\/+$/, "")
-    .replace(/^([A-Z]):/i, (_, d: string) => d.toLowerCase() + ":");
+    .replace(/^([A-Z]):/i, (_, d: string) => `${d.toLowerCase()}:`);
 }
 
 function createOrHeal(
@@ -43,16 +43,10 @@ function createOrHeal(
         .where(eq(schema.projects.id, existing.id))
         .run();
     }
-    return db
-      .select()
-      .from(schema.projects)
-      .where(eq(schema.projects.id, existing.id))
-      .get()!;
+    return db.select().from(schema.projects).where(eq(schema.projects.id, existing.id)).get()!;
   }
   const id = Math.random().toString(36).slice(2, 10);
-  db.insert(schema.projects)
-    .values({ id, name, path: safePath })
-    .run();
+  db.insert(schema.projects).values({ id, name, path: safePath }).run();
   return db.select().from(schema.projects).where(eq(schema.projects.id, id)).get()!;
 }
 
@@ -80,7 +74,11 @@ describe("db:projects:create dedup", () => {
   });
 
   it("creates a new project when path is fresh", () => {
-    const project = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
+    const project = createOrHeal(
+      db,
+      "SpeedWriter",
+      "F:\\ProgramPlayground\\JavaScript\\SpeedWriter",
+    );
     expect(project.id).toBeTruthy();
     expect(project.path).toBe("F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
 
@@ -90,7 +88,11 @@ describe("db:projects:create dedup", () => {
 
   it("returns existing project when path matches exactly", () => {
     const first = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
-    const second = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
+    const second = createOrHeal(
+      db,
+      "SpeedWriter",
+      "F:\\ProgramPlayground\\JavaScript\\SpeedWriter",
+    );
     expect(second.id).toBe(first.id);
 
     const all = db.select().from(schema.projects).all();
@@ -99,7 +101,11 @@ describe("db:projects:create dedup", () => {
 
   it("fuzzy-matches when caller uses different case (Windows drives are case-insensitive)", () => {
     const first = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
-    const second = createOrHeal(db, "SpeedWriter", "f:\\ProgramPlayground\\JavaScript\\SpeedWriter");
+    const second = createOrHeal(
+      db,
+      "SpeedWriter",
+      "f:\\ProgramPlayground\\JavaScript\\SpeedWriter",
+    );
     expect(second.id).toBe(first.id);
 
     const all = db.select().from(schema.projects).all();
@@ -108,7 +114,11 @@ describe("db:projects:create dedup", () => {
 
   it("fuzzy-matches when caller uses trailing slash", () => {
     const first = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter");
-    const second = createOrHeal(db, "SpeedWriter", "F:\\ProgramPlayground\\JavaScript\\SpeedWriter\\");
+    const second = createOrHeal(
+      db,
+      "SpeedWriter",
+      "F:\\ProgramPlayground\\JavaScript\\SpeedWriter\\",
+    );
     expect(second.id).toBe(first.id);
 
     const all = db.select().from(schema.projects).all();

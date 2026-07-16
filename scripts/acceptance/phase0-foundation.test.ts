@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "..", "..");
 
@@ -56,11 +56,11 @@ describe("Phase 0: Foundation + test infrastructure", () => {
     });
 
     it("ipc-mock.ts: onIpcEvent receives webContents.send broadcasts", async () => {
-      const { ipcMainMock, invokeIpc, onIpcEvent } = await import(
-        "../../test-utils/ipc-mock.js"
-      );
+      const { ipcMainMock, invokeIpc, onIpcEvent } = await import("../../test-utils/ipc-mock.js");
       ipcMainMock.clear();
-      ipcMainMock.handle("test:broadcast", async (event, ch: string, payload: unknown) => {
+      ipcMainMock.handle("test:broadcast", async (event, ...args: unknown[]) => {
+        const [ch, payload] = args;
+        if (typeof ch !== "string") throw new TypeError("Expected event channel");
         event.sender.send(ch, payload);
         return { ok: true };
       });
@@ -159,15 +159,11 @@ describe("Phase 0: Foundation + test infrastructure", () => {
   });
 
   describe("package.json scripts", () => {
-    it("has all phase acceptance scripts", () => {
+    it("has current single-instance acceptance scripts", () => {
       const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf-8"));
       expect(pkg.scripts["acceptance:phase0"]).toBeTruthy();
-      expect(pkg.scripts["acceptance:phase1"]).toBeTruthy();
-      expect(pkg.scripts["acceptance:phase2"]).toBeTruthy();
-      expect(pkg.scripts["acceptance:phase3"]).toBeTruthy();
-      expect(pkg.scripts["acceptance:phase4"]).toBeTruthy();
-      // phase5/6 acceptance tests are not yet implemented; scripts will be
-      // re-added when those test files land.
+      expect(pkg.scripts["acceptance:single-instance"]).toBeTruthy();
+      expect(pkg.scripts["acceptance:all"]).toBe("bun run test:acceptance");
     });
 
     it("has layered test scripts", () => {
@@ -182,7 +178,7 @@ describe("Phase 0: Foundation + test infrastructure", () => {
       const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf-8"));
       // The script may prefix cross-env NODE_OPTIONS to enable node:sqlite
       // — the assertion only cares that electron-vite is the runner.
-      expect(pkg.scripts["dev"]).toMatch(/electron-vite dev/);
+      expect(pkg.scripts.dev).toMatch(/electron-vite dev/);
     });
   });
 

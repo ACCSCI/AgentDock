@@ -1,4 +1,4 @@
-import type { Page, Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { TID } from "./testids";
 
 /**
@@ -15,9 +15,7 @@ export class TabBarPage {
   }
 
   tab(projectId: string): Locator {
-    return this.page.locator(
-      `[data-testid="${TID.projectTab}"][data-project-id="${projectId}"]`,
-    );
+    return this.page.locator(`[data-testid="${TID.projectTab}"][data-project-id="${projectId}"]`);
   }
 
   closeTab(projectId: string): Locator {

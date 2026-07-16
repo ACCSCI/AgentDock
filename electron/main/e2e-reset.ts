@@ -58,6 +58,5 @@ export function registerE2eReset(deps: E2eResetDeps): void {
     return resetMainState(deps);
   });
 
-  (globalThis as Record<string, unknown>).__e2eResetMainState = () =>
-    resetMainState(deps);
+  (globalThis as Record<string, unknown>).__e2eResetMainState = () => resetMainState(deps);
 }

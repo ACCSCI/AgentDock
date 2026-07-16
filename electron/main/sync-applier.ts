@@ -89,10 +89,7 @@ export function emptyState(): AppliedState {
  * 套用 snapshot. 覆盖式 — 任何现有状态被 snapshot 内容替换。
  * 记录 snapshotSeq 阈值, 之后到达的 seq <= snapshotSeq 的事件将被丢弃。
  */
-export function applySnapshot(
-  state: AppliedState,
-  snapshot: V2SyncSnapshot,
-): AppliedState {
+export function applySnapshot(state: AppliedState, snapshot: V2SyncSnapshot): AppliedState {
   const next: AppliedState = emptyState();
   next.snapshotSeq = snapshot.snapshotSeq;
   next.appliedSeq = Math.max(state.appliedSeq, snapshot.snapshotSeq);
@@ -121,10 +118,7 @@ export function applySnapshot(
  * 幂等性: port-reassigned / port-released / session-purged / session-renamed
  * 全部幂等 — 重复 apply 不会破坏最终状态。
  */
-export function dispatchEvent(
-  state: AppliedState,
-  event: SseEvent,
-): AppliedState {
+export function dispatchEvent(state: AppliedState, event: SseEvent): AppliedState {
   // 还没套过快照: 直接 apply(等价于 snapshotSeq=0)。
   if (state.snapshotSeq === null) {
     return applyEventUnchecked(state, event);
@@ -153,7 +147,8 @@ function applyEventUnchecked(state: AppliedState, event: SseEvent): AppliedState
       if (!d?.sessionId) return next;
       if (next.sessions.has(d.sessionId)) {
         // 幂等: 已存在 → 合并 displayName (不覆盖其他字段)
-        const cur = next.sessions.get(d.sessionId)!;
+        const cur = next.sessions.get(d.sessionId);
+        if (!cur) return next;
         next.sessions.set(d.sessionId, {
           ...cur,
           displayName: d.displayName ?? cur.displayName,
@@ -175,7 +170,8 @@ function applyEventUnchecked(state: AppliedState, event: SseEvent): AppliedState
       // { sessionId, newDisplayName }
       const d = event.data as { sessionId?: string; newDisplayName?: string };
       if (!d?.sessionId || !next.sessions.has(d.sessionId)) return next;
-      const cur = next.sessions.get(d.sessionId)!;
+      const cur = next.sessions.get(d.sessionId);
+      if (!cur) return next;
       next.sessions.set(d.sessionId, { ...cur, displayName: d.newDisplayName ?? cur.displayName });
       return next;
     }
@@ -300,10 +296,7 @@ function applyEventUnchecked(state: AppliedState, event: SseEvent): AppliedState
  *
  * 用于: 一次性 apply 一批历史事件(测试 / 断线重连回放)。
  */
-export function applyAll(
-  snapshot: V2SyncSnapshot | null,
-  events: SseEvent[],
-): AppliedState {
+export function applyAll(snapshot: V2SyncSnapshot | null, events: SseEvent[]): AppliedState {
   let s = emptyState();
   if (snapshot) s = applySnapshot(s, snapshot);
   for (const ev of events) s = dispatchEvent(s, ev);

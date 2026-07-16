@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * E2E Test: Cold-start race condition
  *
@@ -13,29 +16,28 @@
  * The test ensures: after cold start + open project, the project shows up
  * in the workspace (not stuck on "Project not found" or "Loading…").
  */
-import { test, expect } from "./fixtures/electron-fixture";
-import { HomePage } from "./pages/home";
-import { SidebarPage } from "./pages/sidebar";
-import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { expect, test } from "./fixtures/electron-fixture";
 
 function createTempProject(name: string): string {
   const projectPath = join("D:\\ProgramTest", name);
   if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true });
   mkdirSync(projectPath, { recursive: true });
   execSync("git init", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.email \"test@test.com\"", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.name \"Test\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.name "Test"', { cwd: projectPath, stdio: "ignore" });
   writeFileSync(join(projectPath, "README.md"), "# Test");
   execSync("git add .", { cwd: projectPath, stdio: "ignore" });
-  execSync("git commit -m \"init\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git commit -m "init"', { cwd: projectPath, stdio: "ignore" });
   writeFileSync(join(projectPath, "agentdock.config.yaml"), "hooks:\n  afterCreateSession: []\n");
   return projectPath;
 }
 
 function cleanupTempProject(projectPath: string): void {
-  try { if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true }); } catch { /* */ }
+  try {
+    if (existsSync(projectPath)) rmSync(projectPath, { recursive: true, force: true });
+  } catch {
+    /* */
+  }
 }
 
 test.describe("Cold-start race", () => {
@@ -78,7 +80,9 @@ test.describe("Cold-start race", () => {
 
     // Wait for renderer to come back. The reload navigates to / (home).
     // The tab for our project should be visible.
-    const projectTab = window.locator('[data-testid="project-tab"]').filter({ hasText: "e2e-cold-start" });
+    const projectTab = window
+      .locator('[data-testid="project-tab"]')
+      .filter({ hasText: "e2e-cold-start" });
     await expect(projectTab).toBeVisible({ timeout: 10000 });
 
     // Click the tab to navigate to the project

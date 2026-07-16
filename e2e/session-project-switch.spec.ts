@@ -3,7 +3,7 @@
  *
  * Tests that session state persists when switching between projects
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 
@@ -12,14 +12,7 @@ const PROJECT_1 = "D:\\ProgramTest\\e2e-test-project";
 const PROJECT_2 = "D:\\ProgramTest\\e2e-test-project-2";
 
 test.describe("Session state persistence", () => {
-  test("session persists after switching projects", async ({
-    window,
-    dataDir,
-    pageErrors,
-    dialogs,
-    rendererLog,
-    expectNoRendererErrors,
-  }) => {
+  test("session persists after switching projects", async ({ window }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 

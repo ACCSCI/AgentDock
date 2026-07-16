@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 /**
  * Electron + Playwright launcher for the user-agent.
  *
@@ -23,10 +26,7 @@
  * Usage:
  *   bun run .flue/tools/launch-electron.ts <projectPath> [--out report.json]
  */
-import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
-import { join } from "node:path";
-import { mkdirSync, writeFileSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { type ElectronApplication, type Page, _electron as electron } from "@playwright/test";
 
 const ROOT = "F:\\ProgramPlayground\\JavaScript\\AgentDock\\.agentdock\\worktrees\\bed4c452-74d";
 const SHOT_DIR = join(ROOT, "test-results", "user-agent-shots");
@@ -68,7 +68,8 @@ async function step(window: Page, label: string, fn: () => Promise<void>): Promi
 function mainEntry(): string {
   const dir = join(ROOT, "out", "main");
   const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
-  if (files.length === 0) throw new Error("No main entry in out/main — run `npx electron-vite build` first");
+  if (files.length === 0)
+    throw new Error("No main entry in out/main — run `npx electron-vite build` first");
   return join(dir, files[0]!);
 }
 
@@ -111,63 +112,97 @@ async function run(projectPath: string): Promise<TestReport> {
     await window.waitForTimeout(3000);
 
     // Step 1: cold start — home button visible
-    steps.push(await step(window, "cold start home button", async () => {
-      await window.locator('[data-testid="home-open-project"]').waitFor({ state: "visible", timeout: 15_000 });
-    }));
+    steps.push(
+      await step(window, "cold start home button", async () => {
+        await window
+          .locator('[data-testid="home-open-project"]')
+          .waitFor({ state: "visible", timeout: 15_000 });
+      }),
+    );
 
     // Step 2: click open project → modal appears
-    steps.push(await step(window, "click open project modal", async () => {
-      await window.locator('[data-testid="home-open-project"]').click();
-      await window.locator('[data-testid="dir-modal"]').waitFor({ state: "visible", timeout: 10_000 });
-    }));
+    steps.push(
+      await step(window, "click open project modal", async () => {
+        await window.locator('[data-testid="home-open-project"]').click();
+        await window
+          .locator('[data-testid="dir-modal"]')
+          .waitFor({ state: "visible", timeout: 10_000 });
+      }),
+    );
 
     // Step 3: navigate dir browser to target project
-    steps.push(await step(window, "navigate to target project", async () => {
-      const segments = projectPath.split(/[\\/]/).filter((s) => s.length > 0);
-      segments[0] = `${segments[0]}\\`;
-      const waitEntries = async () => {
-        const entries = window.locator('[data-testid="dir-entry"]');
-        const deadline = Date.now() + 15_000;
-        while (Date.now() < deadline) {
-          if (await entries.count() > 0) return;
-          await window.waitForTimeout(100);
+    steps.push(
+      await step(window, "navigate to target project", async () => {
+        const segments = projectPath.split(/[\\/]/).filter((s) => s.length > 0);
+        segments[0] = `${segments[0]}\\`;
+        const waitEntries = async () => {
+          const entries = window.locator('[data-testid="dir-entry"]');
+          const deadline = Date.now() + 15_000;
+          while (Date.now() < deadline) {
+            if ((await entries.count()) > 0) return;
+            await window.waitForTimeout(100);
+          }
+          throw new Error("dir-entry never rendered");
+        };
+        for (let i = 0; i < segments.length - 1; i++) {
+          const seg = segments[i]!;
+          await window.locator('[data-testid="dir-search-input"]').fill(seg);
+          await window.waitForTimeout(300);
+          await window
+            .locator('[data-testid="dir-entry"]')
+            .filter({
+              has: window.locator(".dir-entry-name", {
+                hasText: new RegExp(`^${seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+              }),
+            })
+            .first()
+            .dblclick();
+          await waitEntries();
         }
-        throw new Error("dir-entry never rendered");
-      };
-      for (let i = 0; i < segments.length - 1; i++) {
-        const seg = segments[i]!;
-        await window.locator('[data-testid="dir-search-input"]').fill(seg);
+        const last = segments[segments.length - 1]!;
+        await window.locator('[data-testid="dir-search-input"]').fill(last);
         await window.waitForTimeout(300);
-        await window.locator('[data-testid="dir-entry"]').filter({
-          has: window.locator(".dir-entry-name", { hasText: new RegExp(`^${seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }),
-        }).first().dblclick();
-        await waitEntries();
-      }
-      const last = segments[segments.length - 1]!;
-      await window.locator('[data-testid="dir-search-input"]').fill(last);
-      await window.waitForTimeout(300);
-      await window.locator('[data-testid="dir-entry"]').filter({
-        has: window.locator(".dir-entry-name", { hasText: new RegExp(`^${last.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }),
-      }).first().click();
-      await window.locator('[data-testid="dir-confirm"]').click();
-      await window.locator('[data-testid="dir-modal"]').waitFor({ state: "hidden", timeout: 10_000 });
-    }));
+        await window
+          .locator('[data-testid="dir-entry"]')
+          .filter({
+            has: window.locator(".dir-entry-name", {
+              hasText: new RegExp(`^${last.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+            }),
+          })
+          .first()
+          .click();
+        await window.locator('[data-testid="dir-confirm"]').click();
+        await window
+          .locator('[data-testid="dir-modal"]')
+          .waitFor({ state: "hidden", timeout: 10_000 });
+      }),
+    );
 
     // Step 4: project loads (h2 shows project basename) — this is the one
     // that crashed before the fix; should now pass.
     const projectName = projectPath.split(/[\\/]/).filter(Boolean).pop()!;
-    steps.push(await step(window, "project workspace loaded", async () => {
-      // Wait for the workspace to settle; bail fast if the ErrorBoundary fires.
-      await window.waitForTimeout(3000);
-      // Defensive: if the ErrorBoundary "Cannot read properties of undefined
-      // (reading 'find')" appears, fail with a clear message.
-      const errorBoundary = await window.locator("text=Cannot read properties of undefined").isVisible().catch(() => false);
-      if (errorBoundary) {
-        throw new Error("ErrorBoundary fired: 'Cannot read properties of undefined' — sessions.find crash regressed");
-      }
-      await window.locator("h2").filter({ hasText: projectName }).first().waitFor({ state: "visible", timeout: 20_000 });
-    }));
-
+    steps.push(
+      await step(window, "project workspace loaded", async () => {
+        // Wait for the workspace to settle; bail fast if the ErrorBoundary fires.
+        await window.waitForTimeout(3000);
+        // Defensive: if the ErrorBoundary "Cannot read properties of undefined
+        // (reading 'find')" appears, fail with a clear message.
+        const errorBoundary = await window
+          .locator("text=Cannot read properties of undefined")
+          .isVisible()
+          .catch(() => false);
+        if (errorBoundary) {
+          throw new Error(
+            "ErrorBoundary fired: 'Cannot read properties of undefined' — sessions.find crash regressed",
+          );
+        }
+        await window
+          .locator("h2")
+          .filter({ hasText: projectName })
+          .first()
+          .waitFor({ state: "visible", timeout: 20_000 });
+      }),
+    );
   } finally {
     if (app) await app.close();
   }
@@ -188,14 +223,16 @@ if (!projectPath) {
   process.exit(2);
 }
 
-run(projectPath).then((report) => {
-  const out = process.argv.includes("--out")
-    ? process.argv[process.argv.indexOf("--out") + 1]
-    : join(SHOT_DIR, `report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  writeFileSync(out, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify(report, null, 2));
-  process.exit(report.passed ? 0 : 1);
-}).catch((err) => {
-  console.error("FATAL:", err);
-  process.exit(2);
-});
+run(projectPath)
+  .then((report) => {
+    const out = process.argv.includes("--out")
+      ? process.argv[process.argv.indexOf("--out") + 1]
+      : join(SHOT_DIR, `report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+    writeFileSync(out, JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(report, null, 2));
+    process.exit(report.passed ? 0 : 1);
+  })
+  .catch((err) => {
+    console.error("FATAL:", err);
+    process.exit(2);
+  });

@@ -106,7 +106,9 @@ function main(): void {
     totalSuggestions += suggestions.length;
     console.log(`\n🔧 ${err.specTitle}`);
     console.log(`   File: ${err.file}`);
-    console.log(`   Classification: ${classification.type} (confidence: ${classification.confidence})`);
+    console.log(
+      `   Classification: ${classification.type} (confidence: ${classification.confidence})`,
+    );
     for (const s of suggestions) {
       console.log(`\n   💡 ${s.title} (confidence: ${s.confidence})`);
       console.log(`      ${s.description}`);
@@ -116,7 +118,9 @@ function main(): void {
     }
   }
 
-  console.log(`\n📊 Total: ${totalSuggestions} suggestion(s) across ${extractedErrors.length} error(s)\n`);
+  console.log(
+    `\n📊 Total: ${totalSuggestions} suggestion(s) across ${extractedErrors.length} error(s)\n`,
+  );
 }
 
 main();

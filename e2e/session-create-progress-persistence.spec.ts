@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * E2E Test: Session creation/deletion progress persistence across project switches
  *
@@ -10,12 +13,9 @@
  *
  * Each test creates its own isolated project directories to avoid state leakage.
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
-import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 /**
  * Create a temporary git project for testing.
@@ -30,20 +30,23 @@ function createTempProject(name: string): string {
 
   // Initialize git repo
   execSync("git init", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.email \"test@test.com\"", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.name \"Test\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.name "Test"', { cwd: projectPath, stdio: "ignore" });
 
   // Create initial commit (required for git worktree)
   writeFileSync(join(projectPath, "README.md"), "# Test Project");
   execSync("git add .", { cwd: projectPath, stdio: "ignore" });
-  execSync("git commit -m \"init\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git commit -m "init"', { cwd: projectPath, stdio: "ignore" });
 
   // Create agentdock config (disable hooks for faster tests)
-  writeFileSync(join(projectPath, "agentdock.config.yaml"), `
+  writeFileSync(
+    join(projectPath, "agentdock.config.yaml"),
+    `
 hooks:
   afterCreateSession: []
   afterDeleteSession: []
-`);
+`,
+  );
 
   return projectPath;
 }
@@ -96,14 +99,7 @@ test.describe("Session creation progress persistence", () => {
     }
   });
 
-  test("creation progress persists after switching projects", async ({
-    window,
-    dataDir,
-    pageErrors,
-    dialogs,
-    rendererLog,
-    expectNoRendererErrors,
-  }) => {
+  test("creation progress persists after switching projects", async ({ window }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
@@ -151,7 +147,10 @@ test.describe("Session creation progress persistence", () => {
 
     // Switch back to first project tab
     const project1Name = project1.split("\\").pop()!;
-    const project1Tab = window.locator('[data-testid="project-tab"]').filter({ hasText: project1Name }).first();
+    const project1Tab = window
+      .locator('[data-testid="project-tab"]')
+      .filter({ hasText: project1Name })
+      .first();
     await project1Tab.click();
 
     // Wait for projects to be loaded
@@ -172,20 +171,15 @@ test.describe("Session creation progress persistence", () => {
     expect(cardsAfterSwitch).toBe(initialCount + 1);
 
     // Verify the session is still there by checking the data-session-id attribute
-    const sessionCard = window.locator(`[data-testid="session-card"][data-session-id="${newSessionId}"]`);
+    const sessionCard = window.locator(
+      `[data-testid="session-card"][data-session-id="${newSessionId}"]`,
+    );
     const sessionStillThere = await sessionCard.isVisible().catch(() => false);
     console.log(`Session ${newSessionId} visible after switch: ${sessionStillThere}`);
     expect(sessionStillThere).toBe(true);
   });
 
-  test("deletion progress persists after switching projects", async ({
-    window,
-    dataDir,
-    pageErrors,
-    dialogs,
-    rendererLog,
-    expectNoRendererErrors,
-  }) => {
+  test("deletion progress persists after switching projects", async ({ window }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
@@ -218,12 +212,14 @@ test.describe("Session creation progress persistence", () => {
     await sessionCard.click({ button: "right" });
 
     // Look for delete option in context menu
-    const deleteOption = window.locator('text=Delete, text=删除').first();
+    const deleteOption = window.locator("text=Delete, text=删除").first();
     if (await deleteOption.isVisible()) {
       await deleteOption.click();
 
       // Confirm deletion if modal appears
-      const confirmBtn = window.locator('button:has-text("Confirm"), button:has-text("确认")').first();
+      const confirmBtn = window
+        .locator('button:has-text("Confirm"), button:has-text("确认")')
+        .first();
       if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await confirmBtn.click();
       }
@@ -249,7 +245,10 @@ test.describe("Session creation progress persistence", () => {
 
       // Switch back to first project tab
       const project1Name = project1.split("\\").pop()!;
-      const project1Tab = window.locator('[data-testid="project-tab"]').filter({ hasText: project1Name }).first();
+      const project1Tab = window
+        .locator('[data-testid="project-tab"]')
+        .filter({ hasText: project1Name })
+        .first();
       await project1Tab.click();
 
       // Wait for projects to be loaded

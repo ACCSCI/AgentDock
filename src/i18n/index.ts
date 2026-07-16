@@ -3,17 +3,17 @@ import { initReactI18next } from "react-i18next";
 
 // 默认语言的翻译文件 —— 同步 import,确保启动即可用
 import enCommon from "./locales/en/common.json";
+import enCompatPrompt from "./locales/en/compat-prompt.json";
+import enConfigEditor from "./locales/en/config-editor.json";
+import enDaemon from "./locales/en/daemon.json";
+import enErrorBoundary from "./locales/en/error-boundary.json";
+import enHome from "./locales/en/home.json";
+import enModals from "./locales/en/modals.json";
+import enSession from "./locales/en/session.json";
 import enSettings from "./locales/en/settings.json";
 import enSidebar from "./locales/en/sidebar.json";
-import enSession from "./locales/en/session.json";
-import enConfigEditor from "./locales/en/config-editor.json";
-import enModals from "./locales/en/modals.json";
 import enTerminal from "./locales/en/terminal.json";
 import enTodo from "./locales/en/todo.json";
-import enHome from "./locales/en/home.json";
-import enErrorBoundary from "./locales/en/error-boundary.json";
-import enDaemon from "./locales/en/daemon.json";
-import enCompatPrompt from "./locales/en/compat-prompt.json";
 
 // 同步加载英文翻译 (默认语言,启动必须)
 const enResources = {

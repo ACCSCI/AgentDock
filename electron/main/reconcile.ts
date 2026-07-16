@@ -1,3 +1,4 @@
+import process from "node:process";
 // @ts-nocheck
 /**
  * reconcile — Walk every session in the active project's DB and compare its
@@ -15,18 +16,21 @@
  * Extracted from main.ts (Approach A: state stays in main.ts, passed as params).
  */
 import { eq } from "drizzle-orm";
-import process from "node:process";
-import { log } from "../../plugins/logger.js";
 import { ensureActiveDb } from "../../plugins/db/index.js";
 import * as schema from "../../plugins/db/schema.js";
-import type { V2PortServiceHandle } from "../../plugins/v2-port-service.js";
+import { log } from "../../plugins/logger.js";
 import { writePortsToEnv } from "../../plugins/port-write-env.js";
+import type { V2PortServiceHandle } from "../../plugins/v2-port-service.js";
 
 export interface ReconcileContext {
   activeProjectPath: string | null;
   v2PortService: V2PortServiceHandle | null;
   cachedDaemonPort: number;
-  globalDbHandle: { db: ReturnType<typeof import("../../plugins/db/global.js").openGlobalDb> extends { db: infer T } ? T : never } | null;
+  globalDbHandle: {
+    db: ReturnType<typeof import("../../plugins/db/global.js").openGlobalDb> extends { db: infer T }
+      ? T
+      : never;
+  } | null;
   reallocatedQueue: Array<{
     sessionId: string;
     oldPorts: Record<string, number>;
@@ -35,9 +39,7 @@ export interface ReconcileContext {
   clientId: string;
 }
 
-export async function reconcileAndDeclareSessions(
-  ctx: ReconcileContext,
-): Promise<void> {
+export async function reconcileAndDeclareSessions(ctx: ReconcileContext): Promise<void> {
   if (!ctx.activeProjectPath) return;
   if (!ctx.v2PortService || ctx.cachedDaemonPort <= 0) {
     log.info("reconcile: v2 not available, skipping (v1 routes removed in F10-2a)");
@@ -119,13 +121,12 @@ export async function reconcileAndDeclareSessions(
     const row = rowsBySessionId.get(known.sessionId);
     if (!row) continue;
     if (ds.status !== "active") continue; // Only reconcile active sessions.
-    const oldPorts = row.ports
-      ? (JSON.parse(row.ports) as Record<string, number>)
-      : {};
+    const oldPorts = row.ports ? (JSON.parse(row.ports) as Record<string, number>) : {};
     const newPorts = ds.ports;
     const keys1 = Object.keys(oldPorts);
     const keys2 = Object.keys(newPorts);
-    const portsEqual = keys1.length === keys2.length && keys1.every((k) => oldPorts[k] === newPorts[k]);
+    const portsEqual =
+      keys1.length === keys2.length && keys1.every((k) => oldPorts[k] === newPorts[k]);
     if (portsEqual) continue;
 
     ctx.reallocatedQueue.push({
@@ -147,10 +148,7 @@ export async function reconcileAndDeclareSessions(
         writePortsToEnv(row.worktreePath, newPorts, project.path);
       }
     } catch (err) {
-      log.warn(
-        { err, sessionId: row.id },
-        "reconcile: persist reallocated ports failed",
-      );
+      log.warn({ err, sessionId: row.id }, "reconcile: persist reallocated ports failed");
     }
   }
 }

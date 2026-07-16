@@ -8,7 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, queryKeys } from "./helpers.js";
-import type { HookError, ProjectData, SessionData, SessionListItem } from "./types.js";
+import type { HookError, SessionData, SessionListItem } from "./types.js";
 
 // GET bgHookStatus — polled while the session's background hooks run
 // [COMPENSATION-LOGIC] Polling every 2s for background hook status
@@ -72,7 +72,7 @@ export function useHookErrors(sessionId: string | null) {
     queryKey: ["hookErrors", sessionId],
     queryFn: async (): Promise<HookError[]> => {
       if (!sessionId) return [];
-      return api().sessions.hookErrors(sessionId);
+      return (await api().sessions.hookErrors(sessionId)) as HookError[];
     },
     enabled: !!sessionId,
     staleTime: 5_000,

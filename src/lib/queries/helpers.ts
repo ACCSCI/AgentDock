@@ -2,8 +2,6 @@
  * Shared helpers for React Query hooks.
  */
 
-import type {} from "../../../electron"; // pulls in window.api type augmentation
-
 // Query keys
 export const queryKeys = {
   projects: ["projects"] as const,
@@ -19,9 +17,7 @@ declare global {
 
 export function api() {
   if (!window.api) {
-    throw new Error(
-      "window.api is not available. Are you running outside Electron?",
-    );
+    throw new Error("window.api is not available. Are you running outside Electron?");
   }
   return window.api;
 }

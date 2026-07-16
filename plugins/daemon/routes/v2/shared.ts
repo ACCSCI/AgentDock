@@ -6,30 +6,27 @@
  * route file only has to import from "./shared.js".
  */
 import { zValidator } from "@hono/zod-validator";
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import type { DaemonContext } from "../../context.js";
-import {
-  LEASE_TTL_MS,
-  PROTOCOL_VERSION,
-} from "../../../constants.js";
+import { LEASE_TTL_MS, PROTOCOL_VERSION } from "../../../constants.js";
 import {
   CURRENT_SCHEMA_VERSION,
+  type DaemonStateV2,
   NotOwnerError,
   PortConflictError,
   RecoveringError,
   SessionBusyError,
   SessionNotDeletableError,
   StaleOwnerError,
-  type DaemonStateV2,
 } from "../../../daemon-state-v2.js";
-import { isPortAvailable, pickFreePort } from "../../../port-allocator.js";
-import { zodErrorHandler } from "../../middleware/error.js";
-import { gateClaimInRecovering } from "../../../recovering-controller.js";
-import { lookupCurrentBranch } from "../../../git-branch-lookup.js";
 import { sanitizeDisplayName } from "../../../display-name.js";
+import { lookupCurrentBranch } from "../../../git-branch-lookup.js";
 import { checkAllInvariants } from "../../../invariants.js";
-import { streamSSE } from "hono/streaming";
+import { isPortAvailable, pickFreePort } from "../../../port-allocator.js";
+import { gateClaimInRecovering } from "../../../recovering-controller.js";
+import type { DaemonContext } from "../../context.js";
+import { zodErrorHandler } from "../../middleware/error.js";
 
 const SESSION_ID_RE = /^[a-zA-Z0-9-_]+$/;
 

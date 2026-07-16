@@ -13,8 +13,22 @@ import { emptyState } from "../lib/daemon-sync";
 
 // Serialized state from main process (Map entries as tuples)
 interface SerializedV2State {
-  sessions: Array<[string, { sessionId: string; projectRoot: string; displayName: string; status: string; createdAt: number; ports: Record<string, number> }]>;
-  owners: Array<[string, { sessionId: string; clientId: string; pid: number; fencingToken: number }]>;
+  sessions: Array<
+    [
+      string,
+      {
+        sessionId: string;
+        projectRoot: string;
+        displayName: string;
+        status: string;
+        createdAt: number;
+        ports: Record<string, number>;
+      },
+    ]
+  >;
+  owners: Array<
+    [string, { sessionId: string; clientId: string; pid: number; fencingToken: number }]
+  >;
   ports: Array<[number, { sessionId: string; name: string }]>;
   snapshotSeq: number | null;
   appliedSeq: number;
@@ -40,7 +54,10 @@ function deserializeState(serialized: SerializedV2State): AppliedState {
   state.appliedSeq = serialized.appliedSeq;
 
   for (const [key, value] of serialized.sessions) {
-    state.sessions.set(key, value as AppliedState["sessions"] extends Map<string, infer V> ? V : never);
+    state.sessions.set(
+      key,
+      value as AppliedState["sessions"] extends Map<string, infer V> ? V : never,
+    );
   }
   for (const [key, value] of serialized.owners) {
     state.owners.set(key, value);

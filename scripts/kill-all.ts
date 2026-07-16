@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 // @ts-nocheck
 /**
  * Kill all AgentDock instances (Vite dev servers) and the daemon process.
@@ -11,14 +12,13 @@
  *  3. Find daemon process on port 20000 → kill it
  *  4. Clean up registry.json and daemon-state.json
  */
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import { join } from "node:path";
 
 const AGENTDOCK_DIR = join(os.homedir(), ".agentdock");
 const REGISTRY_PATH = join(AGENTDOCK_DIR, "registry.json");
-const DAEMON_STATE_PATH = join(AGENTDOCK_DIR, "daemon-state.json");
+const _DAEMON_STATE_PATH = join(AGENTDOCK_DIR, "daemon-state.json");
 const DAEMON_INFO_PATH = join(AGENTDOCK_DIR, "daemon.json");
 const DAEMON_LOCK_PATH = join(AGENTDOCK_DIR, "daemon-lock");
 
@@ -29,12 +29,14 @@ function log(msg: string) {
 function isProcessAlive(pid: number): boolean {
   try {
     if (process.platform === "win32") {
-      const out = execSync(`tasklist /FI "PID eq ${pid}" /NH`, { encoding: "utf-8", timeout: 5000 });
+      const out = execSync(`tasklist /FI "PID eq ${pid}" /NH`, {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       return out.includes(String(pid));
-    } else {
-      process.kill(pid, 0);
-      return true;
     }
+    process.kill(pid, 0);
+    return true;
   } catch {
     return false;
   }
@@ -67,7 +69,9 @@ function findDaemonPid(): number | null {
       if (info.pid && isProcessAlive(info.pid)) {
         return info.pid;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Fallback 1: read daemon-lock file (leader election lock holder)
@@ -77,7 +81,9 @@ function findDaemonPid(): number | null {
       if (lockData.pid && isProcessAlive(lockData.pid)) {
         return lockData.pid;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Fallback: scan common port range for backward compatibility
@@ -87,16 +93,19 @@ function findDaemonPid(): number | null {
     try {
       if (process.platform === "win32") {
         const out = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, {
-          encoding: "utf-8", timeout: 3000,
+          encoding: "utf-8",
+          timeout: 3000,
         });
         const match = out.trim().match(/\s(\d+)\s*$/);
-        if (match) return parseInt(match[1], 10);
+        if (match) return Number.parseInt(match[1], 10);
       } else {
         const out = execSync(`lsof -i :${port} -t`, { encoding: "utf-8", timeout: 3000 });
-        const pid = parseInt(out.trim().split("\n")[0], 10);
-        if (!isNaN(pid) && isProcessAlive(pid)) return pid;
+        const pid = Number.parseInt(out.trim().split("\n")[0], 10);
+        if (!Number.isNaN(pid) && isProcessAlive(pid)) return pid;
       }
-    } catch { /* port not in use */ }
+    } catch {
+      /* port not in use */
+    }
   }
   return null;
 }
@@ -117,17 +126,17 @@ function findVitePids(): number[] {
       );
       for (const line of out.split("\n")) {
         const match = line.match(/,(\d+)\s*$/);
-        if (match) pids.push(parseInt(match[1], 10));
+        if (match) pids.push(Number.parseInt(match[1], 10));
       }
     } else {
-      const out = execSync(
-        `ps -eo pid,args | grep -E 'vite|agentdock' | grep -v grep`,
-        { encoding: "utf-8", timeout: 5000 },
-      );
+      const out = execSync(`ps -eo pid,args | grep -E 'vite|agentdock' | grep -v grep`, {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       for (const line of out.split("\n")) {
         const match = line.trim().match(/^(\d+)/);
         if (match) {
-          const pid = parseInt(match[1], 10);
+          const pid = Number.parseInt(match[1], 10);
           if (pid !== selfPid) pids.push(pid);
         }
       }
@@ -201,7 +210,11 @@ if (existsSync(REGISTRY_PATH)) {
   log("  registry.json — cleared");
 }
 if (existsSync(DAEMON_INFO_PATH)) {
-  try { unlinkSync(DAEMON_INFO_PATH); } catch { /* ignore */ }
+  try {
+    unlinkSync(DAEMON_INFO_PATH);
+  } catch {
+    /* ignore */
+  }
   log("  daemon.json — removed");
 }
 

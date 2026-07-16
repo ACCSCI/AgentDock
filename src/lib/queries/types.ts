@@ -10,10 +10,7 @@ export interface ProjectData {
   sessions: SessionListItem[];
 }
 
-export type SessionRuntimeStatus =
-  | "existing"
-  | "creating"
-  | "deleting";
+export type SessionRuntimeStatus = "existing" | "creating" | "deleting";
 
 export type SessionUserStatus = "draft" | "plan" | "working" | "pr" | "verifying" | "done";
 
@@ -37,7 +34,7 @@ export interface SessionData {
   createdAt: string;
   backgroundHookStatus?: string | null;
   status?: SessionRuntimeStatus;
-  steps?: SessionStep[] | null;  // lifecycle step progress from backend
+  steps?: SessionStep[] | null; // lifecycle step progress from backend
   ownerClientId?: string | null;
   canSelect?: boolean;
   canDelete?: boolean;
@@ -113,7 +110,10 @@ export interface ProjectConfigData {
   config: {
     version: string;
     resources: { sync: Array<{ source: string; strategy: string; skipIfMissing: boolean }> };
-    hooks: Record<string, Array<{ run: string; required: boolean; timeout: number; cwd: string; async: boolean }>>;
+    hooks: Record<
+      string,
+      Array<{ run: string; required: boolean; timeout: number; cwd: string; async: boolean }>
+    >;
     env?: { ports?: string[] };
   };
   exists: boolean;

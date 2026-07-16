@@ -1,17 +1,10 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-} from "node:fs";
-import path from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ResourceDefinition } from "../config.js";
-import { createResourceSyncService, SyncError } from "../resource-sync.js";
+import { SyncError, createResourceSyncService } from "../resource-sync.js";
 
 let projectDir: string;
 let worktreeDir: string;
@@ -65,11 +58,7 @@ describe("单文件同步 syncOne", () => {
   it("B3: skip 策略跳过已有文件", async () => {
     writeFileSync(path.join(projectDir, ".env"), "A=new\n");
     writeFileSync(path.join(worktreeDir, ".env"), "A=old\n");
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource(".env", "skip"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource(".env", "skip"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("skipped");
     expect(readFileSync(path.join(worktreeDir, ".env"), "utf-8")).toBe("A=old\n");
@@ -77,11 +66,7 @@ describe("单文件同步 syncOne", () => {
 
   it("B4: skip 策略复制不存在的文件", async () => {
     writeFileSync(path.join(projectDir, ".env"), "A=1\n");
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource(".env", "skip"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource(".env", "skip"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("copied");
     expect(readFileSync(path.join(worktreeDir, ".env"), "utf-8")).toBe("A=1\n");
@@ -90,11 +75,7 @@ describe("单文件同步 syncOne", () => {
   it("B5: merge 策略合并 .env 文件 — source 覆盖同名 key, target 独有 key 保留", async () => {
     writeFileSync(path.join(projectDir, ".env"), "A=1\nB=2\n");
     writeFileSync(path.join(worktreeDir, ".env"), "B=old\nC=3\n");
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource(".env", "merge"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource(".env", "merge"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("merged");
     const merged = readFileSync(path.join(worktreeDir, ".env"), "utf-8");
@@ -106,11 +87,7 @@ describe("单文件同步 syncOne", () => {
 
   it("B6: merge 策略对目标不存在的文件等同于复制", async () => {
     writeFileSync(path.join(projectDir, ".env"), "A=1\n");
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource(".env", "merge"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource(".env", "merge"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("copied");
     expect(readFileSync(path.join(worktreeDir, ".env"), "utf-8")).toBe("A=1\n");
@@ -222,11 +199,7 @@ describe("目录同步 syncOne", () => {
     mkdirSync(wtUploads, { recursive: true });
     writeFileSync(path.join(wtUploads, "old.txt"), "old");
 
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource("uploads/", "skip"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource("uploads/", "skip"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("skipped");
     // worktree unchanged
@@ -265,11 +238,7 @@ describe("目录同步 syncOne", () => {
     writeFileSync(path.join(uploadsDir, "a.txt"), "file-a");
     writeFileSync(path.join(uploadsDir, "b.txt"), "file-b");
 
-    const result = await service.syncOne(
-      projectDir,
-      worktreeDir,
-      makeResource("uploads/", "skip"),
-    );
+    const result = await service.syncOne(projectDir, worktreeDir, makeResource("uploads/", "skip"));
     expect(result.success).toBe(true);
     expect(result.action).toBe("copied");
     // Directory should have been copied
@@ -340,9 +309,7 @@ describe("syncAll 批量同步", () => {
 
   it("B19: 同步记录耗时", async () => {
     writeFileSync(path.join(projectDir, ".env"), "A=1\n");
-    const report = await service.syncAll(projectDir, worktreeDir, [
-      makeResource(".env"),
-    ]);
+    const report = await service.syncAll(projectDir, worktreeDir, [makeResource(".env")]);
     expect(report.duration).toBeGreaterThanOrEqual(0);
     expect(typeof report.duration).toBe("number");
   });
@@ -356,9 +323,7 @@ describe("边界情况", () => {
     writeFileSync(path.join(projectDir, ".env"), "A=1\n");
     const badWorktree = path.join(os.tmpdir(), `nonexistent-${Date.now()}`);
     // Don't create the directory
-    await expect(
-      service.syncOne(projectDir, badWorktree, makeResource(".env")),
-    ).rejects.toThrow();
+    await expect(service.syncOne(projectDir, badWorktree, makeResource(".env"))).rejects.toThrow();
   });
 
   it("B21: project 路径不存在时 — 源文件 missing, skipIfMissing=true", async () => {
@@ -384,9 +349,9 @@ describe("边界情况", () => {
     );
     expect(result.success).toBe(true);
     expect(result.action).toBe("copied");
-    expect(
-      readFileSync(path.join(worktreeDir, "my files", "config.json"), "utf-8"),
-    ).toBe('{"ok":true}');
+    expect(readFileSync(path.join(worktreeDir, "my files", "config.json"), "utf-8")).toBe(
+      '{"ok":true}',
+    );
   });
 
   it("B23: 嵌套目录同步", async () => {
@@ -402,10 +367,7 @@ describe("边界情况", () => {
     );
     expect(result.success).toBe(true);
     expect(
-      readFileSync(
-        path.join(worktreeDir, "src", "components", "ui", "Button.tsx"),
-        "utf-8",
-      ),
+      readFileSync(path.join(worktreeDir, "src", "components", "ui", "Button.tsx"), "utf-8"),
     ).toBe("<Button/>");
   });
 });

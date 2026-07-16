@@ -85,7 +85,7 @@ function buildScopedChildEnv(workspacePath, runtimeEnv = {}, parentEnv = process
 let ptySpawn = null;
 try {
   ptySpawn = require("node-pty").spawn;
-} catch (err) {
+} catch (_err) {
   // 将在 spawn 时延迟重试
 }
 
@@ -104,7 +104,9 @@ function resolveShell(requestedShell) {
       try {
         execSync(`where ${shell}`, { stdio: "pipe" });
         return shell;
-      } catch { /* not found, try next */ }
+      } catch {
+        /* not found, try next */
+      }
     }
     return process.env.COMSPEC || "cmd.exe";
   }
@@ -137,7 +139,7 @@ rl.on("line", (raw) => {
 });
 
 function send(data) {
-  process.stdout.write(JSON.stringify(data) + "\n");
+  process.stdout.write(`${JSON.stringify(data)}\n`);
 }
 
 function handleMessage(msg) {
@@ -242,19 +244,25 @@ function handleKill(msg) {
   if (!pty) return;
   try {
     pty.kill();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   ptySessions.delete(msg.terminalId);
 }
 
 function handleKillAll() {
-  for (const [id, pty] of ptySessions) {
-    try { pty.kill(); } catch { /* ignore */ }
+  for (const [_id, pty] of ptySessions) {
+    try {
+      pty.kill();
+    } catch {
+      /* ignore */
+    }
   }
   ptySessions.clear();
 }
 
 // 通知父进程就绪
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\n");
+process.stdout.write(`${JSON.stringify({ type: "ready" })}\n`);
 
 // 父进程退出信号
 process.on("SIGTERM", () => {

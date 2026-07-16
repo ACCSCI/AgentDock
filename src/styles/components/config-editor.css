@@ -152,7 +152,8 @@
   gap: 4px;
 }
 
-.config-field label {
+.config-field label,
+.config-field-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -478,4 +479,3 @@
 /* ============================================
    Config Editor — Port Configuration (env.ports)
    ============================================ */
-

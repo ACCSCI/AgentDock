@@ -1,3 +1,6 @@
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { eq } from "drizzle-orm";
 /**
  * FS + Config IPC handlers.
  *
@@ -9,16 +12,12 @@
  * hint always points at the real project directory, not a worktree.
  */
 import { ipcMain } from "electron";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { stringify as yamlStringify } from "yaml";
-import { eq } from "drizzle-orm";
-import { IPC_CHANNELS } from "../../shared/api-types.js";
-import * as schema from "../../../plugins/db/schema.js";
-import { loadConfig, AgentDockConfigSchema } from "../../../plugins/config.js";
-import { discoverPortKeysFromEnv } from "../../../plugins/env.js";
-import { log } from "../../../plugins/logger.js";
+import { AgentDockConfigSchema, loadConfig } from "../../../plugins/config.js";
 import type { DrizzleDb } from "../../../plugins/db/index.js";
+import * as schema from "../../../plugins/db/schema.js";
+import { discoverPortKeysFromEnv } from "../../../plugins/env.js";
+import { IPC_CHANNELS } from "../../shared/api-types.js";
 
 function resolveProjectRoot(
   projectId?: string | null,
@@ -83,29 +82,31 @@ export function registerFsAndConfig(
       const fullPath = join(absPath, e.name);
       const rel = relPath ? join(relPath, e.name) : e.name;
       const stat = statSync(fullPath);
-      return { name: e.name, path: rel, isDir: e.isDirectory(), size: e.isFile() ? stat.size : null };
+      return {
+        name: e.name,
+        path: rel,
+        isDir: e.isDirectory(),
+        size: e.isFile() ? stat.size : null,
+      };
     });
   });
 
   // config:get — read the project's agentdock.config.yaml + .env hints.
   // projectId is passed by the renderer so we resolve the REAL project root
   // from DB instead of using getProjectPath() which may point at a worktree.
-  ipcMain.handle(
-    IPC_CHANNELS["config:get"],
-    (_e, params?: { projectId?: string }) => {
-      const projectId = params?.projectId;
-      const projectPath = resolveProjectRoot(projectId, getProjectPath(), getGlobalDb);
-      const config = loadConfig(projectPath);
-      const yamlPath = join(projectPath, "agentdock.config.yaml");
-      let yaml = "";
-      if (existsSync(yamlPath)) {
-        yaml = readFileSync(yamlPath, "utf-8");
-      }
-      const envPath = join(projectPath, ".env");
-      const envPorts = existsSync(envPath) ? discoverPortKeysFromEnv(envPath) : [];
-      return { config, exists: existsSync(yamlPath), yaml, envPorts };
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS["config:get"], (_e, params?: { projectId?: string }) => {
+    const projectId = params?.projectId;
+    const projectPath = resolveProjectRoot(projectId, getProjectPath(), getGlobalDb);
+    const config = loadConfig(projectPath);
+    const yamlPath = join(projectPath, "agentdock.config.yaml");
+    let yaml = "";
+    if (existsSync(yamlPath)) {
+      yaml = readFileSync(yamlPath, "utf-8");
+    }
+    const envPath = join(projectPath, ".env");
+    const envPorts = existsSync(envPath) ? discoverPortKeysFromEnv(envPath) : [];
+    return { config, exists: existsSync(yamlPath), yaml, envPorts };
+  });
 
   // config:save — write agentdock.config.yaml
   ipcMain.handle(

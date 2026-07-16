@@ -8,25 +8,24 @@
  *
  * NOTE: Session persistence across tabs is verified by UI state (tab counts,
  * no crashes) rather than DB queries, because the v2 architecture stores
- * session state in the daemon rather than the local DB.
+ * session state through the main-process lifecycle and project DB.
  */
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TabBarPage } from "./pages/tab-bar";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -58,8 +57,8 @@ test.describe("multi-project workflow", () => {
     const tabBar = new TabBarPage(window);
     const sidebar = new SidebarPage(window);
 
-    // Wait for daemon to be ready before any session creation.
-    await waitForDaemonReady(window);
+    // Wait for main-process IPC to be ready before any session creation.
+    await waitForAppReady(window);
 
     // 2. Open project A from home.
     await expect(home.openProjectButton).toBeVisible();
@@ -76,9 +75,7 @@ test.describe("multi-project workflow", () => {
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     expect(await sidebar.cardCount()).toBe(0);
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     // 5. Click "+" to open project B via the tab bar.
     await tabBar.openProjectViaPlusButton();
@@ -88,9 +85,7 @@ test.describe("multi-project workflow", () => {
 
     // 6. TabBar should now show two tabs.
     const allTabs = window.locator(`[data-testid="${TID.projectTab}"]`);
-    await expect
-      .poll(() => allTabs.count(), { timeout: 15_000 })
-      .toBeGreaterThanOrEqual(2);
+    await expect.poll(() => allTabs.count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
 
     // Find project B's tab.
     const tabs = await allTabs.all();
@@ -107,9 +102,7 @@ test.describe("multi-project workflow", () => {
     // 7. Create a session in project B.
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     // 8. Switch back to project A by clicking its tab.
     await tabBar.switchTo(projectIdA!);
@@ -126,8 +119,8 @@ test.describe("multi-project workflow", () => {
     await expect.poll(() => allTabs.count()).toBeGreaterThanOrEqual(2);
 
     // 11. No renderer errors.
-    //     NOTE: alert dialogs from daemon /sessions/allocate failures are
-    //     a known app-level issue (daemon v2 endpoint may not be ready);
+    //     NOTE: alert dialogs from session allocation failures are
+    //     captured as app-level errors;
     //     we don't fail the test on them but log them for visibility.
     if (dialogs.filter((d) => d.type === "alert").length > 0) {
       console.log(
@@ -140,10 +133,11 @@ test.describe("multi-project workflow", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(
       consoleErrors,

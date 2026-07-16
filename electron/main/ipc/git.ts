@@ -12,9 +12,9 @@
  * session creation tries `git worktree add`.
  */
 import { ipcMain } from "electron";
-import { IPC_CHANNELS } from "../../shared/api-types.js";
-import { isGitRepo, initGitRepo } from "../../../plugins/worktree.js";
 import { log } from "../../../plugins/logger.js";
+import { initGitRepo, isGitRepo } from "../../../plugins/worktree.js";
+import { IPC_CHANNELS } from "../../shared/api-types.js";
 
 export function registerGit(): void {
   ipcMain.handle(IPC_CHANNELS["git:isRepo"], (_e, dirPath: string) => {

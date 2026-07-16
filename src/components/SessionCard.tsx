@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { FileText, ClipboardList, Wrench, Send, CircleHelp, CheckCircle2 } from "lucide-react";
-import { isCreatingSession, isDeletingSession, isBackgroundHookRunning, isBackgroundHookFailed, useBackgroundHookStatus, type CreatingSession, type DeletingSession, type SessionData, type SessionListItem, type SessionStep, type SessionUserStatus } from "../lib/queries";
+import { CheckCircle2, CircleHelp, ClipboardList, FileText, Send, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n/react";
+import {
+  type CreatingSession,
+  type DeletingSession,
+  type SessionData,
+  type SessionListItem,
+  type SessionStep,
+  type SessionUserStatus,
+  isBackgroundHookFailed,
+  isBackgroundHookRunning,
+  isCreatingSession,
+  isDeletingSession,
+  useBackgroundHookStatus,
+} from "../lib/queries";
 
 // ── Session user-status definitions ────────────────────────────────
 import type { LucideIcon } from "lucide-react";
@@ -37,7 +49,7 @@ function computeHeat(lastActivatedAt: string | null | undefined): number {
   const elapsed = Date.now() - ts;
   if (elapsed < 0) return 0;
   const HALF_LIFE = 5 * 60 * 1000; // 5 min → 30 min ≈ 0.016 (nearly invisible)
-  return Math.pow(0.5, elapsed / HALF_LIFE);
+  return 0.5 ** (elapsed / HALF_LIFE);
 }
 
 function StepIcon({ status }: { status: SessionStep["status"] }) {
@@ -114,27 +126,61 @@ export function SessionCard({
   onDragEnd,
 }: SessionCardProps) {
   const { t } = useTranslation("session");
-  const USER_STATUS_OPTIONS = useMemo(() => [
-    { key: "draft" as SessionUserStatus, Icon: FileText, label: t("status.draft"), color: "#8B5CF6" },
-    { key: "plan" as SessionUserStatus, Icon: ClipboardList, label: t("status.plan"), color: "#3B82F6" },
-    { key: "working" as SessionUserStatus, Icon: Wrench, label: t("status.working"), color: "#F59E0B" },
-    { key: "pr" as SessionUserStatus, Icon: Send, label: t("status.pr"), color: "#10B981" },
-    { key: "verifying" as SessionUserStatus, Icon: CircleHelp, label: t("status.verifying"), color: "#F97316" },
-    { key: "done" as SessionUserStatus, Icon: CheckCircle2, label: t("status.done"), color: "#6B7280" },
-  ], [t]);
-  const createStepLabels = useMemo(() => ({
-    beforeCreateSession: t("step.beforeCreateSession"),
-    createWorktree: t("step.createWorktree"),
-    syncResources: t("step.syncResources"),
-    allocatePorts: t("step.allocatePorts"),
-    afterCreateSession: t("step.afterCreateSession"),
-  }), [t]);
-  const deleteStepLabels = useMemo(() => ({
-    beforeDeleteSession: t("step.beforeDeleteSession"),
-    releasePorts: t("step.releasePorts"),
-    removeWorktree: t("step.removeWorktree"),
-    afterDeleteSession: t("step.afterDeleteSession"),
-  }), [t]);
+  const USER_STATUS_OPTIONS = useMemo(
+    () => [
+      {
+        key: "draft" as SessionUserStatus,
+        Icon: FileText,
+        label: t("status.draft"),
+        color: "#8B5CF6",
+      },
+      {
+        key: "plan" as SessionUserStatus,
+        Icon: ClipboardList,
+        label: t("status.plan"),
+        color: "#3B82F6",
+      },
+      {
+        key: "working" as SessionUserStatus,
+        Icon: Wrench,
+        label: t("status.working"),
+        color: "#F59E0B",
+      },
+      { key: "pr" as SessionUserStatus, Icon: Send, label: t("status.pr"), color: "#10B981" },
+      {
+        key: "verifying" as SessionUserStatus,
+        Icon: CircleHelp,
+        label: t("status.verifying"),
+        color: "#F97316",
+      },
+      {
+        key: "done" as SessionUserStatus,
+        Icon: CheckCircle2,
+        label: t("status.done"),
+        color: "#6B7280",
+      },
+    ],
+    [t],
+  );
+  const createStepLabels = useMemo(
+    () => ({
+      beforeCreateSession: t("step.beforeCreateSession"),
+      createWorktree: t("step.createWorktree"),
+      syncResources: t("step.syncResources"),
+      allocatePorts: t("step.allocatePorts"),
+      afterCreateSession: t("step.afterCreateSession"),
+    }),
+    [t],
+  );
+  const deleteStepLabels = useMemo(
+    () => ({
+      beforeDeleteSession: t("step.beforeDeleteSession"),
+      releasePorts: t("step.releasePorts"),
+      removeWorktree: t("step.removeWorktree"),
+      afterDeleteSession: t("step.afterDeleteSession"),
+    }),
+    [t],
+  );
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -144,7 +190,8 @@ export function SessionCard({
   const submenuRef = useRef<HTMLDivElement>(null);
 
   // Heat value — recomputed every 10s via interval + on session data change
-  const lastActivatedAt = "lastActivatedAt" in session ? (session as SessionData).lastActivatedAt : null;
+  const lastActivatedAt =
+    "lastActivatedAt" in session ? (session as SessionData).lastActivatedAt : null;
   const [heat, setHeat] = useState(() => computeHeat(lastActivatedAt));
 
   useEffect(() => {
@@ -312,16 +359,10 @@ export function SessionCard({
     [menuPos],
   );
 
-  const isForeign = session.status === "foreign";
-  const statusLabel = session.status === "foreign" ? "Foreign" : null;
-  const foreignTitle = session.ownerClientId
-    ? `This session is currently managed by another AgentDock instance (${session.ownerClientId}).`
-    : "This session is currently managed by another AgentDock instance.";
-
   // ── Inline styles for heatmap overlay ──────────────────────────────
   const heatmapStyle = useMemo<React.CSSProperties>(() => {
     if (statusColor) {
-      const opacity = Math.min(heat * 0.30, 0.30);
+      const opacity = Math.min(heat * 0.3, 0.3);
       return {
         "--session-status-color": statusColor,
         "--session-heat": opacity,
@@ -343,7 +384,17 @@ export function SessionCard({
           <span className="step-spinner" />
           <span className="session-name">{creating.name}</span>
         </div>
-        <LifecycleSteps steps={creating.steps} stepOrder={["beforeCreateSession", "createWorktree", "syncResources", "allocatePorts", "afterCreateSession"]} labels={createStepLabels} />
+        <LifecycleSteps
+          steps={creating.steps}
+          stepOrder={[
+            "beforeCreateSession",
+            "createWorktree",
+            "syncResources",
+            "allocatePorts",
+            "afterCreateSession",
+          ]}
+          labels={createStepLabels}
+        />
       </div>
     );
   }
@@ -357,7 +408,16 @@ export function SessionCard({
           <span className="step-spinner" />
           <span className="session-name">{deleting.name}</span>
         </div>
-        <LifecycleSteps steps={deleting.steps} stepOrder={["beforeDeleteSession", "releasePorts", "removeWorktree", "afterDeleteSession"]} labels={deleteStepLabels} />
+        <LifecycleSteps
+          steps={deleting.steps}
+          stepOrder={[
+            "beforeDeleteSession",
+            "releasePorts",
+            "removeWorktree",
+            "afterDeleteSession",
+          ]}
+          labels={deleteStepLabels}
+        />
       </div>
     );
   }
@@ -370,6 +430,7 @@ export function SessionCard({
         onClick={() => handleSelect()}
         onKeyDown={(e) => e.key === "Enter" && handleSelect()}
         tabIndex={0}
+        // biome-ignore lint/a11y/useSemanticElements: the interactive card contains nested action buttons, so it cannot be a button element.
         role="button"
         aria-pressed={isActive}
       >
@@ -382,37 +443,33 @@ export function SessionCard({
           <button
             type="button"
             className="failed-log-btn"
-            onClick={(e) => { e.stopPropagation(); handleSelect(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSelect();
+            }}
           >
             查看失败日志
           </button>
           <button
             type="button"
             className="failed-retry-btn"
-            onClick={(e) => { e.stopPropagation(); onRetryHooks(session.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetryHooks(session.id);
+            }}
           >
             重试
           </button>
           <button
             type="button"
             className="failed-delete-btn"
-            onClick={(e) => { e.stopPropagation(); onRequestDelete(session.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestDelete(session.id);
+            }}
           >
             删除
           </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Foreign state — visible but intentionally not interactive
-  if (isForeign) {
-    return (
-      <div className="session-card session-card-foreign" title={foreignTitle}>
-        <span className="session-name">{session.name}</span>
-        <div className="session-card-meta">
-          {session.ports && <span className="session-ports">:{session.ports.FRONTEND_PORT}</span>}
-          {statusLabel && <span className="session-status-badge session-status-badge-foreign">{statusLabel}</span>}
         </div>
       </div>
     );
@@ -436,13 +493,18 @@ export function SessionCard({
         onDoubleClick={session.canRename === false ? undefined : handleStartRename}
         onKeyDown={(e) => e.key === "Enter" && handleSelect()}
         tabIndex={0}
+        // biome-ignore lint/a11y/useSemanticElements: the draggable interactive card contains nested controls, so it cannot be a button element.
         role="button"
         aria-pressed={isActive}
       >
         {/* Status icon — always visible, empty circle when no status */}
         <span className="session-status-icon">
           {StatusIconComp ? (
-            <StatusIconComp size={14} strokeWidth={2.2} style={{ color: statusColor! }} />
+            <StatusIconComp
+              size={14}
+              strokeWidth={2.2}
+              style={{ color: statusColor ?? undefined }}
+            />
           ) : (
             <span className="session-status-icon-empty" />
           )}
@@ -468,9 +530,6 @@ export function SessionCard({
             :{session.ports.FRONTEND_PORT}
           </span>
         )}
-        {statusLabel && session.status !== "foreign" && (
-          <span className={`session-status-badge session-status-badge-${session.status}`}>{statusLabel}</span>
-        )}
         <button
           type="button"
           className="session-close"
@@ -486,7 +545,12 @@ export function SessionCard({
       {menuPos && (
         <div ref={menuRef} className="context-menu" style={{ left: menuPos.x, top: menuPos.y }}>
           {session.canRename !== false && (
-            <button type="button" className="context-menu-item" onClick={handleStartRename} onMouseEnter={() => setSubmenuPos(null)}>
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={handleStartRename}
+              onMouseEnter={() => setSubmenuPos(null)}
+            >
               重命名
             </button>
           )}
@@ -500,14 +564,29 @@ export function SessionCard({
               <span className="context-menu-submenu-arrow">▸</span>
             </div>
           )}
-          <button type="button" className="context-menu-item" onClick={handleOpenInExplorer} onMouseEnter={() => setSubmenuPos(null)}>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handleOpenInExplorer}
+            onMouseEnter={() => setSubmenuPos(null)}
+          >
             在文件管理器中打开
           </button>
-          <button type="button" className="context-menu-item" onClick={handleOpenInTerminal} onMouseEnter={() => setSubmenuPos(null)}>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={handleOpenInTerminal}
+            onMouseEnter={() => setSubmenuPos(null)}
+          >
             在终端中打开
           </button>
           {session.canReassign !== false && (
-            <button type="button" className="context-menu-item" onClick={handleReassignPorts} onMouseEnter={() => setSubmenuPos(null)}>
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={handleReassignPorts}
+              onMouseEnter={() => setSubmenuPos(null)}
+            >
               重新分配端口
             </button>
           )}
@@ -529,7 +608,11 @@ export function SessionCard({
 
       {/* ── Status submenu ── */}
       {menuPos && submenuPos && (
-        <div ref={submenuRef} className="context-menu context-menu-submenu" style={{ left: submenuPos.x, top: submenuPos.y }}>
+        <div
+          ref={submenuRef}
+          className="context-menu context-menu-submenu"
+          style={{ left: submenuPos.x, top: submenuPos.y }}
+        >
           {USER_STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.key}

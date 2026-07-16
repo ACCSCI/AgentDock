@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { stringify as yamlStringify, Scalar } from "yaml";
-import { useProjectConfig, useSaveConfig, type ProjectConfigData } from "../lib/queries";
+import { Scalar, stringify as yamlStringify } from "yaml";
 import { useTranslation } from "../i18n/react";
+import { type ProjectConfigData, useProjectConfig, useSaveConfig } from "../lib/queries";
 import { FilePicker } from "./FilePicker";
 
 type Config = ProjectConfigData["config"];
@@ -20,32 +20,59 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
   const [showYamlPreview, setShowYamlPreview] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [saveError, setSaveError] = useState("");
-  const [expandedSections, setExpandedSections] = useState({ resources: true, hooks: true, ports: false });
+  const [expandedSections, setExpandedSections] = useState({
+    resources: true,
+    hooks: true,
+    ports: false,
+  });
   const [activeHookTab, setActiveHookTab] = useState("afterCreateSession");
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [filePickerTarget, setFilePickerTarget] = useState<number | null>(null);
   const [newPortKey, setNewPortKey] = useState("");
 
   // Field help descriptions
-  const help = useMemo(() => ({
-    source: t("help.source"),
-    strategy: t("help.strategy"),
-    skipIfMissing: t("help.skipIfMissing"),
-    run: t("help.run"),
-    required: t("help.required"),
-    timeout: t("help.timeout"),
-    cwd: t("help.cwd"),
-    async: t("help.async"),
-  }), [t]);
+  const help = useMemo(
+    () => ({
+      source: t("help.source"),
+      strategy: t("help.strategy"),
+      skipIfMissing: t("help.skipIfMissing"),
+      run: t("help.run"),
+      required: t("help.required"),
+      timeout: t("help.timeout"),
+      cwd: t("help.cwd"),
+      async: t("help.async"),
+    }),
+    [t],
+  );
 
-  const lifecycleEvents = useMemo(() => [
-    { key: "beforeCreateSession", label: t("lifecycle.beforeCreateSession"), desc: t("lifecycle.beforeCreateSessionDesc") },
-    { key: "afterCreateSession", label: t("lifecycle.afterCreateSession"), desc: t("lifecycle.afterCreateSessionDesc") },
-    { key: "beforeDeleteSession", label: t("lifecycle.beforeDeleteSession"), desc: t("lifecycle.beforeDeleteSessionDesc") },
-    { key: "afterDeleteSession", label: t("lifecycle.afterDeleteSession"), desc: t("lifecycle.afterDeleteSessionDesc") },
-  ], [t]);
+  const lifecycleEvents = useMemo(
+    () => [
+      {
+        key: "beforeCreateSession",
+        label: t("lifecycle.beforeCreateSession"),
+        desc: t("lifecycle.beforeCreateSessionDesc"),
+      },
+      {
+        key: "afterCreateSession",
+        label: t("lifecycle.afterCreateSession"),
+        desc: t("lifecycle.afterCreateSessionDesc"),
+      },
+      {
+        key: "beforeDeleteSession",
+        label: t("lifecycle.beforeDeleteSession"),
+        desc: t("lifecycle.beforeDeleteSessionDesc"),
+      },
+      {
+        key: "afterDeleteSession",
+        label: t("lifecycle.afterDeleteSession"),
+        desc: t("lifecycle.afterDeleteSessionDesc"),
+      },
+    ],
+    [t],
+  );
 
   // Reset config when projectId changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: projectId changes intentionally reset local editor state.
   useEffect(() => {
     setConfig(null);
   }, [projectId]);
@@ -88,101 +115,130 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
     }));
   }, [updateConfig]);
 
-  const removeResource = useCallback((index: number) => {
-    updateConfig((prev) => ({
-      ...prev,
-      resources: { sync: prev.resources.sync.filter((_, i) => i !== index) },
-    }));
-  }, [updateConfig]);
+  const removeResource = useCallback(
+    (index: number) => {
+      updateConfig((prev) => ({
+        ...prev,
+        resources: { sync: prev.resources.sync.filter((_, i) => i !== index) },
+      }));
+    },
+    [updateConfig],
+  );
 
-  const updateResource = useCallback((index: number, field: string, value: unknown) => {
-    updateConfig((prev) => ({
-      ...prev,
-      resources: {
-        sync: prev.resources.sync.map((r, i) => (i === index ? { ...r, [field]: value } : r)),
-      },
-    }));
-  }, [updateConfig]);
+  const updateResource = useCallback(
+    (index: number, field: string, value: unknown) => {
+      updateConfig((prev) => ({
+        ...prev,
+        resources: {
+          sync: prev.resources.sync.map((r, i) => (i === index ? { ...r, [field]: value } : r)),
+        },
+      }));
+    },
+    [updateConfig],
+  );
 
-  const handleFileSelect = useCallback((filePath: string) => {
-    if (filePickerTarget !== null) {
-      updateResource(filePickerTarget, "source", filePath);
-    }
-    setFilePickerOpen(false);
-    setFilePickerTarget(null);
-  }, [filePickerTarget, updateResource]);
+  const handleFileSelect = useCallback(
+    (filePath: string) => {
+      if (filePickerTarget !== null) {
+        updateResource(filePickerTarget, "source", filePath);
+      }
+      setFilePickerOpen(false);
+      setFilePickerTarget(null);
+    },
+    [filePickerTarget, updateResource],
+  );
 
   // --- Hook handlers ---
-  const addHook = useCallback((event: string) => {
-    updateConfig((prev) => ({
-      ...prev,
-      hooks: {
-        ...prev.hooks,
-        [event]: [
-          ...(prev.hooks[event] || []),
-          { run: "", required: false, timeout: 30000, cwd: "worktree", async: false },
-        ],
-      },
-    }));
-  }, [updateConfig]);
+  const addHook = useCallback(
+    (event: string) => {
+      updateConfig((prev) => ({
+        ...prev,
+        hooks: {
+          ...prev.hooks,
+          [event]: [
+            ...(prev.hooks[event] || []),
+            { run: "", required: false, timeout: 30000, cwd: "worktree", async: false },
+          ],
+        },
+      }));
+    },
+    [updateConfig],
+  );
 
-  const removeHook = useCallback((event: string, index: number) => {
-    updateConfig((prev) => ({
-      ...prev,
-      hooks: {
-        ...prev.hooks,
-        [event]: (prev.hooks[event] || []).filter((_, i) => i !== index),
-      },
-    }));
-  }, [updateConfig]);
+  const removeHook = useCallback(
+    (event: string, index: number) => {
+      updateConfig((prev) => ({
+        ...prev,
+        hooks: {
+          ...prev.hooks,
+          [event]: (prev.hooks[event] || []).filter((_, i) => i !== index),
+        },
+      }));
+    },
+    [updateConfig],
+  );
 
-  const updateHook = useCallback((event: string, index: number, field: string, value: unknown) => {
-    updateConfig((prev) => ({
-      ...prev,
-      hooks: {
-        ...prev.hooks,
-        [event]: (prev.hooks[event] || []).map((h, i) => (i === index ? { ...h, [field]: value } : h)),
-      },
-    }));
-  }, [updateConfig]);
+  const updateHook = useCallback(
+    (event: string, index: number, field: string, value: unknown) => {
+      updateConfig((prev) => ({
+        ...prev,
+        hooks: {
+          ...prev.hooks,
+          [event]: (prev.hooks[event] || []).map((h, i) =>
+            i === index ? { ...h, [field]: value } : h,
+          ),
+        },
+      }));
+    },
+    [updateConfig],
+  );
 
   // --- Port key handlers ---
-  const addPortKey = useCallback((key: string) => {
-    const trimmed = key.trim().toUpperCase();
-    if (!trimmed || !/^[A-Z][A-Z0-9_]*$/.test(trimmed)) return;
-    updateConfig((prev) => {
-      const current = prev.env?.ports ?? [];
-      if (current.includes(trimmed)) return prev;
-      return {
-        ...prev,
-        env: {
-          ...prev.env,
-          ports: [...current, trimmed],
-        },
-      };
-    });
-    setNewPortKey("");
-  }, [updateConfig]);
+  const addPortKey = useCallback(
+    (key: string) => {
+      const trimmed = key.trim().toUpperCase();
+      if (!trimmed || !/^[A-Z][A-Z0-9_]*$/.test(trimmed)) return;
+      updateConfig((prev) => {
+        const current = prev.env?.ports ?? [];
+        if (current.includes(trimmed)) return prev;
+        return {
+          ...prev,
+          env: {
+            ...prev.env,
+            ports: [...current, trimmed],
+          },
+        };
+      });
+      setNewPortKey("");
+    },
+    [updateConfig],
+  );
 
-  const removePortKey = useCallback((index: number) => {
-    updateConfig((prev) => {
-      const current = prev.env?.ports ?? [];
-      return {
-        ...prev,
-        env: {
-          ...prev.env,
-          ports: current.filter((_, i) => i !== index),
-        },
-      };
-    });
-  }, [updateConfig]);
+  const removePortKey = useCallback(
+    (index: number) => {
+      updateConfig((prev) => {
+        const current = prev.env?.ports ?? [];
+        return {
+          ...prev,
+          env: {
+            ...prev.env,
+            ports: current.filter((_, i) => i !== index),
+          },
+        };
+      });
+    },
+    [updateConfig],
+  );
 
-  const handlePortKeyInputKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addPortKey(newPortKey);
-    }
-  }, [addPortKey, newPortKey]);
+  const handlePortKeyInputKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addPortKey(newPortKey);
+      }
+    },
+    [addPortKey, newPortKey],
+  );
 
   // --- Actions ---
   const handlePreview = useCallback(() => {
@@ -196,7 +252,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
     // Normalize: strip empty ports so Zod default kicks in (avoid min(1) rejection)
     const saveConfig = { ...config };
     if (!saveConfig.env?.ports?.length) {
-      delete saveConfig.env;
+      saveConfig.env = undefined;
     }
     try {
       await saveMutation.mutateAsync(saveConfig);
@@ -206,7 +262,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
       setSaveStatus("error");
       setSaveError(err instanceof Error ? err.message : t("saveFailed"));
     }
-  }, [config, saveMutation]);
+  }, [config, saveMutation, t]);
 
   if (isLoading || !config) {
     return (
@@ -232,26 +288,35 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           className="config-section-header"
           onClick={() => setExpandedSections((s) => ({ ...s, resources: !s.resources }))}
         >
-          <span className={`config-section-arrow ${expandedSections.resources ? "expanded" : ""}`}>▶</span>
+          <span className={`config-section-arrow ${expandedSections.resources ? "expanded" : ""}`}>
+            ▶
+          </span>
           <h3>{t("resourceSync")}</h3>
-          <span className="config-section-count">{t("itemsCount", { count: config.resources.sync.length })}</span>
+          <span className="config-section-count">
+            {t("itemsCount", { count: config.resources.sync.length })}
+          </span>
         </button>
-        <p className="config-section-desc">
-          {t("resourceSyncDesc")}
-        </p>
+        <p className="config-section-desc">{t("resourceSyncDesc")}</p>
 
         {expandedSections.resources && (
           <div className="config-section-body">
             {config.resources.sync.map((res, i) => (
-              <div key={i} className="config-entry">
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: config entries are edited and removed by their positional index and have no persisted identity.
+                key={i}
+                className="config-entry"
+              >
                 <div className="config-entry-row">
                   <div className="config-field config-field-source">
-                    <label>
+                    <label htmlFor={`resource-source-${i}`}>
                       source
-                      <span className="config-field-help" title={help.source}>?</span>
+                      <span className="config-field-help" title={help.source}>
+                        ?
+                      </span>
                     </label>
                     <div className="config-field-input-group">
                       <input
+                        id={`resource-source-${i}`}
                         type="text"
                         value={res.source}
                         placeholder=".env"
@@ -260,31 +325,48 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                       <button
                         type="button"
                         className="config-btn-browse"
-                        onClick={() => { setFilePickerTarget(i); setFilePickerOpen(true); }}
+                        onClick={() => {
+                          setFilePickerTarget(i);
+                          setFilePickerOpen(true);
+                        }}
                       >
                         {t("browse")}
                       </button>
                     </div>
                   </div>
-                  <button type="button" className="config-btn-delete" onClick={() => removeResource(i)}>×</button>
+                  <button
+                    type="button"
+                    className="config-btn-delete"
+                    onClick={() => removeResource(i)}
+                  >
+                    ×
+                  </button>
                 </div>
                 <div className="config-entry-row config-entry-row-fields">
                   <div className="config-field">
-                    <label>
+                    <label htmlFor={`resource-strategy-${i}`}>
                       strategy
-                      <span className="config-field-help" title={help.strategy}>?</span>
+                      <span className="config-field-help" title={help.strategy}>
+                        ?
+                      </span>
                     </label>
-                    <select value={res.strategy} onChange={(e) => updateResource(i, "strategy", e.target.value)}>
+                    <select
+                      id={`resource-strategy-${i}`}
+                      value={res.strategy}
+                      onChange={(e) => updateResource(i, "strategy", e.target.value)}
+                    >
                       <option value="overwrite">{t("strategyOverwrite")}</option>
                       <option value="skip">{t("strategySkip")}</option>
                       <option value="merge">{t("strategyMerge")}</option>
                     </select>
                   </div>
                   <div className="config-field">
-                    <label>
+                    <span className="config-field-label">
                       skipIfMissing
-                      <span className="config-field-help" title={help.skipIfMissing}>?</span>
-                    </label>
+                      <span className="config-field-help" title={help.skipIfMissing}>
+                        ?
+                      </span>
+                    </span>
                     <label className="config-checkbox">
                       <input
                         type="checkbox"
@@ -311,12 +393,12 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           className="config-section-header"
           onClick={() => setExpandedSections((s) => ({ ...s, hooks: !s.hooks }))}
         >
-          <span className={`config-section-arrow ${expandedSections.hooks ? "expanded" : ""}`}>▶</span>
+          <span className={`config-section-arrow ${expandedSections.hooks ? "expanded" : ""}`}>
+            ▶
+          </span>
           <h3>{t("hooks")}</h3>
         </button>
-        <p className="config-section-desc">
-          {t("hooksDesc")}
-        </p>
+        <p className="config-section-desc">{t("hooksDesc")}</p>
 
         {expandedSections.hooks && (
           <div className="config-section-body">
@@ -330,7 +412,9 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                   onClick={() => setActiveHookTab(evt.key)}
                 >
                   {evt.label}
-                  <span className="config-hook-tab-count">{(config.hooks[evt.key] || []).length}</span>
+                  <span className="config-hook-tab-count">
+                    {(config.hooks[evt.key] || []).length}
+                  </span>
                 </button>
               ))}
             </div>
@@ -342,29 +426,44 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
 
             {/* Hook entries */}
             {(config.hooks[activeHookTab] || []).map((hook, i) => (
-              <div key={i} className="config-entry config-entry-hook">
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: hook entries are edited and removed by their positional index and have no persisted identity.
+                key={i}
+                className="config-entry config-entry-hook"
+              >
                 <div className="config-entry-row">
                   <div className="config-field config-field-run">
-                    <label>
+                    <label htmlFor={`hook-run-${activeHookTab}-${i}`}>
                       run
-                      <span className="config-field-help" title={help.run}>?</span>
+                      <span className="config-field-help" title={help.run}>
+                        ?
+                      </span>
                     </label>
                     <input
+                      id={`hook-run-${activeHookTab}-${i}`}
                       type="text"
                       value={hook.run}
                       placeholder="bun install"
                       onChange={(e) => updateHook(activeHookTab, i, "run", e.target.value)}
                     />
                   </div>
-                  <button type="button" className="config-btn-delete" onClick={() => removeHook(activeHookTab, i)}>×</button>
+                  <button
+                    type="button"
+                    className="config-btn-delete"
+                    onClick={() => removeHook(activeHookTab, i)}
+                  >
+                    ×
+                  </button>
                 </div>
                 <div className="config-entry-row config-entry-row-fields">
                   {!hook.async && (
                     <div className="config-field">
-                      <label>
+                      <span className="config-field-label">
                         required
-                        <span className="config-field-help" title={help.required}>?</span>
-                      </label>
+                        <span className="config-field-help" title={help.required}>
+                          ?
+                        </span>
+                      </span>
                       <label className="config-checkbox">
                         <input
                           type="checkbox"
@@ -381,33 +480,46 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                     </div>
                   )}
                   <div className="config-field">
-                    <label>
+                    <label htmlFor={`hook-timeout-${activeHookTab}-${i}`}>
                       timeout (ms)
-                      <span className="config-field-help" title={help.timeout}>?</span>
+                      <span className="config-field-help" title={help.timeout}>
+                        ?
+                      </span>
                     </label>
                     <input
+                      id={`hook-timeout-${activeHookTab}-${i}`}
                       type="number"
                       value={hook.timeout}
                       min={1000}
                       step={1000}
-                      onChange={(e) => updateHook(activeHookTab, i, "timeout", Number(e.target.value))}
+                      onChange={(e) =>
+                        updateHook(activeHookTab, i, "timeout", Number(e.target.value))
+                      }
                     />
                   </div>
                   <div className="config-field">
-                    <label>
+                    <label htmlFor={`hook-cwd-${activeHookTab}-${i}`}>
                       cwd
-                      <span className="config-field-help" title={help.cwd}>?</span>
+                      <span className="config-field-help" title={help.cwd}>
+                        ?
+                      </span>
                     </label>
-                    <select value={hook.cwd} onChange={(e) => updateHook(activeHookTab, i, "cwd", e.target.value)}>
+                    <select
+                      id={`hook-cwd-${activeHookTab}-${i}`}
+                      value={hook.cwd}
+                      onChange={(e) => updateHook(activeHookTab, i, "cwd", e.target.value)}
+                    >
                       <option value="worktree">worktree</option>
                       <option value="project">project</option>
                     </select>
                   </div>
                   <div className="config-field config-field-async-mode">
-                    <label>
+                    <span className="config-field-label">
                       {t("executionMode")}
-                      <span className="config-field-help" title={help.async}>?</span>
-                    </label>
+                      <span className="config-field-help" title={help.async}>
+                        ?
+                      </span>
+                    </span>
                     <div className="config-hook-mode-tabs">
                       <button
                         type="button"
@@ -454,10 +566,12 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           className="config-section-header"
           onClick={() => setExpandedSections((s) => ({ ...s, ports: !s.ports }))}
         >
-          <span className={`config-section-arrow ${expandedSections.ports ? "expanded" : ""}`}>▶</span>
+          <span className={`config-section-arrow ${expandedSections.ports ? "expanded" : ""}`}>
+            ▶
+          </span>
           <h3>{t("portAllocation")}</h3>
           <span className="config-section-count">
-            {(config.env?.ports && config.env.ports.length > 0)
+            {config.env?.ports && config.env.ports.length > 0
               ? t("portCount", { count: config.env.ports.length })
               : t("defaultPortCount")}
           </span>
@@ -472,7 +586,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
             {/* Port key tags */}
             <div className="config-port-list">
               {(config.env?.ports ?? []).map((key, i) => (
-                <div key={i} className="config-port-tag">
+                <div key={key} className="config-port-tag">
                   <span className="config-port-tag-label">{key}</span>
                   <button
                     type="button"
@@ -484,9 +598,7 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
                 </div>
               ))}
               {!config.env?.ports?.length && (
-                <div className="config-port-empty">
-                  {t("noPortsConfigured")}
-                </div>
+                <div className="config-port-empty">{t("noPortsConfigured")}</div>
               )}
             </div>
 
@@ -548,9 +660,13 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
         <div className="config-yaml-preview">
           <div className="config-yaml-preview-header">
             <h3>{t("yamlPreview")}</h3>
-            <button type="button" onClick={() => setShowYamlPreview(false)}>{t("close")}</button>
+            <button type="button" onClick={() => setShowYamlPreview(false)}>
+              {t("close")}
+            </button>
           </div>
-          <pre><code>{yamlPreview}</code></pre>
+          <pre>
+            <code>{yamlPreview}</code>
+          </pre>
         </div>
       )}
 
@@ -560,15 +676,23 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
           {t("previewYaml")}
         </button>
         <div className="config-actions-right">
-          {saveStatus === "success" && <span className="config-save-status config-save-success">✓ {t("saved")}</span>}
-          {saveStatus === "error" && <span className="config-save-status config-save-error">✗ {saveError}</span>}
+          {saveStatus === "success" && (
+            <span className="config-save-status config-save-success">✓ {t("saved")}</span>
+          )}
+          {saveStatus === "error" && (
+            <span className="config-save-status config-save-error">✗ {saveError}</span>
+          )}
           <button
             type="button"
             className="config-btn config-btn-save"
             onClick={handleSave}
             disabled={saveMutation.isPending}
           >
-            {saveMutation.isPending ? t("saving") : data?.exists ? t("saveConfig") : t("generateConfigFile")}
+            {saveMutation.isPending
+              ? t("saving")
+              : data?.exists
+                ? t("saveConfig")
+                : t("generateConfigFile")}
           </button>
         </div>
       </div>
@@ -578,7 +702,10 @@ export function ConfigEditor({ projectId }: ConfigEditorProps) {
         open={filePickerOpen}
         projectId={projectId}
         onConfirm={handleFileSelect}
-        onCancel={() => { setFilePickerOpen(false); setFilePickerTarget(null); }}
+        onCancel={() => {
+          setFilePickerOpen(false);
+          setFilePickerTarget(null);
+        }}
       />
     </div>
   );

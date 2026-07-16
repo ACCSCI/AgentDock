@@ -16,8 +16,8 @@
  * (raw fetch against /session/create, /claim, /session/activate, etc.).
  */
 import { hc } from "hono/client";
+import { isProcessAlive, readDaemonInfo } from "./daemon-discovery.js";
 import type { AppType } from "./daemon/app.js";
-import { readDaemonInfo, isProcessAlive } from "./daemon-discovery.js";
 
 /**
  * The Hono client shape. We re-derive it from AppType so the route surface

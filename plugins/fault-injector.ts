@@ -14,7 +14,7 @@
  * The injector uses a plain object for its state so endpoint handlers can
  * mutate it without escaping closures.
  */
-import { createServer, type Server } from "node:net";
+import { type Server, createServer } from "node:net";
 import type { Hono } from "hono";
 
 export interface FaultInjectorState {
@@ -55,10 +55,7 @@ export async function cleanupFaults(state: FaultInjectorState): Promise<void> {
  * Mount fault-injection endpoints on the given Hono app. Endpoints return
  * 404 when disabled, so test code can probe without checking the flag.
  */
-export function registerFaultEndpoints(
-  app: Hono,
-  state: FaultInjectorState,
-): void {
+export function registerFaultEndpoints(app: Hono, state: FaultInjectorState): void {
   // Register specific routes FIRST so they take precedence over the wildcard.
   // Hono matches in registration order — wildcard last is the catch-all 404.
 

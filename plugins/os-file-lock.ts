@@ -1,4 +1,12 @@
-import { existsSync, openSync, closeSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 // ============================================================
@@ -22,8 +30,6 @@ export interface FileLock {
   release(): Promise<void>;
 }
 
-const LOCK_STALE_MS = 30_000;
-
 export interface LockOptions {
   /** Max wait in ms. 0 = non-blocking. Default: 0. */
   readonly timeoutMs?: number;
@@ -45,18 +51,19 @@ export class LockAcquisitionError extends Error {
  *
  * The lock file contains JSON with `pid` and `acquiredAt` for stale detection.
  */
-export async function acquireLock(
-  lockPath: string,
-  options: LockOptions = {},
-): Promise<FileLock> {
+export async function acquireLock(lockPath: string, options: LockOptions = {}): Promise<FileLock> {
   const { timeoutMs = 0, retryMs = 50, metadata } = options;
   const lockDir = path.dirname(lockPath);
 
   if (!existsSync(lockDir)) {
-    try { mkdirSync(lockDir, { recursive: true }); } catch { /* ignore */ }
+    try {
+      mkdirSync(lockDir, { recursive: true });
+    } catch {
+      /* ignore */
+    }
   }
 
-  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   let lastErr: Error | undefined;
 
   while (Date.now() < deadline) {
@@ -69,18 +76,26 @@ export async function acquireLock(
       if (metadata) Object.assign(payload, metadata);
       writeFileSync(lockPath, JSON.stringify(payload), "utf-8");
       closeSync(fd);
-      return { path: lockPath, release: () => unlinkSyncQuiet(lockPath) };
-    } catch (err: any) {
+      return { path: lockPath, release: async () => unlinkSyncQuiet(lockPath) };
+    } catch (err: unknown) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      if (err.code === "EEXIST") {
-        if (timeoutMs === 0) {
-          // Non-blocking: never delete a held lock — just report contention
-          throw new LockAcquisitionError(lockPath, "held by another process");
-        }
+      const errorCode =
+        typeof err === "object" && err !== null && "code" in err ? String(err.code) : undefined;
+      if (errorCode === "EEXIST") {
+        // A crashed process leaves the lock file behind. Recover it even for
+        // non-blocking callers (the production single-instance path), but
+        // never replace a lock whose PID is still alive.
         if (isLockStale(lockPath)) {
-          // Only break stale locks; never delete a live holder
-          try { unlinkSync(lockPath); } catch { /* ignore */ }
+          try {
+            unlinkSync(lockPath);
+          } catch {
+            /* ignore */
+          }
           continue;
+        }
+        if (timeoutMs === 0) {
+          // Non-blocking: a live holder is genuine contention.
+          throw new LockAcquisitionError(lockPath, "held by another process");
         }
         // Lock held by live process — wait
         await sleep(retryMs);
@@ -90,10 +105,7 @@ export async function acquireLock(
     }
   }
 
-  throw new LockAcquisitionError(
-    lockPath,
-    lastErr?.message ?? "timeout waiting for lock",
-  );
+  throw new LockAcquisitionError(lockPath, lastErr?.message ?? "timeout waiting for lock");
 }
 
 /** Non-blocking lock acquisition — throws immediately if unavailable. */
@@ -111,7 +123,7 @@ export async function isLockHeld(lockPath: string): Promise<boolean> {
 
 /**
  * Check whether an existing lock file is stale.
- * A lock is stale when its holder process is dead OR it's older than LOCK_STALE_MS.
+ * A lock is stale when its holder process is no longer alive.
  */
 export function isLockStale(lockPath: string): boolean {
   try {
@@ -120,18 +132,16 @@ export function isLockStale(lockPath: string): boolean {
 
     if (typeof data.pid !== "number" || data.pid <= 0) return true;
 
-    // Age-based staleness
-    if (data.acquiredAt) {
-      const age = Date.now() - new Date(data.acquiredAt).getTime();
-      if (age > LOCK_STALE_MS) return true;
-    }
-
-    // Liveness check
+    // Liveness is authoritative. A healthy AgentDock process normally holds
+    // this lock for much longer than LOCK_STALE_MS, so age alone must never
+    // invalidate a live owner.
     try {
       process.kill(data.pid, 0);
       return false; // Process is alive, lock is valid
-    } catch (err: any) {
-      if (err?.code === "EPERM") return false; // Process exists, different user
+    } catch (err: unknown) {
+      const errorCode =
+        typeof err === "object" && err !== null && "code" in err ? String(err.code) : undefined;
+      if (errorCode === "EPERM") return false; // Process exists, different user
       return true; // Process is dead
     }
   } catch {
@@ -140,7 +150,11 @@ export function isLockStale(lockPath: string): boolean {
 }
 
 function unlinkSyncQuiet(path: string): void {
-  try { unlinkSync(path); } catch { /* ignore */ }
+  try {
+    unlinkSync(path);
+  } catch {
+    /* ignore */
+  }
 }
 
 function sleep(ms: number): Promise<void> {

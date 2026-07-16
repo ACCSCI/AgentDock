@@ -1,9 +1,9 @@
 // Real user simulation: bun start -> open Copilot-Switch -> create session -> delete session
 // No fixtures. No IPC shortcuts. All clicks are real.
 
-import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type ElectronApplication, type Page, _electron as electron } from "@playwright/test";
 
 const ROOT = "F:\\ProgramPlayground\\JavaScript\\AgentDock\\.agentdock\\worktrees\\bed4c452-74d";
 const SCREENSHOT_DIR = join(ROOT, "screenshots");
@@ -21,19 +21,20 @@ interface Step {
 const steps: Step[] = [];
 const errors: string[] = [];
 
-function logStep(step: string, status: "passed" | "failed" | "skipped", detail?: string, screenshot?: string) {
+function logStep(
+  step: string,
+  status: "passed" | "failed" | "skipped",
+  detail?: string,
+  screenshot?: string,
+) {
   steps.push({ step, status, detail, screenshot });
-  console.log(`[${status.toUpperCase()}] ${step}${detail ? " — " + detail : ""}`);
+  console.log(`[${status.toUpperCase()}] ${step}${detail ? ` — ${detail}` : ""}`);
 }
 
 function logErr(e: unknown) {
   const msg = e instanceof Error ? e.message : String(e);
   errors.push(msg);
   console.error("ERROR:", msg);
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function main() {
@@ -62,7 +63,7 @@ async function main() {
       }
     });
     window.on("pageerror", (err) => {
-      console.log(`[renderer pageerror]`, err.message);
+      console.log("[renderer pageerror]", err.message);
     });
     logStep("first_window", "passed", `url=${window.url()}`);
 
@@ -137,7 +138,7 @@ async function main() {
           const h2 = document.querySelector("h2");
           return h2?.textContent?.includes("Copilot-Switch") ?? false;
         },
-        { timeout: 30_000 }
+        { timeout: 30_000 },
       );
       await window.screenshot({ path: join(SCREENSHOT_DIR, "03-workspace.png") });
       logStep("workspace_loaded", "passed", "h2 显示 Copilot-Switch", "03-workspace.png");
@@ -191,11 +192,10 @@ async function main() {
     // 9. Wait for session card to disappear
     await window.waitForFunction(
       () => document.querySelectorAll('[data-testid="session-card"]').length === 0,
-      { timeout: 30_000 }
+      { timeout: 30_000 },
     );
     await window.screenshot({ path: join(SCREENSHOT_DIR, "05-deleted.png") });
     logStep("session_deleted", "passed", "session 卡片已消失", "05-deleted.png");
-
   } catch (e) {
     logErr(e);
     if (window) {
@@ -205,7 +205,9 @@ async function main() {
     }
   } finally {
     if (app) {
-      try { await app.close(); } catch {}
+      try {
+        await app.close();
+      } catch {}
     }
   }
 

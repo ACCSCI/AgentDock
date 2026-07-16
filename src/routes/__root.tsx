@@ -2,8 +2,8 @@ import { Outlet, createRootRoute } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { CustomTitleBar } from "../components/CustomTitleBar";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import { ShortcutsProvider } from "../hooks/useShortcuts";
 import { TabBar } from "../components/TabBar";
+import { ShortcutsProvider } from "../hooks/useShortcuts";
 import { StoreProvider } from "../lib/store";
 
 export const Route = createRootRoute({

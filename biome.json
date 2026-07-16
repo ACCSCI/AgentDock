@@ -30,6 +30,30 @@
       "semicolons": "always"
     }
   },
+  "overrides": [
+    {
+      "include": [
+        "e2e/**",
+        "**/__tests__/**",
+        "test-utils/**",
+        ".flue/**",
+        "test-real-user-flow.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noEmptyPattern": "off"
+          },
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
     "ignore": [
       "node_modules",

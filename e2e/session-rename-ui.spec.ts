@@ -9,25 +9,24 @@
  *   3. Right-click a card, pick "rename" from context menu -- verify rename works.
  *
  * NOTE: Name persistence in the DB is not verified because v2 architecture
- * stores session state in the daemon, not the local DB. We verify the
+ * stores session state through the main-process lifecycle. We verify the
  * rename behavior through DOM assertions only.
  */
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
+import { waitForAppReady } from "./helpers/ipc";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TID } from "./pages/testids";
-import { waitForDaemonReady } from "./helpers/ipc";
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync(
-    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
-    { cwd: dir },
-  );
+  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
+    cwd: dir,
+  });
 }
 
 function writeEmptyConfig(dir: string): void {
@@ -48,7 +47,6 @@ test.describe("session rename UI", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -59,38 +57,41 @@ test.describe("session rename UI", () => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     // Open project and create a session.
     await home.openProject(projectPath);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
 
     // Wait for the card to settle (ports visible = lifecycle complete).
-    // If ports never appear (daemon /sessions/allocate 404), the rename
+    // If ports never appear while session setup is settling, the rename
     // may still work since it only needs the card to be interactive.
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {
-      // Ports may not appear in v2 mode with broken daemon; continue.
-    });
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {
+        // Ports may not appear before the card settles; continue.
+      });
 
-    // Wait for the SSE sync to land the real sessionId. The card
+    // Wait for the persisted session update to land the real sessionId. The card
     // initially has a `temp-<timestamp>` id; full-suite runs in
     // particular can be slow enough that the real id doesn't appear
     // by the time we hit this assertion.
     await expect
-      .poll(async () => {
-        const id = await card.getAttribute("data-session-id");
-        return id && !id.startsWith("temp-") ? id : null;
-      }, { timeout: 20_000 })
+      .poll(
+        async () => {
+          const id = await card.getAttribute("data-session-id");
+          return id && !id.startsWith("temp-") ? id : null;
+        },
+        { timeout: 20_000 },
+      )
       .toBeTruthy()
       .catch(() => {
-        // Best-effort — if the SSE sync is still pending, the rename
+        // Best-effort — if the persisted update is still pending, the rename
         // will likely work but on a temp id; the DOM assertion below
         // still verifies the user-visible rename behavior.
       });
@@ -99,13 +100,11 @@ test.describe("session rename UI", () => {
     // in full-suite runs the card is briefly in creating state where
     // .session-name may not be visible yet. We also re-query the card
     // each time because the sidebar can re-render between polls when
-    // SSE syncs land, and the original `card` reference may be stale.
+    // Session updates can re-render the card, making the original reference stale.
     await expect
       .poll(
         async () => {
-          const fresh = window
-            .locator(`[data-testid="${TID.sessionCard}"]`)
-            .first();
+          const fresh = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
           const el = fresh.locator(".session-name");
           if ((await el.count()) === 0) return null;
           return await el.textContent();
@@ -113,9 +112,7 @@ test.describe("session rename UI", () => {
         { timeout: 20_000, message: "session-name never appeared" },
       )
       .toBeTruthy();
-    const freshCard = window
-      .locator(`[data-testid="${TID.sessionCard}"]`)
-      .first();
+    const freshCard = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     const nameEl = freshCard.locator(".session-name");
     const originalName = await nameEl.textContent();
     expect(originalName).toBeTruthy();
@@ -137,16 +134,15 @@ test.describe("session rename UI", () => {
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
     await card.locator(".session-delete-confirm-yes").click();
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     expect(pageErrors).toHaveLength(0);
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();
@@ -156,7 +152,6 @@ test.describe("session rename UI", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -167,38 +162,39 @@ test.describe("session rename UI", () => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     await home.openProject(projectPath);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {});
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
 
-    // Wait for the SSE sync to land the real sessionId. Best-effort
+    // Wait for the persisted session update to land the real sessionId. Best-effort
     // for full-suite runs where the sync can be slow.
     await expect
-      .poll(async () => {
-        const id = await card.getAttribute("data-session-id");
-        return id && !id.startsWith("temp-") ? id : null;
-      }, { timeout: 20_000 })
+      .poll(
+        async () => {
+          const id = await card.getAttribute("data-session-id");
+          return id && !id.startsWith("temp-") ? id : null;
+        },
+        { timeout: 20_000 },
+      )
       .toBeTruthy()
       .catch(() => {});
 
     // Re-query the card fresh and poll for .session-name — the
-    // sidebar can re-render mid-test when SSE syncs land, leaving
+    // sidebar can re-render mid-test when session updates land, leaving
     // the original `card` reference stale.
     await expect
       .poll(
         async () => {
-          const fresh = window
-            .locator(`[data-testid="${TID.sessionCard}"]`)
-            .first();
+          const fresh = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
           const el = fresh.locator(".session-name");
           if ((await el.count()) === 0) return null;
           return await el.textContent();
@@ -206,9 +202,7 @@ test.describe("session rename UI", () => {
         { timeout: 20_000, message: "session-name never appeared" },
       )
       .toBeTruthy();
-    const freshCard = window
-      .locator(`[data-testid="${TID.sessionCard}"]`)
-      .first();
+    const freshCard = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     const nameEl = freshCard.locator(".session-name");
     const originalName = await nameEl.textContent();
 
@@ -231,16 +225,15 @@ test.describe("session rename UI", () => {
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
     await card.locator(".session-delete-confirm-yes").click();
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     expect(pageErrors).toHaveLength(0);
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();
@@ -250,7 +243,6 @@ test.describe("session rename UI", () => {
     window,
     dataDir,
     pageErrors,
-    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -261,26 +253,29 @@ test.describe("session rename UI", () => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
-    await waitForDaemonReady(window);
+    await waitForAppReady(window);
 
     await home.openProject(projectPath);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     await sidebar.clickNewSession();
-    await expect
-      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(1);
+    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
-    await expect(card.locator(".session-ports")).toBeVisible({ timeout: 15_000 }).catch(() => {});
+    await expect(card.locator(".session-ports"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
 
-    // Wait for the SSE sync to land the real sessionId. Best-effort
+    // Wait for the persisted session update to land the real sessionId. Best-effort
     // for full-suite runs where the sync can be slow.
     await expect
-      .poll(async () => {
-        const id = await card.getAttribute("data-session-id");
-        return id && !id.startsWith("temp-") ? id : null;
-      }, { timeout: 20_000 })
+      .poll(
+        async () => {
+          const id = await card.getAttribute("data-session-id");
+          return id && !id.startsWith("temp-") ? id : null;
+        },
+        { timeout: 20_000 },
+      )
       .toBeTruthy()
       .catch(() => {});
 
@@ -308,16 +303,15 @@ test.describe("session rename UI", () => {
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
     await card.locator(".session-delete-confirm-yes").click();
-    await expect
-      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
-      .toBe(0);
+    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     expect(pageErrors).toHaveLength(0);
     const consoleErrors = rendererLog.filter(
-      (e) => e.type === "error"
-        && !e.text.includes("agentdock-fonts://")
-        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
-        && !e.text.includes("net::ERR_FAILED"),
+      (e) =>
+        e.type === "error" &&
+        !e.text.includes("agentdock-fonts://") &&
+        !(e.location?.url || "").includes("agentdock-fonts://") &&
+        !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

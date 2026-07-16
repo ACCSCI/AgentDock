@@ -1,3 +1,7 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 // @ts-nocheck
 /**
  * E2E tests for resource sync — verifies directory sync through the
@@ -7,19 +11,8 @@
  * sync resources, then exercise lifecycle.create() to verify directories are
  * correctly synced to the worktree.
  */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { execSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { createSessionLifecycle, type PortService } from "../session-lifecycle.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type PortService, createSessionLifecycle } from "../session-lifecycle.js";
 
 // --- Mock PortService ---
 let nextPort = 30000;
@@ -73,27 +66,15 @@ function createSourceDir(projectDir: string): void {
   writeFileSync(path.join(nestedDir, "nested.txt"), "nested-content");
 }
 
-function createConfig(projectDir: string): void {
-  const config = `version: "1"
-resources:
-  sync:
-    - source: "uploads/"
-      strategy: "overwrite"
-    - source: "uploads/"
-      strategy: "skip"
-      skipIfMissing: true
-hooks: {}
-`;
-  writeFileSync(path.join(projectDir, "agentdock.config.yaml"), config, "utf-8");
-}
-
 function cleanup(fixture: Fixture) {
   // Remove worktree paths that were created
   const wtBase = path.join(fixture.projectDir, ".agentdock", "worktrees");
   if (existsSync(wtBase)) {
     for (const entry of readdirSync(wtBase)) {
       const wtPath = path.join(wtBase, entry);
-      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+      try {
+        rmSync(wtPath, { recursive: true, force: true });
+      } catch {}
     }
   }
   // Remove branches created by test
@@ -181,7 +162,7 @@ hooks: {}
     expect(existsSync(path.join(wtUploads, "sub"))).toBe(true);
     expect(readFileSync(path.join(wtUploads, "sub", "nested.txt"), "utf-8")).toBe("nested-content");
 
-    // Cleanup git worktree (lifecycle.remove also works but needs daemon)
+    // Cleanup the git worktree directly; lifecycle deletion is covered elsewhere.
     gitWorktreeRemove(projectDir, result.worktreePath);
   });
 
@@ -299,7 +280,9 @@ hooks: {}
     expect(readFileSync(path.join(wtUploads, "a.txt"), "utf-8")).toBe("file-a");
 
     // Verify file
-    expect(readFileSync(path.join(result.worktreePath, ".env"), "utf-8")).toContain("NODE_ENV=development");
+    expect(readFileSync(path.join(result.worktreePath, ".env"), "utf-8")).toContain(
+      "NODE_ENV=development",
+    );
 
     gitWorktreeRemove(projectDir, result.worktreePath);
   });

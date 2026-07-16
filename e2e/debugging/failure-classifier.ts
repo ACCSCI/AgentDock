@@ -91,7 +91,7 @@ const rules: ClassificationRule[] = [
 export function classifyFailure(
   errorMessage: string,
   stackTrace: string,
-  testPath: string
+  testPath: string,
 ): FailureClassification {
   const combined = `${errorMessage}\n${stackTrace}`;
 

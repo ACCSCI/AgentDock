@@ -1,5 +1,12 @@
 // @ts-nocheck
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { DaemonState } from "./daemon-state.js";
 
@@ -59,7 +66,11 @@ export class DaemonWAL {
     } catch {
       // Fallback: direct write if rename fails
       writeFileSync(this.filePath, json, "utf-8");
-      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -80,17 +91,12 @@ export class DaemonWAL {
     try {
       const parsed = JSON.parse(json);
       if (parsed.schemaVersion === 2) {
-        throw new Error(
-          "refuse-overwrite-v2-state: v1 WAL detected schemaVersion=2, cannot load",
-        );
+        throw new Error("refuse-overwrite-v2-state: v1 WAL detected schemaVersion=2, cannot load");
       }
     } catch (err) {
       // Re-throw the v2 refusal; let JSON parse errors fall through
       // to DaemonState.deserialize which handles corrupt files gracefully.
-      if (
-        err instanceof Error &&
-        err.message.startsWith("refuse-overwrite-v2-state")
-      ) {
+      if (err instanceof Error && err.message.startsWith("refuse-overwrite-v2-state")) {
         throw err;
       }
     }

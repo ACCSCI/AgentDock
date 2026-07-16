@@ -1,11 +1,11 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { useKeyCapture } from "../hooks/useKeyCapture";
+import { SUPPORTED_LANGUAGES, type SupportedLanguage, setLanguage } from "../i18n";
+import { useTranslation } from "../i18n/react";
 import { MAX_BINDINGS_PER_ACTION } from "../lib/store";
 import type { ShortcutAction } from "../lib/store";
 import { useStore } from "../lib/store";
-import { useKeyCapture } from "../hooks/useKeyCapture";
-import { useTranslation } from "../i18n/react";
-import { setLanguage, SUPPORTED_LANGUAGES, type SupportedLanguage } from "../i18n";
 
 // Surface for window.api (exposed by preload.ts via contextBridge).
 // Mirrors the inline declaration in components/CustomTitleBar.tsx — each
@@ -14,14 +14,6 @@ import { setLanguage, SUPPORTED_LANGUAGES, type SupportedLanguage } from "../i18
 interface UpdateInfo {
   version?: string;
 }
-
-type CheckForUpdatesResult =
-  | { status: "dev-mode" }
-  | { status: "checking" }
-  | { status: "available"; info: { version: string } }
-  | { status: "not-available"; info: { version: string } }
-  | { status: "downloaded"; info: { version: string } }
-  | { status: "error"; message: string };
 
 // window.api type is inferred from contextBridge in preload.ts
 
@@ -46,7 +38,10 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
   });
 
   const removeKey = (key: string) => {
-    updateShortcut(action, bindings.filter((k) => k !== key));
+    updateShortcut(
+      action,
+      bindings.filter((k) => k !== key),
+    );
   };
 
   return (
@@ -153,7 +148,9 @@ function VersionSection() {
         const v = info?.version ?? "";
         setState({ kind: "downloaded", version: v });
       }),
-      api.updates.onError((err: { message: string }) => setState({ kind: "error", message: err.message })),
+      api.updates.onError((err: { message: string }) =>
+        setState({ kind: "error", message: err.message }),
+      ),
     ];
     return () => {
       for (const off of unsubs) {
@@ -271,7 +268,9 @@ function UpdateStatusText({
     case "dev-mode":
       return <span className="settings-version-hint">{t("devModeHint")}</span>;
     case "up-to-date":
-      return <span className="settings-version-ok">{t("upToDateLabel", { version: versionLabel })}</span>;
+      return (
+        <span className="settings-version-ok">{t("upToDateLabel", { version: versionLabel })}</span>
+      );
     case "available": {
       const pct = Math.max(0, Math.min(100, Math.round(state.percent)));
       return (
@@ -281,9 +280,17 @@ function UpdateStatusText({
       );
     }
     case "downloaded":
-      return <span className="settings-version-ok">{t("downloadedLabel", { version: state.version })}</span>;
+      return (
+        <span className="settings-version-ok">
+          {t("downloadedLabel", { version: state.version })}
+        </span>
+      );
     case "error":
-      return <span className="settings-version-error">{t("errorLabel", { message: state.message })}</span>;
+      return (
+        <span className="settings-version-error">
+          {t("errorLabel", { message: state.message })}
+        </span>
+      );
   }
 }
 
@@ -367,15 +374,18 @@ function SettingsPage() {
         <h3 className="settings-section-title">端口池配置</h3>
         <div className="settings-port-pool">
           <div className="settings-port-pool-row">
-            <label className="settings-port-pool-label">端口范围:</label>
+            <label className="settings-port-pool-label" htmlFor="port-pool-start">
+              端口范围:
+            </label>
             <input
+              id="port-pool-start"
               type="number"
               className="settings-port-pool-input"
               value={portPoolStart}
               min={1024}
               max={65535}
               onChange={(e) => {
-                const start = parseInt(e.target.value, 10);
+                const start = Number.parseInt(e.target.value, 10);
                 if (Number.isFinite(start)) {
                   handlePortPoolChange(start, portPoolEnd);
                 }
@@ -390,7 +400,7 @@ function SettingsPage() {
               min={1024}
               max={65535}
               onChange={(e) => {
-                const end = parseInt(e.target.value, 10);
+                const end = Number.parseInt(e.target.value, 10);
                 if (Number.isFinite(end)) {
                   handlePortPoolChange(portPoolStart, end);
                 }
@@ -405,11 +415,7 @@ function SettingsPage() {
       </div>
 
       <div className="settings-footer">
-        <button
-          type="button"
-          className="settings-reset-btn"
-          onClick={resetShortcuts}
-        >
+        <button type="button" className="settings-reset-btn" onClick={resetShortcuts}>
           {t("resetDefault", { ns: "settings" })}
         </button>
       </div>

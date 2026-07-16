@@ -5,11 +5,11 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import {
-  Hono,
-  type DaemonContext,
-  PROTOCOL_VERSION_STR,
-  HEALTH_CAPABILITIES,
   CURRENT_SCHEMA_VERSION,
+  type DaemonContext,
+  HEALTH_CAPABILITIES,
+  type Hono,
+  PROTOCOL_VERSION_STR,
   zodErrorHandler,
 } from "./shared.js";
 
@@ -75,10 +75,9 @@ export function registerSyncV2(app: Hono, ctx: DaemonContext): void {
         status: s.status,
         createdAt: s.createdAt,
         ports: Object.fromEntries(
-          ctx.stateV2.getSessionPorts(s.sessionId).map((p) => [
-            ctx.stateV2.getPortOwner(p)?.name ?? "?",
-            p,
-          ]),
+          ctx.stateV2
+            .getSessionPorts(s.sessionId)
+            .map((p) => [ctx.stateV2.getPortOwner(p)?.name ?? "?", p]),
         ),
       })),
       owners: ctx.stateV2.listOwners(),

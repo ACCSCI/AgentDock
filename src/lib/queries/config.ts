@@ -13,7 +13,7 @@ export function useProjectConfig(projectId: string) {
   return useQuery({
     queryKey: ["projectConfig", projectId],
     queryFn: async (): Promise<ProjectConfigData> => {
-      return api().config.get(projectId);
+      return (await api().config.get(projectId)) as ProjectConfigData;
     },
     enabled: !!projectId,
     staleTime: 10_000,

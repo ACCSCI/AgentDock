@@ -55,7 +55,16 @@ const ShortcutsContext = createContext<ShortcutsContextValue | null>(null);
  * caller should ignore empty combos.
  */
 export function formatKeyCombo(
-  e: KeyboardEvent | { key: string; code?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean },
+  e:
+    | KeyboardEvent
+    | {
+        key: string;
+        code?: string;
+        ctrlKey: boolean;
+        altKey: boolean;
+        shiftKey: boolean;
+        metaKey: boolean;
+      },
 ): string {
   const parts: string[] = [];
   if (e.ctrlKey) parts.push("Ctrl");
@@ -142,11 +151,7 @@ export function ShortcutsProvider({ children }: { children: ReactNode }) {
     registryRef.current.set(action, list);
   };
 
-  return (
-    <ShortcutsContext.Provider value={{ register }}>
-      {children}
-    </ShortcutsContext.Provider>
-  );
+  return <ShortcutsContext.Provider value={{ register }}>{children}</ShortcutsContext.Provider>;
 }
 
 /**
@@ -156,7 +161,7 @@ export function ShortcutsProvider({ children }: { children: ReactNode }) {
 export function useShortcutAction(
   action: ShortcutAction,
   handler: ShortcutHandler,
-  enabled: boolean = true,
+  enabled = true,
 ): void {
   const ctx = useContext(ShortcutsContext);
   // Use a ref for the handler so the registry always calls the latest closure

@@ -20,11 +20,8 @@
  *   - recovery /claim (sessionId in wal OR already-reported-this-window) → allowed
  *   - reconciliation pauses C1/C2 takeover (§4.4 — RECOVERING期间暂缓卡死判定)
  */
-import {
-  RECOVERING_HARD_MAX_MS,
-  RECOVERING_SOFT_MIN_MS,
-} from "./constants.js";
-import type { DaemonStateV2, DaemonLifecycleState } from "./daemon-state-v2.js";
+import { RECOVERING_HARD_MAX_MS, RECOVERING_SOFT_MIN_MS } from "./constants.js";
+import type { DaemonLifecycleState, DaemonStateV2 } from "./daemon-state-v2.js";
 
 /** How often the daemon's RECOVERING controller ticks (daemon-side). */
 export const RECOVERING_TICK_INTERVAL_MS = 500;
@@ -94,8 +91,7 @@ export function createRecoveringController(
 
     // Early exit: soft_min elapsed AND all expected reports are in
     const allReported =
-      reported.size >= cfg.expectedSessionIds.size &&
-      cfg.expectedSessionIds.size > 0;
+      reported.size >= cfg.expectedSessionIds.size && cfg.expectedSessionIds.size > 0;
     const noExpected = cfg.expectedSessionIds.size === 0;
 
     if (elapsed >= softMin && (allReported || noExpected)) {
@@ -153,21 +149,15 @@ export function gateClaimInRecovering(
   sessionId: string,
   expectedSessionIds: ReadonlySet<string>,
   alreadyReportedThisWindow: ReadonlySet<string>,
-):
-  | { allow: true }
-  | { allow: false; code: "RECOVERING"; message: string } {
+): { allow: true } | { allow: false; code: "RECOVERING"; message: string } {
   if (state.isReady()) return { allow: true };
   // RECOVERING — only recovery claims pass
-  if (
-    expectedSessionIds.has(sessionId) ||
-    alreadyReportedThisWindow.has(sessionId)
-  ) {
+  if (expectedSessionIds.has(sessionId) || alreadyReportedThisWindow.has(sessionId)) {
     return { allow: true };
   }
   return {
     allow: false,
     code: "RECOVERING",
-    message:
-      "Daemon is in RECOVERING; non-recovery claims are rejected. Retry after READY.",
+    message: "Daemon is in RECOVERING; non-recovery claims are rejected. Retry after READY.",
   };
 }

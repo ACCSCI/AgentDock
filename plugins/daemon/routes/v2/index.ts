@@ -11,11 +11,11 @@
  */
 import type { Hono } from "hono";
 import type { DaemonContext } from "../../context.js";
-import { registerHealthV2, registerSyncV2 } from "./health.js";
-import { registerSessionsV2, registerTakeover } from "./sessions.js";
-import { registerClaim } from "./ports.js";
-import { registerEvents } from "./events.js";
 import { registerDebugState, registerMetrics } from "./debug.js";
+import { registerEvents } from "./events.js";
+import { registerHealthV2, registerSyncV2 } from "./health.js";
+import { registerClaim } from "./ports.js";
+import { registerSessionsV2, registerTakeover } from "./sessions.js";
 
 export function registerV2(app: Hono, ctx: DaemonContext): void {
   registerHealthV2(app, ctx);

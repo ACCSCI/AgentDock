@@ -2,14 +2,14 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import type { ResourceDefinition } from "./config.js";
-import { parseEnv, mergeEnv, writeEnv } from "./env.js";
+import { mergeEnv, parseEnv, writeEnv } from "./env.js";
 
 // --- SyncError ---
 export class SyncError extends Error {

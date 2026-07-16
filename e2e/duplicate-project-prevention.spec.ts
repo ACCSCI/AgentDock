@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * E2E Test: Duplicate project prevention
  *
@@ -6,12 +9,9 @@
  *
  * Each test uses isolated project directories and cleans up after itself.
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
-import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 /**
  * Create a temporary git project for testing.
@@ -25,20 +25,23 @@ function createTempProject(name: string): string {
 
   // Initialize git repo
   execSync("git init", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.email \"test@test.com\"", { cwd: projectPath, stdio: "ignore" });
-  execSync("git config user.name \"Test\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: "ignore" });
+  execSync('git config user.name "Test"', { cwd: projectPath, stdio: "ignore" });
 
   // Create initial commit (required for git worktree)
   writeFileSync(join(projectPath, "README.md"), "# Test Project");
   execSync("git add .", { cwd: projectPath, stdio: "ignore" });
-  execSync("git commit -m \"init\"", { cwd: projectPath, stdio: "ignore" });
+  execSync('git commit -m "init"', { cwd: projectPath, stdio: "ignore" });
 
   // Create agentdock config (disable hooks for faster tests)
-  writeFileSync(join(projectPath, "agentdock.config.yaml"), `
+  writeFileSync(
+    join(projectPath, "agentdock.config.yaml"),
+    `
 hooks:
   afterCreateSession: []
   afterDeleteSession: []
-`);
+`,
+  );
 
   return projectPath;
 }
@@ -90,14 +93,7 @@ test.describe("Duplicate project prevention", () => {
     }
   });
 
-  test("opening same project twice should not create duplicate tab", async ({
-    window,
-    dataDir,
-    pageErrors,
-    dialogs,
-    rendererLog,
-    expectNoRendererErrors,
-  }) => {
+  test("opening same project twice should not create duplicate tab", async ({ window }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
 
@@ -110,7 +106,9 @@ test.describe("Duplicate project prevention", () => {
 
     // Count tabs with this project name
     const projectNameShort = projectName;
-    const tabsWithProject = window.locator(`[data-testid="project-tab"]`).filter({ hasText: projectNameShort });
+    const tabsWithProject = window
+      .locator(`[data-testid="project-tab"]`)
+      .filter({ hasText: projectNameShort });
     const tabCountAfterFirst = await tabsWithProject.count();
     console.log(`Tabs with project name after first open: ${tabCountAfterFirst}`);
 
@@ -142,11 +140,6 @@ test.describe("Duplicate project prevention", () => {
 
   test("opening project with different path format should not create duplicate", async ({
     window,
-    dataDir,
-    pageErrors,
-    dialogs,
-    rendererLog,
-    expectNoRendererErrors,
   }) => {
     const home = new HomePage(window);
     const sidebar = new SidebarPage(window);
@@ -160,14 +153,16 @@ test.describe("Duplicate project prevention", () => {
 
     // Count tabs with this project name
     const projectNameShort = projectName;
-    const tabsWithProject = window.locator(`[data-testid="project-tab"]`).filter({ hasText: projectNameShort });
+    const tabsWithProject = window
+      .locator(`[data-testid="project-tab"]`)
+      .filter({ hasText: projectNameShort });
     const tabCountAfterFirst = await tabsWithProject.count();
     console.log(`Tabs with project name after first open: ${tabCountAfterFirst}`);
     expect(tabCountAfterFirst).toBe(1);
 
     // Now try to open the same project with a slightly different path
     // (e.g., with trailing slash)
-    const pathWithSlash = projectPath + "\\";
+    const pathWithSlash = `${projectPath}\\`;
     console.log(`Opening with different path format: ${pathWithSlash}`);
 
     // Click the "+" button to open new project

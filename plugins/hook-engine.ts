@@ -1,21 +1,32 @@
 import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import process from "node:process";
+import { promisify } from "node:util";
 import type { HookDefinition, HookLifecycleEvent } from "./config.js";
 import { buildScopedChildEnv } from "./env.js";
-import { killProcessesUnderPath } from "./worktree.js";
 import { log } from "./logger.js";
+import { killProcessesUnderPath } from "./worktree.js";
 
 const execAsync = promisify(exec);
 
 // --- 异步 hook 子进程追踪 ---
 // 用于 session 删除时 kill 仍在运行的 hook 子进程，防止 EBUSY
 const sessionHookPids = new Map<string, Set<number>>();
+const cancelledHookSessions = new Set<string>();
 
 export function trackHookPid(sessionId: string, pid: number): void {
   let set = sessionHookPids.get(sessionId);
-  if (!set) { set = new Set(); sessionHookPids.set(sessionId, set); }
+  if (!set) {
+    set = new Set();
+    sessionHookPids.set(sessionId, set);
+  }
   set.add(pid);
+}
+
+function untrackHookPid(sessionId: string, pid: number): void {
+  const pids = sessionHookPids.get(sessionId);
+  if (!pids) return;
+  pids.delete(pid);
+  if (pids.size === 0) sessionHookPids.delete(sessionId);
 }
 
 export function killSessionHookProcesses(sessionId: string): void {
@@ -42,7 +53,13 @@ export function killSessionHookProcesses(sessionId: string): void {
  * On Windows, cmd.exe may take >300ms after receiving SIGTERM to release its CWD handle.
  * We poll up to ~5s, verifying processes are actually gone before returning.
  */
-export async function killSessionHookProcessesAndWait(sessionId: string, dirPath: string): Promise<void> {
+export async function killSessionHookProcessesAndWait(
+  sessionId: string,
+  dirPath: string,
+): Promise<void> {
+  // Prevent an in-flight multi-hook sequence from starting its next command
+  // after we kill the currently running shell.
+  cancelledHookSessions.add(sessionId);
   const pids = sessionHookPids.get(sessionId);
   if (!pids || pids.size === 0) {
     sessionHookPids.delete(sessionId);
@@ -56,7 +73,9 @@ export async function killSessionHookProcessesAndWait(sessionId: string, dirPath
     }
   } else {
     for (const pid of pids) {
-      try { process.kill(pid, "SIGKILL"); } catch {}
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
     }
   }
 
@@ -142,7 +161,6 @@ export interface HookEngine {
  * We just need to pass the raw command string — exec handles the shell.
  */
 
-
 /**
  * Create a HookRegistry instance.
  */
@@ -203,7 +221,15 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
         },
         (error, stdout, stderr) => {
           log.info({ hook: hook.run, cwd }, "hook exec callback fired");
-          log.info({ error: error?.message, exitCode: (error as any)?.code, stdoutLen: stdout?.length, stderrLen: stderr?.length }, "hook exec callback details");
+          log.info(
+            {
+              error: error?.message,
+              exitCode: error?.code,
+              stdoutLen: stdout?.length,
+              stderrLen: stderr?.length,
+            },
+            "hook exec callback details",
+          );
           if (settled) return;
 
           if (timedOut) {
@@ -255,29 +281,50 @@ export function createHookEngine(registry: HookRegistry): HookEngine {
 
       // Handle timeout
       const timer = setTimeout(() => {
+        if (settled) return;
         timedOut = true;
+        settled = true;
         try {
           if (process.platform === "win32") {
             // On Windows, kill the process tree
-            exec(`taskkill /pid ${child.pid} /T /F`, () => {});
+            if (child.pid) exec(`taskkill /pid ${child.pid} /T /F`, () => {});
           } else {
             child.kill("SIGTERM");
           }
         } catch {}
+        // The timeout is the hook API boundary. Process-tree cleanup may finish
+        // later on Windows, but callers must not wait seconds for taskkill's
+        // callback before receiving the timeout result.
+        resolve({
+          hook,
+          event: context.event,
+          success: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          duration: Date.now() - start,
+          timedOut: true,
+          error: `Hook timed out after ${hook.timeout}ms`,
+        });
       }, hook.timeout);
 
       child.on("exit", () => {
         clearTimeout(timer);
+        if (child.pid) untrackHookPid(context.sessionId, child.pid);
       });
     });
   }
 
   async function execute(event: HookLifecycleEvent, context: HookContext): Promise<HookReport> {
+    if (event === "beforeCreateSession" || event === "afterDeleteSession") {
+      cancelledHookSessions.delete(context.sessionId);
+    }
     const hooks = registry.getHooks(event);
     const results: HookResult[] = [];
     const start = Date.now();
 
     for (const hook of hooks) {
+      if (cancelledHookSessions.has(context.sessionId)) break;
       const result = await executeOne(hook, { ...context, event });
       results.push(result);
 

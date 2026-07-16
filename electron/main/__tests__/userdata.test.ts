@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // @ts-nocheck
 /**
  * userdata decision unit tests.
@@ -5,10 +8,7 @@
  * The Electron `app` module is not available in Node test env, so we mock
  * it and verify the perUser/perMachine decision based on process.execPath.
  */
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
   app: {
@@ -24,7 +24,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { resolveUserDataPath, migrateLegacyUserData, detectInstallMode } from "../userdata.js";
+import { detectInstallMode, migrateLegacyUserData, resolveUserDataPath } from "../userdata.js";
 
 describe("resolveUserDataPath", () => {
   const originalExecPath = process.execPath;
@@ -50,6 +50,7 @@ describe("resolveUserDataPath", () => {
 
   it("falls back to %PROGRAMDATA% = C:\\ProgramData if env unset", () => {
     const old = process.env.PROGRAMDATA;
+    // biome-ignore lint/performance/noDelete: deleting is the only cross-runtime-safe way to simulate an absent process.env key.
     delete process.env.PROGRAMDATA;
     Object.defineProperty(process, "execPath", {
       value: "C:\\Program Files\\AgentDock\\AgentDock.exe",
@@ -58,6 +59,8 @@ describe("resolveUserDataPath", () => {
       expect(resolveUserDataPath()).toBe("C:\\ProgramData\\AgentDock");
     } finally {
       if (old !== undefined) process.env.PROGRAMDATA = old;
+      // biome-ignore lint/performance/noDelete: restore the key to its truly absent state.
+      else delete process.env.PROGRAMDATA;
     }
   });
 });
@@ -103,7 +106,9 @@ describe("migrateLegacyUserData", () => {
     const { migratedFrom } = migrateLegacyUserData(newPath);
     expect(migratedFrom).toBeNull();
     // Existing data must NOT be clobbered
-    expect(require("node:fs").readFileSync(join(newPath, "already-here.txt"), "utf8")).toBe("fresh");
+    expect(require("node:fs").readFileSync(join(newPath, "already-here.txt"), "utf8")).toBe(
+      "fresh",
+    );
   });
 
   it("copies files from $APPDATA\\AgentDock when new is empty", () => {

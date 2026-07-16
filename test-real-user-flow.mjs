@@ -12,9 +12,9 @@
 //   - If not visible, refresh the page which repopulates TabBar from server data
 // All of these are user-visible interactions.
 
-import { _electron as electron } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { _electron as electron } from "@playwright/test";
 
 const ROOT = "F:\\ProgramPlayground\\JavaScript\\AgentDock\\.agentdock\\worktrees\\bed4c452-74d";
 const SCREENSHOT_DIR = join(ROOT, "screenshots");
@@ -30,7 +30,7 @@ const errors = [];
 
 function logStep(step, status, detail, screenshot) {
   steps.push({ step, status, detail, screenshot });
-  console.log(`[${status.toUpperCase()}] ${step}${detail ? " — " + detail : ""}`);
+  console.log(`[${status.toUpperCase()}] ${step}${detail ? ` — ${detail}` : ""}`);
 }
 
 function logErr(e) {
@@ -66,7 +66,7 @@ async function main() {
       }
     });
     window.on("pageerror", (err) => {
-      console.log(`[renderer pageerror]`, err.message);
+      console.log("[renderer pageerror]", err.message);
     });
     logStep("first_window", "passed", `url=${window.url()}`);
 
@@ -126,8 +126,8 @@ async function main() {
     // Debug: verify visible entries
     const visibleEntries = await window.evaluate(() => {
       return Array.from(document.querySelectorAll('[data-testid="dir-entry"]'))
-        .filter(el => el.offsetParent !== null)
-        .map(el => el.querySelector('.dir-entry-name')?.textContent);
+        .filter((el) => el.offsetParent !== null)
+        .map((el) => el.querySelector(".dir-entry-name")?.textContent);
     });
     console.log("  Visible entries:", JSON.stringify(visibleEntries));
 
@@ -144,8 +144,8 @@ async function main() {
     await window.waitForTimeout(500);
 
     const selectedAfterClick = await window.evaluate(() => {
-      const el = document.querySelector('.dir-entry-selected');
-      return el ? el.querySelector('.dir-entry-name')?.textContent : null;
+      const el = document.querySelector(".dir-entry-selected");
+      return el ? el.querySelector(".dir-entry-name")?.textContent : null;
     });
     console.log("  Selected after click:", selectedAfterClick);
     logStep("dir_select", "passed", `选中 ${last} (selected=${selectedAfterClick})`);
@@ -153,7 +153,7 @@ async function main() {
     // Confirm
     const isBtnDisabled = await window.evaluate(() => {
       const btn = document.querySelector('[data-testid="dir-confirm"]');
-      return btn?.hasAttribute('disabled');
+      return btn?.hasAttribute("disabled");
     });
     console.log("  Confirm disabled:", isBtnDisabled);
     const confirm = window.locator('[data-testid="dir-confirm"]');
@@ -167,11 +167,13 @@ async function main() {
       const debugProjects = await window.evaluate(async () => {
         try {
           const all = await window.api.db.projects.list();
-          return all.map(p => ({ id: p.id, name: p.name, path: p.path }));
-        } catch(e) { return `Error: ${e.message}`; }
+          return all.map((p) => ({ id: p.id, name: p.name, path: p.path }));
+        } catch (e) {
+          return `Error: ${e.message}`;
+        }
       });
       console.log("  Backend projects after confirm:", JSON.stringify(debugProjects));
-    } catch(e) {
+    } catch (e) {
       console.log("  Failed to check backend projects:", e.message);
     }
 
@@ -190,7 +192,9 @@ async function main() {
     // ================================================================
 
     // Wait for the modal to close and the page to settle
-    await window.waitForSelector('[data-testid="dir-modal"]', { state: "hidden", timeout: 10_000 }).catch(() => {});
+    await window
+      .waitForSelector('[data-testid="dir-modal"]', { state: "hidden", timeout: 10_000 })
+      .catch(() => {});
     await window.waitForTimeout(2000);
 
     // Check if we've already navigated (h2 shows Copilot-Switch)
@@ -201,7 +205,7 @@ async function main() {
           const h2 = document.querySelector("h2");
           return h2?.textContent?.includes("Copilot-Switch") ?? false;
         },
-        { timeout: 5000 }
+        { timeout: 5000 },
       );
       navigated = true;
       console.log("Auto-navigation succeeded!");
@@ -210,7 +214,10 @@ async function main() {
     }
 
     if (!navigated) {
-      const tabEl = window.locator('[data-testid="project-tab"]').filter({ hasText: PROJECT_NAME }).first();
+      const tabEl = window
+        .locator('[data-testid="project-tab"]')
+        .filter({ hasText: PROJECT_NAME })
+        .first();
       let tabVisible = false;
       try {
         await tabEl.waitFor({ state: "visible", timeout: 5000 });
@@ -229,13 +236,13 @@ async function main() {
           await window.evaluate(async () => {
             // Call the projects list via IPC to ensure it works
             const projects = await window.api.db.projects.list();
-            console.log('[debug] IPC projects count:', projects.length);
+            console.log("[debug] IPC projects count:", projects.length);
             // Try to trigger a React Query refetch
             // We dispatch a custom event that the hook listens for
-            window.dispatchEvent(new CustomEvent('agentdock:force-refetch'));
+            window.dispatchEvent(new CustomEvent("agentdock:force-refetch"));
           });
           await window.waitForTimeout(3000);
-        } catch(e) {
+        } catch (e) {
           console.log("Force refetch failed:", e.message);
         }
 
@@ -253,16 +260,19 @@ async function main() {
         });
         console.log("  Page state:", JSON.stringify(pageState).slice(0, 600));
 
-        const tabEl2 = window.locator('[data-testid="project-tab"]').filter({ hasText: PROJECT_NAME }).first();
+        const tabEl2 = window
+          .locator('[data-testid="project-tab"]')
+          .filter({ hasText: PROJECT_NAME })
+          .first();
         try {
           await tabEl2.waitFor({ state: "visible", timeout: 15_000 });
           console.log("Project tab visible after reload, clicking it");
           await tabEl2.click();
           await window.waitForTimeout(3000);
-        } catch (e) {
+        } catch (_e) {
           console.log("Project tab STILL not visible after reload");
           const anyTab = window.locator('[data-testid="project-tab"]').first();
-          if (await anyTab.count() > 0) {
+          if ((await anyTab.count()) > 0) {
             await anyTab.click();
             await window.waitForTimeout(3000);
           }
@@ -276,7 +286,7 @@ async function main() {
         const h2 = document.querySelector("h2");
         return h2?.textContent?.includes("Copilot-Switch") ?? false;
       },
-      { timeout: 30_000 }
+      { timeout: 30_000 },
     );
     await window.screenshot({ path: join(SCREENSHOT_DIR, "03-workspace.png") });
     logStep("workspace_loaded", "passed", "h2 显示 Copilot-Switch", "03-workspace.png");
@@ -334,11 +344,10 @@ async function main() {
     // ================================================================
     await window.waitForFunction(
       () => document.querySelectorAll('[data-testid="session-card"]').length === 0,
-      { timeout: 30_000 }
+      { timeout: 30_000 },
     );
     await window.screenshot({ path: join(SCREENSHOT_DIR, "05-deleted.png") });
     logStep("session_deleted", "passed", "session 卡片已消失", "05-deleted.png");
-
   } catch (e) {
     logErr(e);
     if (window) {
@@ -348,7 +357,9 @@ async function main() {
     }
   } finally {
     if (app) {
-      try { await app.close(); } catch {}
+      try {
+        await app.close();
+      } catch {}
     }
   }
 

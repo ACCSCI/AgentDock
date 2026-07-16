@@ -152,9 +152,7 @@ export class SseConsumer {
    * Each subscriber receives every event. Subscribers throwing do not
    * affect other subscribers.
    */
-  subscribe(
-    cb: (e: { event: string; seq: number; data: unknown }) => void,
-  ): () => void {
+  subscribe(cb: (e: { event: string; seq: number; data: unknown }) => void): () => void {
     this.subscribers.add(cb);
     return () => {
       this.subscribers.delete(cb);
@@ -173,7 +171,7 @@ export class SseConsumer {
     let res: Response;
     try {
       res = await fetchImpl(url, { headers, signal: this.currentController.signal });
-    } catch (err) {
+    } catch (_err) {
       if (this.stopped) return;
       this.scheduleReconnect();
       return;
@@ -196,17 +194,22 @@ export class SseConsumer {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        let parsed: ReturnType<typeof parseSseFrame> = null;
         // Drain all complete frames in the buffer.
-        while ((parsed = parseSseFrame(buffer)) !== null) {
+        let parsed = parseSseFrame(buffer);
+        while (parsed !== null) {
           buffer = parsed.rest;
           this.dispatch(parsed.frame);
+          parsed = parseSseFrame(buffer);
         }
       }
     } catch {
       /* network error — fall through to reconnect */
     } finally {
-      try { reader.releaseLock(); } catch { /* already released */ }
+      try {
+        reader.releaseLock();
+      } catch {
+        /* already released */
+      }
     }
     if (this.stopped) return;
     // §5.3 — 断线立即触发 onDisconnect (host: fetch /sync, 重新 claim)

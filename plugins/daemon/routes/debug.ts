@@ -11,9 +11,9 @@
  * Use v2 /debug/state-v2 for session/port inspection.
  */
 import { zValidator } from "@hono/zod-validator";
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import { z } from "zod";
-import { HEARTBEAT_TIMEOUT_MS, cleanupStaleClients, type DaemonContext } from "../context.js";
+import { type DaemonContext, HEARTBEAT_TIMEOUT_MS, cleanupStaleClients } from "../context.js";
 import { zodErrorHandler } from "../middleware/error.js";
 
 const SimulateStaleSchema = z.object({

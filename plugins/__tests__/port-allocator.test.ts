@@ -1,16 +1,11 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import {
-  FilePortAllocator,
-  PoolPortAllocator,
-  isPortAvailable,
-  type PortAllocator,
-} from "../port-allocator.js";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { execFile } from "node:child_process";
-import { createServer, type Server } from "node:net";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { type Server, createServer } from "node:net";
+import os from "node:os";
+import path from "node:path";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FilePortAllocator, PoolPortAllocator, isPortAvailable } from "../port-allocator.js";
 
 function tmpDir(): string {
   const dir = path.join(
@@ -348,18 +343,13 @@ describe("FilePortAllocator — cross-process concurrency", () => {
 
 function runChild(scriptPath: string, count: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [scriptPath, count],
-      { timeout: 10000 },
-      (err, stdout, stderr) => {
-        if (err) {
-          reject(new Error(`Child failed: ${stderr || err.message}`));
-        } else {
-          resolve(stdout);
-        }
-      },
-    );
+    execFile(process.execPath, [scriptPath, count], { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error(`Child failed: ${stderr || err.message}`));
+      } else {
+        resolve(stdout);
+      }
+    });
   });
 }
 
@@ -382,7 +372,7 @@ describe("isPortAvailable (新架构 §3.3 bindProbe)", () => {
 
   afterEach(async () => {
     if (grabbed) {
-      await new Promise<void>((r) => grabbed!.close(() => r()));
+      await new Promise<void>((r) => grabbed?.close(() => r()));
       grabbed = null;
     }
   });

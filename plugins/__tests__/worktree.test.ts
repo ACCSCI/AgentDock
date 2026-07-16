@@ -1,10 +1,17 @@
-// @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+// @ts-nocheck
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  classifyOrphans,
+  dispatchOrphanCleanup,
+  removeOrphanBranch,
+  removeOrphanDir,
+  scanOrphanBranches,
+} from "../orphan.js";
 import {
   createWorktree,
   getWorktreePath,
@@ -14,13 +21,6 @@ import {
   renameWorktree,
   validateBranchName,
 } from "../worktree.js";
-import {
-  classifyOrphans,
-  dispatchOrphanCleanup,
-  removeOrphanBranch,
-  removeOrphanDir,
-  scanOrphanBranches,
-} from "../orphan.js";
 
 let projectDir: string;
 
@@ -30,7 +30,7 @@ function initGitRepo(dir: string) {
   execSync("git config user.name Test", { cwd: dir, stdio: "pipe" });
   writeFileSync(path.join(dir, "README.md"), "# test\n");
   execSync("git add .", { cwd: dir, stdio: "pipe" });
-  execSync('git commit -m init', { cwd: dir, stdio: "pipe" });
+  execSync("git commit -m init", { cwd: dir, stdio: "pipe" });
 }
 
 beforeEach(() => {
@@ -70,9 +70,9 @@ describe("isRegisteredWorktree", () => {
 // ============================================================
 describe("removeWorktree", () => {
   it("W1: 路径不存在时抛出 Worktree not found", async () => {
-    await expect(
-      removeWorktree(projectDir, "nonexistent", { force: true }),
-    ).rejects.toThrow("Worktree not found");
+    await expect(removeWorktree(projectDir, "nonexistent", { force: true })).rejects.toThrow(
+      "Worktree not found",
+    );
   });
 
   it("W2: 目录存在但不是 git worktree，回退 fs.rm 删除目录", async () => {
@@ -101,7 +101,11 @@ describe("removeWorktree", () => {
     expect(await isRegisteredWorktree(projectDir, result.worktreePath)).toBe(false);
 
     // Branch should also be deleted
-    const branchOutput = execSync("git branch --list", { cwd: projectDir, encoding: "utf-8", stdio: "pipe" });
+    const branchOutput = execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
     expect(branchOutput).not.toContain("agentdock/s3");
   });
 
@@ -164,7 +168,11 @@ describe("removeWorktree", () => {
     await removeWorktree(projectDir, "s8", { force: true });
     expect(existsSync(result.worktreePath)).toBe(false);
 
-    const branches = execSync("git branch --list", { cwd: projectDir, encoding: "utf-8", stdio: "pipe" });
+    const branches = execSync("git branch --list", {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
     expect(branches).not.toContain("agentdock/s8");
 
     const recreated = createWorktree(projectDir, "s8");
@@ -175,7 +183,7 @@ describe("removeWorktree", () => {
   it("W9: 模拟 git worktree remove 失败后 fs.rm 兜底（核心修复验证）", async () => {
     const result = createWorktree(projectDir, "s9");
     const lockedFile = path.join(result.worktreePath, "potentially-locked.bin");
-    writeFileSync(lockedFile, Buffer.alloc(1024, 0xFF));
+    writeFileSync(lockedFile, Buffer.alloc(1024, 0xff));
 
     const removed = await removeWorktree(projectDir, "s9", { force: true });
     expect(removed.removed).toBe(result.worktreePath);
@@ -204,7 +212,10 @@ const isWin = process.platform === "win32";
 
 // 独立临时目录，避免 afterEach 清理 projectDir 时因子进程持有句柄而失败
 function orphanTempDir(): string {
-  const dir = path.join(os.tmpdir(), `ad-orphan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = path.join(
+    os.tmpdir(),
+    `ad-orphan-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -247,8 +258,12 @@ describe("removeOrphanDir", () => {
     await expect(removeOrphanDir(orphanDir)).resolves.toBeUndefined();
     expect(existsSync(orphanDir)).toBe(false);
 
-    try { child?.kill(); } catch {}
-    try { rmSync(orphanDir, { recursive: true, force: true }); } catch {}
+    try {
+      child?.kill();
+    } catch {}
+    try {
+      rmSync(orphanDir, { recursive: true, force: true });
+    } catch {}
   });
 
   it("W14: 重试耗尽后抛出错误", { timeout: 60000 }, async () => {
@@ -270,8 +285,13 @@ describe("removeOrphanDir", () => {
     await expect(removeOrphanDir(orphanDir)).rejects.toThrow();
     expect(existsSync(orphanDir)).toBe(true);
 
-    try { child?.kill(); child?.unref(); } catch {}
-    try { rmSync(orphanDir, { recursive: true, force: true }); } catch {}
+    try {
+      child?.kill();
+      child?.unref();
+    } catch {}
+    try {
+      rmSync(orphanDir, { recursive: true, force: true });
+    } catch {}
   });
 });
 
@@ -316,9 +336,7 @@ describe("validateBranchName", () => {
 describe("createWorktree baseBranch injection safety", () => {
   it("WI1: baseBranch 含 shell 元字符 → 拒绝（不创建注入文件）", () => {
     const marker = path.join(projectDir, "INJECTED.txt");
-    expect(() =>
-      createWorktree(projectDir, "inj1", 'main"; echo x > INJECTED.txt; "'),
-    ).toThrow();
+    expect(() => createWorktree(projectDir, "inj1", 'main"; echo x > INJECTED.txt; "')).toThrow();
     expect(existsSync(marker)).toBe(false);
   });
 
@@ -338,7 +356,7 @@ describe("renameWorktree newName injection safety", () => {
     createWorktree(projectDir, "rn1");
     // §4.1 — branch 派生自 sessionId, newName 仅作为 displayName.
     // 特殊字符在 newName 中不会注入到 branch (branch = agentdock/rn1).
-    const result = renameWorktree(projectDir, "rn1", 'x`touch pwned`');
+    const result = renameWorktree(projectDir, "rn1", "x`touch pwned`");
     expect(result.newBranch).toBe("agentdock/rn1");
     expect(existsSync(path.join(projectDir, "pwned"))).toBe(false);
     const result2 = renameWorktree(projectDir, "rn1", 'x"; echo y; "');
@@ -504,9 +522,7 @@ describe("removeOrphanBranch", () => {
   });
 
   it("ROB3: 拒绝非法分支名（命令注入防护）", async () => {
-    await expect(
-      removeOrphanBranch(projectDir, 'agentdock/x"; echo pwned; "'),
-    ).rejects.toThrow();
+    await expect(removeOrphanBranch(projectDir, 'agentdock/x"; echo pwned; "')).rejects.toThrow();
   });
 });
 
@@ -591,7 +607,7 @@ describe("classifyOrphans + dispatchOrphanCleanup", () => {
     const classified = classifyOrphans(projectDir, new Set(), new Set());
     const fsItem = classified.filesystemOrphans.find((o) => o.sessionId === "dc1");
     expect(fsItem).toBeDefined();
-    expect(fsItem!.branch).toBe("agentdock/dc1");
+    expect(fsItem?.branch).toBe("agentdock/dc1");
 
     const result = await dispatchOrphanCleanup(projectDir, classified);
     expect(result.failed).toHaveLength(0);
@@ -622,7 +638,7 @@ describe("classifyOrphans + dispatchOrphanCleanup", () => {
     const classified = classifyOrphans(projectDir, new Set(), new Set());
     const branchItem = classified.branchOrphans.find((o) => o.sessionId === "dc3");
     expect(branchItem).toBeDefined();
-    expect(branchItem!.worktreePath).toBe("");
+    expect(branchItem?.worktreePath).toBe("");
 
     const cleanup = await dispatchOrphanCleanup(projectDir, classified);
     expect(cleanup.failed).toHaveLength(0);
@@ -644,4 +660,3 @@ describe("classifyOrphans + dispatchOrphanCleanup", () => {
     expect(listBranches()).not.toContain("agentdock/dc4");
   });
 });
-

@@ -4,7 +4,7 @@
  * Settings are stored in a JSON file at <userData>/settings.json
  * In dev mode: <cwd>/data/settings.json
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 interface GlobalSettings {

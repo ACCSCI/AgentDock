@@ -27,29 +27,24 @@ export function ConfirmDeleteModal({
   if (!open) return null;
 
   return (
-    <div className="dir-modal-overlay" onClick={onCancel}>
-      <div
-        className="dir-modal git-init-modal"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="confirm-delete-modal"
-      >
+    <div
+      className="dir-modal-overlay"
+      role="presentation"
+      onClick={(event) => event.target === event.currentTarget && onCancel()}
+      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    >
+      <div className="dir-modal git-init-modal" data-testid="confirm-delete-modal">
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
             <h3>{t("confirmDelete.title")}</h3>
           </div>
-          <button
-            type="button"
-            className="dir-modal-close"
-            onClick={onCancel}
-          >
+          <button type="button" className="dir-modal-close" onClick={onCancel}>
             ✕
           </button>
         </div>
 
         <div className="git-init-description">
-          <p>
-            {t("confirmDelete.message", { name: sessionName })}
-          </p>
+          <p>{t("confirmDelete.message", { name: sessionName })}</p>
           <p>{t("confirmDelete.consequence")}</p>
         </div>
 

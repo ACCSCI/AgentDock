@@ -48,13 +48,9 @@ export interface CompositeResult {
  *  - 503 + success=false + error.code=INVARIANT_VIOLATION → 至少 1 条失败
  *  - 其他 (daemon down / 404) → 抛 Error (网络错, 不是不变式失败)
  */
-export async function fetchInvariants(
-  window: Page,
-): Promise<CompositeResult> {
+export async function fetchInvariants(window: Page): Promise<CompositeResult> {
   return await window.evaluate(async () => {
-    const port = (
-      window as unknown as { __agentdockDaemonPort?: number }
-    ).__agentdockDaemonPort;
+    const port = (window as unknown as { __agentdockDaemonPort?: number }).__agentdockDaemonPort;
     if (!port) {
       // Renderer 没暴露 port — 退回到通过 faultInject 路径
       // (IPC `daemon:debugState` 已知可达, 但 invariants 端点不一定在 IPC 暴露).
@@ -72,9 +68,7 @@ export async function fetchInvariants(
       error?: { code: string; message: string; failed: string[] };
     };
     if (!res.ok && body.error?.code !== "INVARIANT_VIOLATION") {
-      throw new Error(
-        `fetchInvariants: unexpected ${res.status} ${JSON.stringify(body)}`,
-      );
+      throw new Error(`fetchInvariants: unexpected ${res.status} ${JSON.stringify(body)}`);
     }
     return {
       ok: body.ok ?? false,
@@ -96,14 +90,7 @@ export async function fetchInvariants(
 export interface InvariantContext {
   envNotTrusted?: [number | undefined, number, boolean];
   staleWriteStatus?: number;
-  displayNameIsolation?: [
-    string,
-    string,
-    string,
-    string,
-    string,
-    string,
-  ];
+  displayNameIsolation?: [string, string, string, string, string, string];
   snapshotStream?: [number, Record<string, number>, Record<string, number>, number];
 }
 
@@ -117,7 +104,7 @@ export interface InvariantContext {
  */
 export async function assertInvariantsAfterStep(
   window: Page,
-  ctx?: InvariantContext,
+  _ctx?: InvariantContext,
 ): Promise<void> {
   const v2Enabled = await window.evaluate(() =>
     (
@@ -137,8 +124,6 @@ export async function assertInvariantsAfterStep(
   // 扩展. 这里只保证默认 4 条全过即可.
   if (!composite.ok) {
     const lines = composite.failed.map((f) => `  - ${f}`).join("\n");
-    throw new Error(
-      `[invariant] ${composite.failed.length} invariant(s) violated:\n${lines}`,
-    );
+    throw new Error(`[invariant] ${composite.failed.length} invariant(s) violated:\n${lines}`);
   }
 }

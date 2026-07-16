@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // @ts-nocheck
 /**
  * Comprehensive E2E — covers all main branch functionality via Playwright.
@@ -13,7 +16,7 @@
  *   4. Config: get, save
  *   5. Files: list
  *   6. Worktree: orphans (returns empty for fresh project)
- *   7. Sessions: create (with SSE step tracking), list, delete
+ *   7. Sessions: create (with IPC step tracking), list, delete
  *   8. Terminals: create, list, open (port transfer)
  *   9. Shell: openExplorer, openTerminal
  *  10. bgHookStatus, hookErrors, retryHooks
@@ -24,15 +27,12 @@
  * IPC channels without needing a display server.
  */
 import {
-  test as base,
-  expect,
   type ElectronApplication,
   type Page,
+  test as base,
   _electron as electron,
+  expect,
 } from "@playwright/test";
-import { join } from "node:path";
-import { existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 
 const ROOT = process.cwd();
 
@@ -91,7 +91,9 @@ test_.beforeAll(async () => {
   window = await app.firstWindow({ timeout: 20_000 });
   await window.waitForLoadState("domcontentloaded");
   // Give preload a moment to expose window.api
-  await window.waitForFunction(() => typeof (window as { api?: unknown }).api === "object", null, { timeout: 10_000 });
+  await window.waitForFunction(() => typeof (window as { api?: unknown }).api === "object", null, {
+    timeout: 10_000,
+  });
 });
 
 test_.afterAll(async () => {
@@ -112,17 +114,31 @@ test_.describe("E2E: full IPC surface", () => {
     expect(window).not.toBeNull();
   });
 
-  test_("bootstrap:health returns daemon status + IPC count", async () => {
+  test_("bootstrap:health returns renderer status + IPC count", async () => {
     if (!window) throw new Error("window not initialized");
-    const health = await window.evaluate(() => (window as unknown as { api: { bootstrap: { health: () => Promise<{ daemon: string; vite: string; ipc: number }> } } }).api.bootstrap.health());
-    expect(health.daemon).toBe("ok");
+    const health = await window.evaluate(() =>
+      (
+        window as unknown as {
+          api: { bootstrap: { health: () => Promise<{ vite: string; ipc: number }> } };
+        }
+      ).api.bootstrap.health(),
+    );
+    expect(health.ipc).toBeGreaterThan(0);
     expect(health.ipc).toBeGreaterThanOrEqual(29);
   });
 
   test_("bootstrap:clientId returns a stable string", async () => {
     if (!window) throw new Error("window not initialized");
-    const id1 = await window.evaluate(() => (window as unknown as { api: { bootstrap: { clientId: () => Promise<string> } } }).api.bootstrap.clientId());
-    const id2 = await window.evaluate(() => (window as unknown as { api: { bootstrap: { clientId: () => Promise<string> } } }).api.bootstrap.clientId());
+    const id1 = await window.evaluate(() =>
+      (
+        window as unknown as { api: { bootstrap: { clientId: () => Promise<string> } } }
+      ).api.bootstrap.clientId(),
+    );
+    const id2 = await window.evaluate(() =>
+      (
+        window as unknown as { api: { bootstrap: { clientId: () => Promise<string> } } }
+      ).api.bootstrap.clientId(),
+    );
     expect(id1).toBe(id2);
     expect(id1).toMatch(/^client_/);
   });
@@ -138,10 +154,14 @@ test_.describe("E2E: full IPC surface", () => {
     const projectDir = join(testDataDir, "projectA");
     mkdirSync(projectDir, { recursive: true });
     await window.evaluate((p) => {
-      return (window as unknown as { api: { db: { init: (path: string) => Promise<unknown> } } }).api.db.init(p);
+      return (
+        window as unknown as { api: { db: { init: (path: string) => Promise<unknown> } } }
+      ).api.db.init(p);
     }, projectDir);
     const projects = await window.evaluate(() =>
-      (window as unknown as { api: { db: { projects: { list: () => Promise<unknown[]> } } } }).api.db.projects.list(),
+      (
+        window as unknown as { api: { db: { projects: { list: () => Promise<unknown[]> } } } }
+      ).api.db.projects.list(),
     );
     expect(Array.isArray(projects)).toBe(true);
   });
@@ -149,7 +169,20 @@ test_.describe("E2E: full IPC surface", () => {
   test_("config:get returns parsed config (needs DB)", async () => {
     if (!window) throw new Error("window not initialized");
     const cfg = await window.evaluate(() =>
-      (window as unknown as { api: { config: { get: () => Promise<{ config: unknown; exists: boolean; yaml: string; envPorts: string[] }> } } }).api.config.get(),
+      (
+        window as unknown as {
+          api: {
+            config: {
+              get: () => Promise<{
+                config: unknown;
+                exists: boolean;
+                yaml: string;
+                envPorts: string[];
+              }>;
+            };
+          };
+        }
+      ).api.config.get(),
     );
     expect(cfg).toHaveProperty("config");
     expect(cfg).toHaveProperty("exists");
@@ -159,7 +192,9 @@ test_.describe("E2E: full IPC surface", () => {
   test_("worktree:orphans returns empty array for fresh project (needs DB)", async () => {
     if (!window) throw new Error("window not initialized");
     const orphans = await window.evaluate(() =>
-      (window as unknown as { api: { worktree: { orphans: () => Promise<unknown[]> } } }).api.worktree.orphans(),
+      (
+        window as unknown as { api: { worktree: { orphans: () => Promise<unknown[]> } } }
+      ).api.worktree.orphans(),
     );
     expect(Array.isArray(orphans)).toBe(true);
     expect(orphans.length).toBe(0);
@@ -172,9 +207,11 @@ test_.describe("E2E: full IPC surface", () => {
     // should return as a non-empty error string.
     const result = await window.evaluate(async () => {
       try {
-        return await (window as unknown as { api: { shell: { openExplorer: (p: string) => Promise<{ success: boolean }> } } }).api.shell.openExplorer(
-          "C:\\definitely\\not\\a\\real\\path",
-        );
+        return await (
+          window as unknown as {
+            api: { shell: { openExplorer: (p: string) => Promise<{ success: boolean }> } };
+          }
+        ).api.shell.openExplorer("C:\\definitely\\not\\a\\real\\path");
       } catch (err) {
         return { success: false, error: String(err) };
       }
@@ -194,7 +231,14 @@ test_.describe("E2E: full IPC surface", () => {
     mkdirSync(join(browseRoot, "b"), { recursive: true });
 
     const entries = (await window.evaluate(
-      (p: string) => (window as unknown as { api: { fs: { browseDirs: (path: string) => Promise<Array<{ name: string; path: string }>> } } }).api.fs.browseDirs(p),
+      (p: string) =>
+        (
+          window as unknown as {
+            api: {
+              fs: { browseDirs: (path: string) => Promise<Array<{ name: string; path: string }>> };
+            };
+          }
+        ).api.fs.browseDirs(p),
       browseRoot,
     )) as Array<{ name: string; path: string }>;
     expect(Array.isArray(entries)).toBe(true);
@@ -203,18 +247,34 @@ test_.describe("E2E: full IPC surface", () => {
     expect(names).toContain("b");
   });
 
-  test_.skip("fs:files lists project files with git status (needs DB for project context)", async () => {
-    if (!window) throw new Error("window not initialized");
-    const projectDir = join(testDataDir, "files-test");
-    mkdirSync(projectDir, { recursive: true });
-    mkdirSync(join(projectDir, "src"), { recursive: true });
+  test_.skip(
+    "fs:files lists project files with git status (needs DB for project context)",
+    async () => {
+      if (!window) throw new Error("window not initialized");
+      const projectDir = join(testDataDir, "files-test");
+      mkdirSync(projectDir, { recursive: true });
+      mkdirSync(join(projectDir, "src"), { recursive: true });
 
-    const entries = (await window.evaluate(
-      (p: string) => (window as unknown as { api: { fs: { files: (rel: string) => Promise<Array<{ name: string; path: string; isDir: boolean; size: number | null }>> } } }).api.fs.files(p),
-      projectDir,
-    )) as Array<unknown>;
-    expect(Array.isArray(entries)).toBe(true);
-  });
+      const entries = (await window.evaluate(
+        (p: string) =>
+          (
+            window as unknown as {
+              api: {
+                fs: {
+                  files: (
+                    rel: string,
+                  ) => Promise<
+                    Array<{ name: string; path: string; isDir: boolean; size: number | null }>
+                  >;
+                };
+              };
+            }
+          ).api.fs.files(p),
+        projectDir,
+      )) as Array<unknown>;
+      expect(Array.isArray(entries)).toBe(true);
+    },
+  );
 
   // --- shell:openTerminal (no DB) ---
 
@@ -222,9 +282,11 @@ test_.describe("E2E: full IPC surface", () => {
     if (!window) throw new Error("window not initialized");
     const result = await window.evaluate(async () => {
       try {
-        return await (window as unknown as { api: { shell: { openTerminal: (p: string) => Promise<{ success: boolean }> } } }).api.shell.openTerminal(
-          "C:\\Temp\\agentdock-shell-test",
-        );
+        return await (
+          window as unknown as {
+            api: { shell: { openTerminal: (p: string) => Promise<{ success: boolean }> } };
+          }
+        ).api.shell.openTerminal("C:\\Temp\\agentdock-shell-test");
       } catch (err) {
         return { success: false, error: String(err) };
       }
@@ -239,7 +301,10 @@ test_.describe("E2E: full IPC surface", () => {
   // unit + acceptance suites. UI smoke tests should be re-enabled when a
   // dedicated test ID strategy is in place.
 
-  test_.skip("renderer: home page renders Open Project button (skipped — needs test IDs)", async () => {
-    expect(true).toBe(true);
-  });
+  test_.skip(
+    "renderer: home page renders Open Project button (skipped — needs test IDs)",
+    async () => {
+      expect(true).toBe(true);
+    },
+  );
 });

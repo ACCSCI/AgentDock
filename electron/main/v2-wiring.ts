@@ -10,8 +10,8 @@
  */
 import process from "node:process";
 import { log } from "../../plugins/logger.js";
-import { applySnapshot, type AppliedState, type V2SyncSnapshot } from "./sync-applier.js";
 import type { V2PortServiceHandle } from "../../plugins/v2-port-service.js";
+import { type AppliedState, type V2SyncSnapshot, applySnapshot } from "./sync-applier.js";
 
 /**
  * §5.3 — 断线立即全量重注册.

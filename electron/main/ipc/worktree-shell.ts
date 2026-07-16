@@ -1,3 +1,8 @@
+import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
+import { eq } from "drizzle-orm";
 /**
  * Worktree orphan + Shell integration IPC handlers.
  *
@@ -11,27 +16,19 @@
  * shell APIs (file manager, terminal).
  */
 import { BrowserWindow, ipcMain, shell } from "electron";
-import { eq } from "drizzle-orm";
-import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { IPC_CHANNELS } from "../../shared/api-types.js";
-import {
-  getWorktreeBase,
-  listWorktrees,
-} from "../../../plugins/worktree.js";
+import { getActiveDb } from "../../../plugins/db/index.js";
+import * as schema from "../../../plugins/db/schema.js";
+import { log } from "../../../plugins/logger.js";
+import { openInFileManager } from "../../../plugins/open-explorer.js";
+import { openInTerminal } from "../../../plugins/open-terminal.js";
 import {
   classifyOrphans,
   dispatchOrphanCleanup,
   scanOrphanBranches,
   scanOrphanWorktrees,
 } from "../../../plugins/orphan.js";
-import * as schema from "../../../plugins/db/schema.js";
-import { getActiveDb } from "../../../plugins/db/index.js";
-import { openInFileManager } from "../../../plugins/open-explorer.js";
-import { openInTerminal } from "../../../plugins/open-terminal.js";
-import { log } from "../../../plugins/logger.js";
+import { getWorktreeBase, listWorktrees } from "../../../plugins/worktree.js";
+import { IPC_CHANNELS } from "../../shared/api-types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,9 +75,7 @@ function resolveProjectPath(projectId?: string): string {
   }
   const fallback = getProjectPathRef?.();
   if (!fallback) {
-    throw new Error(
-      "no active project; call db:init or pass projectId in the request body",
-    );
+    throw new Error("no active project; call db:init or pass projectId in the request body");
   }
   return fallback;
 }
@@ -117,10 +112,7 @@ export function registerWorktreeAndShell(
     const db = getActiveDb();
     if (db) {
       try {
-        const rows = db
-          .select({ branch: schema.sessions.branch })
-          .from(schema.sessions)
-          .all();
+        const rows = db.select({ branch: schema.sessions.branch }).from(schema.sessions).all();
         for (const r of rows) {
           if (r.branch) known.add(r.branch);
         }
@@ -145,26 +137,13 @@ export function registerWorktreeAndShell(
   //   - string[]                            (legacy paths-only callers)
   ipcMain.handle(
     IPC_CHANNELS["worktree:deleteOrphans"],
-    async (
-      _e,
-      body:
-        | { paths?: string[]; branches?: string[]; projectId?: string }
-        | string[],
-    ) => {
+    async (_e, body: { paths?: string[]; branches?: string[]; projectId?: string } | string[]) => {
       // Backwards-compat: the old single-array shape is still accepted
       // (Phase 5 renderer code that hasn't migrated yet).
-      const paths = Array.isArray(body)
-        ? body
-        : Array.isArray(body?.paths)
-          ? body.paths
-          : [];
-      const branches = !Array.isArray(body) && Array.isArray(body?.branches)
-        ? body.branches
-        : [];
+      const paths = Array.isArray(body) ? body : Array.isArray(body?.paths) ? body.paths : [];
+      const branches = !Array.isArray(body) && Array.isArray(body?.branches) ? body.branches : [];
       const projectId =
-        !Array.isArray(body) && typeof body?.projectId === "string"
-          ? body.projectId
-          : undefined;
+        !Array.isArray(body) && typeof body?.projectId === "string" ? body.projectId : undefined;
 
       if (paths.length === 0 && branches.length === 0) {
         throw new Error("paths[] or branches[] required");
@@ -179,25 +158,23 @@ export function registerWorktreeAndShell(
         for (const wt of listWorktrees(projectPath)) {
           if (wt.branch.startsWith("agentdock/")) knownBranches.add(wt.branch);
         }
-      } catch { /* not a git repo */ }
+      } catch {
+        /* not a git repo */
+      }
       const db = getActiveDb();
       if (db) {
         try {
-          const rows = db
-            .select({ branch: schema.sessions.branch })
-            .from(schema.sessions)
-            .all();
+          const rows = db.select({ branch: schema.sessions.branch }).from(schema.sessions).all();
           for (const r of rows) {
             if (r.branch) knownBranches.add(r.branch);
           }
-          const idRows = db
-            .select({ id: schema.sessions.id })
-            .from(schema.sessions)
-            .all();
+          const idRows = db.select({ id: schema.sessions.id }).from(schema.sessions).all();
           for (const r of idRows) {
             knownSessionIds.add(r.id);
           }
-        } catch { /* stale schema */ }
+        } catch {
+          /* stale schema */
+        }
       }
 
       const classified = classifyOrphans(projectPath, knownSessionIds, knownBranches);
@@ -210,7 +187,7 @@ export function registerWorktreeAndShell(
       for (const p of paths) {
         if (typeof p !== "string" || !p) continue;
         const norm = normalizePath(p);
-        if (!norm.startsWith(baseDir + "/")) continue;
+        if (!norm.startsWith(`${baseDir}/`)) continue;
         selectedPathSet.add(p);
         // extract sessionId from path: .../worktrees/<sessionId>
         const parts = norm.split("/");
@@ -234,13 +211,15 @@ export function registerWorktreeAndShell(
           (i) => selectedPathSet.has(i.worktreePath) || selectedSessionIds.has(i.sessionId),
         ),
         gitMetadataOrphans: classified.gitMetadataOrphans.filter(
-          (i) => (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
+          (i) =>
+            (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
         ),
         orphanSessions: classified.orphanSessions.filter(
           (i) => selectedPathSet.has(i.worktreePath) || selectedSessionIds.has(i.sessionId),
         ),
         branchOrphans: classified.branchOrphans.filter(
-          (i) => (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
+          (i) =>
+            (i.branch && selectedBranchSet.has(i.branch)) || selectedSessionIds.has(i.sessionId),
         ),
         registryStale: [], // UI 选择不应包含 registryStale
       };
@@ -325,7 +304,9 @@ export function registerWorktreeAndShell(
     // Get the origin remote URL
     let remoteUrl: string;
     try {
-      remoteUrl = (await execFileAsync("git", ["-C", projectPath, "remote", "get-url", "origin"])).stdout.trim();
+      remoteUrl = (
+        await execFileAsync("git", ["-C", projectPath, "remote", "get-url", "origin"])
+      ).stdout.trim();
     } catch {
       throw new Error("未配置 GitHub remote（origin）");
     }

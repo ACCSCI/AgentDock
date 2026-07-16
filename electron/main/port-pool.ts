@@ -1,3 +1,4 @@
+import { log } from "../../plugins/logger.js";
 /**
  * Port Pool — deterministic port allocation from a configured range.
  *
@@ -12,11 +13,6 @@
  * plugins/port-allocator.ts.
  */
 import { isPortAvailable } from "../../plugins/port-allocator.js";
-import {
-  DEFAULT_PORT_POOL_END,
-  DEFAULT_PORT_POOL_START,
-} from "../../plugins/constants.js";
-import { log } from "../../plugins/logger.js";
 
 // ============================================================
 // Types
@@ -40,9 +36,7 @@ export interface PortPool {
 
 export class PortPoolExhaustedError extends Error {
   constructor(needed: number, available: number) {
-    super(
-      `Port pool exhausted: need ${needed} ports but only ${available} available`,
-    );
+    super(`Port pool exhausted: need ${needed} ports but only ${available} available`);
     this.name = "PortPoolExhaustedError";
   }
 }
@@ -74,7 +68,7 @@ function parseAvailablePortEnv(): number[] {
   const ports = new Set<number>();
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("AVAILABLE_PORT") || key === "PORT_STRICT") continue;
-    const num = parseInt(value ?? "", 10);
+    const num = Number.parseInt(value ?? "", 10);
     if (Number.isFinite(num) && num >= 1024 && num <= 65535) {
       ports.add(num);
     } else {
@@ -112,17 +106,14 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
   // the first one is about to return.
   let allocationQueue: Promise<unknown> = Promise.resolve();
 
-  async function allocate(
-    count: number,
-    portKeys: string[],
-  ): Promise<Record<string, number>> {
+  async function allocate(count: number, portKeys: string[]): Promise<Record<string, number>> {
     // Capture the (possibly-rejected) result of this allocation in a
     // separate Promise that callers can await, but always keep the queue
     // chain resolved so a single failure (e.g. PortPoolExhaustedError)
     // doesn't poison subsequent allocations. Without this, any thrown
     // error inside the .then() would leave `allocationQueue` rejected
     // forever and every subsequent allocate() would re-reject.
-    let result: Record<string, number>;
+    let result: Record<string, number> | undefined;
     let failure: unknown;
     allocationQueue = allocationQueue.then(async () => {
       try {
@@ -173,7 +164,8 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
     // subsequent allocations can still proceed.
     await allocationQueue.catch(() => undefined);
     if (failure !== undefined) throw failure;
-    return result!;
+    if (result === undefined) throw new Error("Port allocation completed without a result");
+    return result;
   }
 
   function release(sessionId: string): void {
@@ -186,12 +178,24 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
   }
 
   /** Call after allocate to record the mapping. */
-  function recordSessionPorts(
-    sessionId: string,
-    ports: Record<string, number>,
-  ): void {
+  function recordSessionPorts(sessionId: string, ports: Record<string, number>): void {
     const portSet = new Set(Object.values(ports));
+    for (const [ownerId, ownerPorts] of sessionPorts) {
+      if (ownerId === sessionId) continue;
+      for (const port of portSet) {
+        if (ownerPorts.has(port)) {
+          throw new Error(`Port ${port} is already owned by session ${ownerId}`);
+        }
+      }
+    }
+
+    const previous = sessionPorts.get(sessionId);
     sessionPorts.set(sessionId, portSet);
+    if (previous) {
+      for (const port of previous) {
+        if (!portSet.has(port)) allocated.delete(port);
+      }
+    }
     for (const p of portSet) {
       allocated.add(p);
     }

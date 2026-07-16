@@ -5,8 +5,8 @@
  * Only bootstrap:health and renderer:reportError are retained.
  */
 import { ipcMain } from "electron";
-import { IPC_CHANNELS } from "../shared/api-types.js";
 import { log } from "../../plugins/logger.js";
+import { IPC_CHANNELS } from "../shared/api-types.js";
 
 export interface BootstrapDeps {
   /** Resolves true if the Vite dev server is reachable (dev only). */
@@ -28,24 +28,26 @@ export function registerBootstrap(deps: BootstrapDeps): void {
 
   // Renderer error reporting — the bridge that connects renderer-side
   // ErrorBoundary / window.onerror to the main process pino logger.
-  ipcMain.handle(
-    IPC_CHANNELS["renderer:reportError"],
-    (_evt, payload) => {
-      if (!payload || typeof payload !== "object") {
-        log.error({ source: "renderer" }, "renderer error reported with invalid payload");
-        return;
-      }
-      const p = payload as { type: string; message: string; stack?: string | null; componentStack?: string | null };
-      log.error(
-        {
-          source: "renderer",
-          errorType: p.type,
-          message: p.message,
-          stack: p.stack ?? undefined,
-          componentStack: p.componentStack ?? undefined,
-        },
-        "renderer error",
-      );
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS["renderer:reportError"], (_evt, payload) => {
+    if (!payload || typeof payload !== "object") {
+      log.error({ source: "renderer" }, "renderer error reported with invalid payload");
+      return;
+    }
+    const p = payload as {
+      type: string;
+      message: string;
+      stack?: string | null;
+      componentStack?: string | null;
+    };
+    log.error(
+      {
+        source: "renderer",
+        errorType: p.type,
+        message: p.message,
+        stack: p.stack ?? undefined,
+        componentStack: p.componentStack ?? undefined,
+      },
+      "renderer error",
+    );
+  });
 }

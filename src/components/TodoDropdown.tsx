@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "../i18n/react";
 import {
-  useTodos,
   useCreateTodo,
   useCycleStatusTodo,
   useDeleteTodo,
-  useUpdateTodo,
   useReorderTodo,
+  useTodos,
+  useUpdateTodo,
 } from "../lib/queries";
-import { useTranslation } from "../i18n/react";
 
 interface TodoDropdownProps {
   projectId: string | null;
@@ -156,14 +156,17 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
     toastTimer.current = setTimeout(() => setToast(null), 1500);
   }, []);
 
-  const handleCopy = useCallback(async (content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      showToast(t("copied"));
-    } catch {
-      showToast(t("copyFailed"));
-    }
-  }, [showToast]);
+  const handleCopy = useCallback(
+    async (content: string) => {
+      try {
+        await navigator.clipboard.writeText(content);
+        showToast(t("copied"));
+      } catch {
+        showToast(t("copyFailed"));
+      }
+    },
+    [showToast, t],
+  );
 
   // ── Drag & Drop reorder (only from handle) ──
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
@@ -220,133 +223,132 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
 
   return (
     <>
-    <div
-      ref={dropdownRef}
-      className="todo-dropdown"
-      data-testid="todo-dropdown"
-    >
-      <div className="todo-dropdown-header">
-        <span className="todo-dropdown-title">{t("todo")}</span>
-        {todos.length > 0 && (
-          <span className="todo-dropdown-count">
-            {doneCount}/{todos.length}
-          </span>
-        )}
-      </div>
-
-      <div className="todo-dropdown-input-row">
-        <input
-          ref={inputRef}
-          type="text"
-          className="todo-dropdown-input"
-          placeholder={projectId ? t("addTask") : t("openProjectFirst")}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={!projectId}
-          data-testid="todo-input"
-        />
-        <button
-          type="button"
-          className="todo-dropdown-add-btn"
-          onClick={handleCreate}
-          disabled={!projectId || !input.trim()}
-          data-testid="todo-add-btn"
-        >
-          +
-        </button>
-      </div>
-
-      <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
-        {todos.length === 0 && (
-          <div className="todo-dropdown-empty">
-            {projectId ? t("noTasks") : t("openProjectToAddTasks")}
-          </div>
-        )}
-        {todos.map((todo) => (
-          <div
-            key={todo.id}
-            className={[
-              "todo-dropdown-item",
-              todo.status === "done" ? "todo-dropdown-item--done" : "",
-              todo.status === "in_progress" ? "todo-dropdown-item--in-progress" : "",
-              todo.status === "pending" ? "todo-dropdown-item--pending" : "",
-              dragId === todo.id ? "todo-dropdown-item--dragging" : "",
-              dragOverId === todo.id ? "todo-dropdown-item--drag-over" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            data-testid="todo-item"
-            draggable={false}
-            onDragOver={(e) => handleDragOver(e, todo.id)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, todo.id)}
-            onDragEnd={handleDragEnd}
-          >
-            <span
-              className="todo-dropdown-drag-handle"
-              title={t("dragToReorder")}
-              draggable
-              onDragStart={(e) => handleDragStart(e, todo.id)}
-            >
-              ⠿
+      <div ref={dropdownRef} className="todo-dropdown" data-testid="todo-dropdown">
+        <div className="todo-dropdown-header">
+          <span className="todo-dropdown-title">{t("todo")}</span>
+          {todos.length > 0 && (
+            <span className="todo-dropdown-count">
+              {doneCount}/{todos.length}
             </span>
+          )}
+        </div>
 
-            <button
-              type="button"
-              className={`todo-dropdown-checkbox todo-dropdown-checkbox--${todo.status}`}
-              onClick={() => handleCycleStatus(todo.id)}
-              title={todo.status === "pending" ? "Click: start" : todo.status === "in_progress" ? "Click: mark done" : "Click: reset"}
-              data-testid="todo-toggle-btn"
+        <div className="todo-dropdown-input-row">
+          <input
+            ref={inputRef}
+            type="text"
+            className="todo-dropdown-input"
+            placeholder={projectId ? t("addTask") : t("openProjectFirst")}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={!projectId}
+            data-testid="todo-input"
+          />
+          <button
+            type="button"
+            className="todo-dropdown-add-btn"
+            onClick={handleCreate}
+            disabled={!projectId || !input.trim()}
+            data-testid="todo-add-btn"
+          >
+            +
+          </button>
+        </div>
+
+        <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
+          {todos.length === 0 && (
+            <div className="todo-dropdown-empty">
+              {projectId ? t("noTasks") : t("openProjectToAddTasks")}
+            </div>
+          )}
+          {todos.map((todo) => (
+            <div
+              key={todo.id}
+              className={[
+                "todo-dropdown-item",
+                todo.status === "done" ? "todo-dropdown-item--done" : "",
+                todo.status === "in_progress" ? "todo-dropdown-item--in-progress" : "",
+                todo.status === "pending" ? "todo-dropdown-item--pending" : "",
+                dragId === todo.id ? "todo-dropdown-item--dragging" : "",
+                dragOverId === todo.id ? "todo-dropdown-item--drag-over" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              data-testid="todo-item"
+              draggable={false}
+              onDragOver={(e) => handleDragOver(e, todo.id)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, todo.id)}
+              onDragEnd={handleDragEnd}
             >
-              {todo.status === "pending" && "○"}
-              {todo.status === "in_progress" && "●"}
-              {todo.status === "done" && "●"}
-            </button>
-
-            {editingId === todo.id ? (
-              <input
-                ref={editInputRef}
-                type="text"
-                className="todo-dropdown-edit-input"
-                value={editingContent}
-                onChange={(e) => setEditingContent(e.target.value)}
-                onBlur={handleEditSave}
-                onKeyDown={handleEditKeyDown}
-                data-testid="todo-edit-input"
-              />
-            ) : (
               <span
-                className="todo-dropdown-item-text"
-                onDoubleClick={() => handleDoubleClick(todo.id, todo.content)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  handleCopy(todo.content);
-                }}
-                title={`${t("doubleClickToEdit")} · ${t("rightClickToCopy")}`}
-                data-testid="todo-text"
+                className="todo-dropdown-drag-handle"
+                title={t("dragToReorder")}
+                draggable
+                onDragStart={(e) => handleDragStart(e, todo.id)}
               >
-                {todo.content}
+                ⠿
               </span>
-            )}
 
-            <button
-              type="button"
-              className="todo-dropdown-delete-btn"
-              onClick={() => handleDelete(todo.id)}
-              title={t("delete")}
-              data-testid="todo-delete-btn"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+              <button
+                type="button"
+                className={`todo-dropdown-checkbox todo-dropdown-checkbox--${todo.status}`}
+                onClick={() => handleCycleStatus(todo.id)}
+                title={
+                  todo.status === "pending"
+                    ? "Click: start"
+                    : todo.status === "in_progress"
+                      ? "Click: mark done"
+                      : "Click: reset"
+                }
+                data-testid="todo-toggle-btn"
+              >
+                {todo.status === "pending" && "○"}
+                {todo.status === "in_progress" && "●"}
+                {todo.status === "done" && "●"}
+              </button>
+
+              {editingId === todo.id ? (
+                <input
+                  ref={editInputRef}
+                  type="text"
+                  className="todo-dropdown-edit-input"
+                  value={editingContent}
+                  onChange={(e) => setEditingContent(e.target.value)}
+                  onBlur={handleEditSave}
+                  onKeyDown={handleEditKeyDown}
+                  data-testid="todo-edit-input"
+                />
+              ) : (
+                <span
+                  className="todo-dropdown-item-text"
+                  onDoubleClick={() => handleDoubleClick(todo.id, todo.content)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    handleCopy(todo.content);
+                  }}
+                  title={`${t("doubleClickToEdit")} · ${t("rightClickToCopy")}`}
+                  data-testid="todo-text"
+                >
+                  {todo.content}
+                </span>
+              )}
+
+              <button
+                type="button"
+                className="todo-dropdown-delete-btn"
+                onClick={() => handleDelete(todo.id)}
+                title={t("delete")}
+                data-testid="todo-delete-btn"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-      {toast && createPortal(
-        <div className="todo-toast">{toast}</div>,
-        document.body,
-      )}
+      {toast && createPortal(<div className="todo-toast">{toast}</div>, document.body)}
     </>
   );
 }

@@ -17,17 +17,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FilePortAllocator, type PortAllocator } from "../port-allocator.js";
-import { Mutex } from "../mutex.js";
-import { DaemonState } from "../daemon-state.js";
-import { DaemonStateV2 } from "../daemon-state-v2.js";
-import { DaemonWAL } from "../daemon-wal.js";
-import { DaemonWALV2 } from "../daemon-wal-v2.js";
-import { SseBus } from "../sse-bus.js";
-import {
-  createFaultInjectorState,
-  type FaultInjectorState,
-} from "../fault-injector.js";
 // §11.5 C4 — re-exported from plugins/constants.ts so all callers resolve to
 // the SAME single source of truth. Previously context.ts re-declared
 // HEARTBEAT_PERSIST_INTERVAL_MS as 30_000, causing 6× divergence from the
@@ -37,6 +26,14 @@ import {
   HEARTBEAT_TIMEOUT_MS,
   SYNC_INTERVAL_MS,
 } from "../constants.js";
+import { DaemonStateV2 } from "../daemon-state-v2.js";
+import { DaemonState } from "../daemon-state.js";
+import { DaemonWALV2 } from "../daemon-wal-v2.js";
+import { DaemonWAL } from "../daemon-wal.js";
+import { type FaultInjectorState, createFaultInjectorState } from "../fault-injector.js";
+import { Mutex } from "../mutex.js";
+import { FilePortAllocator, type PortAllocator } from "../port-allocator.js";
+import { SseBus } from "../sse-bus.js";
 
 /** Tunables — same constants the old AgentDockDaemon used. */
 export { HEARTBEAT_PERSIST_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS };
@@ -175,8 +172,8 @@ export function makeContext(options: DaemonOptions = {}): DaemonContext {
   let port = 0;
   if (options.port !== undefined) {
     port = options.port;
-  } else if (state.getDaemonPort() !== null) {
-    port = state.getDaemonPort()!;
+  } else {
+    port = state.getDaemonPort() ?? 0;
   }
 
   const ctx: DaemonContext = {

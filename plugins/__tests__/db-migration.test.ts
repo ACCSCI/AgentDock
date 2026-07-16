@@ -1,9 +1,9 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import path from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createDb, getDbPath, SCHEMA_VERSION } from "../db/index.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SCHEMA_VERSION, createDb, getDbPath } from "../db/index.js";
 
 function tmpProject(): string {
   return mkdtempSync(path.join(os.tmpdir(), "ad-dbmig-test-"));
@@ -22,9 +22,7 @@ function columns(dbPath: string, table: string): string[] {
 function userVersion(dbPath: string): number {
   const db = new DatabaseSync(dbPath);
   try {
-    const row = db.prepare("PRAGMA user_version").get() as
-      | { user_version: number }
-      | undefined;
+    const row = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
     return row?.user_version ?? 0;
   } finally {
     db.close();
@@ -58,9 +56,7 @@ describe("DB migration — PRAGMA user_version", () => {
     expect(cols).toContain("ports");
     expect(cols).toContain("background_hook_status");
     const projCols = columns(getDbPath(projectDir), "projects");
-    expect(projCols).toEqual(
-      expect.arrayContaining(["id", "name", "path", "created_at"]),
-    );
+    expect(projCols).toEqual(expect.arrayContaining(["id", "name", "path", "created_at"]));
   });
 
   it("DBM3: 重复 createDb 幂等，不报错且版本不变", () => {
@@ -75,9 +71,8 @@ describe("DB migration — PRAGMA user_version", () => {
   it("DBM4: 旧库（缺列、user_version=0、含数据）升级后补齐列且数据不丢失", () => {
     // Simulate a legacy DB: base columns only, no ports/background_hook_status,
     // user_version left at default 0, with one existing row.
-    const dbDir = path.join(projectDir, ".data");
-    mkdirSync(dbDir, { recursive: true });
     const dbPath = getDbPath(projectDir);
+    mkdirSync(path.dirname(dbPath), { recursive: true });
     const legacy = new DatabaseSync(dbPath);
     legacy.exec(`
       CREATE TABLE projects (
@@ -95,12 +90,14 @@ describe("DB migration — PRAGMA user_version", () => {
         created_at TEXT NOT NULL
       );
     `);
-    legacy.prepare(
-      "INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)",
-    ).run("p1", "Legacy", "/tmp/legacy", "2024-01-01T00:00:00.000Z");
-    legacy.prepare(
-      "INSERT INTO sessions (id, project_id, name, branch, worktree_path, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).run("s1", "p1", "Old Session", "agentdock/s1", "/tmp/wt", "2024-01-01T00:00:00.000Z");
+    legacy
+      .prepare("INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)")
+      .run("p1", "Legacy", "/tmp/legacy", "2024-01-01T00:00:00.000Z");
+    legacy
+      .prepare(
+        "INSERT INTO sessions (id, project_id, name, branch, worktree_path, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run("s1", "p1", "Old Session", "agentdock/s1", "/tmp/wt", "2024-01-01T00:00:00.000Z");
     expect(
       (legacy.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
     ).toBe(0);
@@ -124,9 +121,9 @@ describe("DB migration — PRAGMA user_version", () => {
         .get("s1") as { id: string; name: string; branch: string } | undefined;
       expect(session).toBeDefined();
       expect(session?.name).toBe("Old Session");
-      const project = check
-        .prepare("SELECT id, name FROM projects WHERE id = ?")
-        .get("p1") as { id: string; name: string } | undefined;
+      const project = check.prepare("SELECT id, name FROM projects WHERE id = ?").get("p1") as
+        | { id: string; name: string }
+        | undefined;
       expect(project?.name).toBe("Legacy");
     } finally {
       check.close();

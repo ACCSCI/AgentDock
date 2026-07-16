@@ -1,18 +1,16 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildScopedChildEnv,
   discoverPortKeysFromEnv,
   loadDotEnvIntoProcess,
   mergeEnv,
   parseEnv,
-  readEnvFile,
-  readWorkspaceEnv,
   updateEnvFile,
   writeEnv,
 } from "../env.js";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 
 describe("parseEnv", () => {
   it("parses simple KEY=VALUE pairs", () => {
@@ -113,7 +111,10 @@ describe("writeEnv", () => {
 
 describe("buildScopedChildEnv", () => {
   function createTmpDir(): string {
-    const dir = path.join(os.tmpdir(), `agentdock-env-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const dir = path.join(
+      os.tmpdir(),
+      `agentdock-env-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -122,11 +123,15 @@ describe("buildScopedChildEnv", () => {
     const dir = createTmpDir();
     try {
       writeFileSync(path.join(dir, ".env"), "FRONTEND_PORT=20091\nAPI_URL=http://local\n");
-      const env = buildScopedChildEnv(dir, { AGENTDOCK_SESSION_ID: "sess1" }, {
-        FRONTEND_PORT: "5175",
-        API_URL: "http://parent",
-        PATH: process.env.PATH,
-      });
+      const env = buildScopedChildEnv(
+        dir,
+        { AGENTDOCK_SESSION_ID: "sess1" },
+        {
+          FRONTEND_PORT: "5175",
+          API_URL: "http://parent",
+          PATH: process.env.PATH,
+        },
+      );
       expect(env.FRONTEND_PORT).toBe("20091");
       expect(env.API_URL).toBe("http://local");
       expect(env.AGENTDOCK_SESSION_ID).toBe("sess1");
@@ -140,11 +145,15 @@ describe("buildScopedChildEnv", () => {
     const dir = createTmpDir();
     try {
       writeFileSync(path.join(dir, ".env"), "API_URL=http://local\n");
-      const env = buildScopedChildEnv(dir, {}, {
-        FRONTEND_PORT: "5175",
-        PORT: "3000",
-        API_URL: "http://parent",
-      });
+      const env = buildScopedChildEnv(
+        dir,
+        {},
+        {
+          FRONTEND_PORT: "5175",
+          PORT: "3000",
+          API_URL: "http://parent",
+        },
+      );
       expect(env.FRONTEND_PORT).toBeUndefined();
       expect(env.PORT).toBeUndefined();
       expect(env.API_URL).toBe("http://local");
@@ -156,11 +165,15 @@ describe("buildScopedChildEnv", () => {
   it("keeps safe inherited vars when no workspace override exists", () => {
     const dir = createTmpDir();
     try {
-      const env = buildScopedChildEnv(dir, {}, {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        CUSTOM_SAFE: "keep-me",
-      });
+      const env = buildScopedChildEnv(
+        dir,
+        {},
+        {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          CUSTOM_SAFE: "keep-me",
+        },
+      );
       expect(env.PATH).toBe(process.env.PATH);
       expect(env.HOME).toBe(process.env.HOME);
       expect(env.CUSTOM_SAFE).toBe("keep-me");
@@ -235,7 +248,10 @@ describe("updateEnvFile", () => {
 
 describe("discoverPortKeysFromEnv", () => {
   function createTmpDir(): string {
-    const dir = path.join(os.tmpdir(), `agentdock-port-discovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const dir = path.join(
+      os.tmpdir(),
+      `agentdock-port-discovery-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -243,7 +259,10 @@ describe("discoverPortKeysFromEnv", () => {
   it("D1: 从包含 _PORT 变量的 .env 发现端口名", () => {
     const dir = createTmpDir();
     try {
-      writeFileSync(path.join(dir, ".env"), "FRONTEND_PORT=3000\nBACKEND_PORT=3001\nAPI_URL=http://local\nWS_PORT=3002\n");
+      writeFileSync(
+        path.join(dir, ".env"),
+        "FRONTEND_PORT=3000\nBACKEND_PORT=3001\nAPI_URL=http://local\nWS_PORT=3002\n",
+      );
       const result = discoverPortKeysFromEnv(path.join(dir, ".env"));
       expect(result).toEqual(["FRONTEND_PORT", "BACKEND_PORT", "WS_PORT"]);
     } finally {
@@ -310,7 +329,9 @@ describe("loadDotEnvIntoProcess", () => {
     tmpDirs.push(dir);
     const filePath = path.join(dir, ".env");
     writeFileSync(filePath, "FRONTEND_PORT=30000\nBACKEND_PORT=30001\n");
+    // biome-ignore lint/performance/noDelete: deleting is the only cross-runtime-safe way to make a process.env key absent.
     delete process.env.FRONTEND_PORT;
+    // biome-ignore lint/performance/noDelete: deleting is the only cross-runtime-safe way to make a process.env key absent.
     delete process.env.BACKEND_PORT;
 
     loadDotEnvIntoProcess(filePath);
@@ -362,6 +383,7 @@ describe("loadDotEnvIntoProcess", () => {
     // We create the file at the resolved absolute path so cwd is irrelevant
     // to the assertion: only the param matters.
     writeFileSync(path.join(dir, ".env"), "EXPLICIT_PATH_VAR=loaded\n");
+    // biome-ignore lint/performance/noDelete: deleting is the only cross-runtime-safe way to make a process.env key absent.
     delete process.env.EXPLICIT_PATH_VAR;
 
     loadDotEnvIntoProcess(path.join(dir, ".env"));
@@ -373,7 +395,7 @@ describe("loadDotEnvIntoProcess", () => {
     const dir = createTmpDir();
     tmpDirs.push(dir);
     writeFileSync(path.join(dir, ".env"), "CWD_DEFAULT_VAR=loaded\n");
-    delete process.env.CWD_DEFAULT_VAR;
+    process.env.CWD_DEFAULT_VAR = undefined;
     // Stub process.cwd() so the no-arg call resolves to our tmpdir.
     // Avoids real chdir() which on Windows can fail across drive letters.
     vi.spyOn(process, "cwd").mockReturnValue(dir);

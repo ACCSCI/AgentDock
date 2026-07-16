@@ -1,14 +1,21 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef } from "react";
+import { useOpenProject } from "../hooks/useOpenProject";
 import { useInitDb, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
-import { useOpenProject } from "../hooks/useOpenProject";
 import { DirBrowserModal } from "./DirBrowserModal";
 import { GitInitConfirmModal } from "./GitInitConfirmModal";
 
 export function TabBar() {
   const navigate = useNavigate();
-  const { activeProjectId, activeSessionId, setActiveProject, setActiveSession, closedProjectIds, closeProject } = useStore();
+  const {
+    activeProjectId,
+    activeSessionId,
+    setActiveProject,
+    setActiveSession,
+    closedProjectIds,
+    closeProject,
+  } = useStore();
   const { data: projects } = useProjects();
   const initDb = useInitDb();
   const {
@@ -24,19 +31,26 @@ export function TabBar() {
   } = useOpenProject();
   const openProjects = projects?.filter((p) => !closedProjectIds.includes(p.id)) ?? [];
 
-  const handleRemoveProject = useCallback((projectId: string) => {
-    closeProject(projectId);
-    // After closing a tab, switch to the next available tab if any remain.
-    // Only navigate to home ("/") when the closed tab was the last one.
-    const remaining = openProjects.filter((p) => p.id !== projectId);
-    if (remaining.length > 0) {
-      const next = remaining[0]!;
-      setActiveProject(next.id);
-      try { navigate({ to: "/app/$projectId", params: { projectId: next.id } }); } catch {}
-    } else {
-      try { navigate({ to: "/" }); } catch {}
-    }
-  }, [openProjects, closeProject, setActiveProject, navigate]);
+  const handleRemoveProject = useCallback(
+    (projectId: string) => {
+      closeProject(projectId);
+      // After closing a tab, switch to the next available tab if any remain.
+      // Only navigate to home ("/") when the closed tab was the last one.
+      const remaining = openProjects.filter((p) => p.id !== projectId);
+      const [next] = remaining;
+      if (next) {
+        setActiveProject(next.id);
+        try {
+          navigate({ to: "/app/$projectId", params: { projectId: next.id } });
+        } catch {}
+      } else {
+        try {
+          navigate({ to: "/" });
+        } catch {}
+      }
+    },
+    [openProjects, closeProject, setActiveProject, navigate],
+  );
 
   // Ctrl+W (Cmd+W on macOS) closes the active project tab. Two paths:
   //   1. IPC "app:close-tab" from main process (handles macOS default menu
@@ -56,11 +70,7 @@ export function TabBar() {
       if (e.altKey || e.shiftKey) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        target?.isContentEditable
-      ) {
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
         return;
       }
       e.preventDefault();
@@ -102,7 +112,9 @@ export function TabBar() {
         setActiveSession(null);
       } else {
         setActiveProject(null);
-        try { navigate({ to: "/" }); } catch {}
+        try {
+          navigate({ to: "/" });
+        } catch {}
       }
     } else {
       // Tell the main process which project is active so syncProject()
@@ -125,45 +137,45 @@ export function TabBar() {
   return (
     <>
       <div className="tab-bar" data-testid="tab-bar" ref={tabBarRef}>
-      {openProjects.map((project) => (
-        <div
-          key={project.id}
-          className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
-          onClick={() => handleTabClick(project.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleTabClick(project.id);
-          }}
-          tabIndex={0}
-          role="tab"
-          aria-selected={project.id === activeProjectId}
-          data-testid="project-tab"
-          data-project-id={project.id}
-        >
-          <span className="tab-name">{project.name}</span>
-          <button
-            type="button"
-            className="tab-close"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRemoveProject(project.id);
+        {openProjects.map((project) => (
+          <div
+            key={project.id}
+            className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
+            onClick={() => handleTabClick(project.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleTabClick(project.id);
             }}
-            data-testid="project-tab-close"
+            tabIndex={0}
+            role="tab"
+            aria-selected={project.id === activeProjectId}
+            data-testid="project-tab"
+            data-project-id={project.id}
           >
-            ✕
-          </button>
-        </div>
-      ))}
-      <button type="button" className="tab-add" onClick={openProject} data-testid="new-project">
-        +
-      </button>
-      <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
-      <GitInitConfirmModal
-        open={gitInitModalOpen}
-        dirPath={selectedDirPath}
-        onConfirm={onGitInitConfirm}
-        onCancel={onGitInitCancel}
-        loading={gitInitLoading}
-      />
+            <span className="tab-name">{project.name}</span>
+            <button
+              type="button"
+              className="tab-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemoveProject(project.id);
+              }}
+              data-testid="project-tab-close"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        <button type="button" className="tab-add" onClick={openProject} data-testid="new-project">
+          +
+        </button>
+        <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
+        <GitInitConfirmModal
+          open={gitInitModalOpen}
+          dirPath={selectedDirPath}
+          onConfirm={onGitInitConfirm}
+          onCancel={onGitInitCancel}
+          loading={gitInitLoading}
+        />
       </div>
     </>
   );

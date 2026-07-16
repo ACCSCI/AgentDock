@@ -43,7 +43,7 @@ export interface FixSuggestion {
 export function suggestFix(
   classification: FailureClassification,
   testPath: string,
-  errorMessage: string
+  errorMessage: string,
 ): FixSuggestion[] {
   const suggestions: FixSuggestion[] = [];
 
@@ -139,8 +139,7 @@ export function suggestFix(
         {
           path: testPath,
           change: "modify",
-          rationale:
-            "Read the failing test, the code it exercises, and the error stack trace.",
+          rationale: "Read the failing test, the code it exercises, and the error stack trace.",
         },
       ],
       confidence: 0.3,

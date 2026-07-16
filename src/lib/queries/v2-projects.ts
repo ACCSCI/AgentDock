@@ -6,10 +6,10 @@
  * for backward compatibility with existing components.
  */
 import { useMemo } from "react";
+import { isV2StateAvailable, useV2State } from "../../hooks/useV2State.js";
+import { useProjects } from "./projects.js";
 import type { ProjectData, SessionData, SessionRuntimeStatus } from "./types.js";
 import { isCreatingSession, isDeletingSession } from "./types.js";
-import { useV2State, isV2StateAvailable } from "../../hooks/useV2State.js";
-import { useProjects } from "./projects.js";
 
 /** Normalize path for consistent map keys across platforms. */
 const normalizeKey = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -102,22 +102,30 @@ export function useV2Projects() {
       // §4.3: 有主 → 判定"我的"还是"别人的"
       const isForeign = myClientId != null && ownerClientId !== myClientId;
 
-      const project = projectMap.get(projectKey)!;
+      const project = projectMap.get(projectKey);
+      if (!project) continue;
       project.sessions.push({
         id: session.sessionId,
         projectId: projectRoot,
         name: session.displayName,
         branch: "",
         worktreePath: projectRoot,
-        ports: session.ports && Object.keys(session.ports).length > 0 ? {
-          FRONTEND_PORT: session.ports.FRONTEND_PORT || 0,
-          BACKEND_PORT: session.ports.BACKEND_PORT || 0,
-          WS_PORT: session.ports.WS_PORT || 0,
-          DEBUG_PORT: session.ports.DEBUG_PORT || 0,
-          PREVIEW_PORT: session.ports.PREVIEW_PORT || 0,
-        } : null,
+        ports:
+          session.ports && Object.keys(session.ports).length > 0
+            ? {
+                FRONTEND_PORT: session.ports.FRONTEND_PORT || 0,
+                BACKEND_PORT: session.ports.BACKEND_PORT || 0,
+                WS_PORT: session.ports.WS_PORT || 0,
+                DEBUG_PORT: session.ports.DEBUG_PORT || 0,
+                PREVIEW_PORT: session.ports.PREVIEW_PORT || 0,
+              }
+            : null,
         createdAt: new Date(session.createdAt).toISOString(),
-        status: (isForeign ? "foreign" : session.status === "active" ? "existing" : session.status) as SessionRuntimeStatus,
+        status: (isForeign
+          ? "foreign"
+          : session.status === "active"
+            ? "existing"
+            : session.status) as SessionRuntimeStatus,
         ownerClientId,
       });
     }
@@ -145,7 +153,8 @@ export function useV2Projects() {
             sessions: [],
           });
         }
-        const project = projectMap.get(projectKey)!;
+        const project = projectMap.get(projectKey);
+        if (!project) continue;
         const existingIds = new Set(project.sessions.map((s) => s.id));
         for (const optSession of optimisticSessions) {
           if (!existingIds.has(optSession.id)) {
@@ -237,9 +246,8 @@ export function useV2ProjectSessions(projectId: string | null) {
     if (!projectId) return [];
 
     // Resolve projectId (may be nanoid) to actual project path
-    const projectPath = oldQuery.data?.find(
-      (p) => p.id === projectId || p.path === projectId,
-    )?.path || projectId;
+    const projectPath =
+      oldQuery.data?.find((p) => p.id === projectId || p.path === projectId)?.path || projectId;
 
     // Try v2State first
     if (v2State?.ready) {
@@ -254,20 +262,24 @@ export function useV2ProjectSessions(projectId: string | null) {
         })
         .map((s) => {
           const ownerClientId = v2State.owners.get(s.sessionId)?.clientId ?? null;
-          const isForeign = myClientId != null && ownerClientId !== null && ownerClientId !== myClientId;
+          const isForeign =
+            myClientId != null && ownerClientId !== null && ownerClientId !== myClientId;
           return {
             id: s.sessionId,
             projectId: s.projectRoot,
             name: s.displayName,
             branch: "",
             worktreePath: s.projectRoot,
-            ports: s.ports && Object.keys(s.ports).length > 0 ? {
-              FRONTEND_PORT: s.ports.FRONTEND_PORT || 0,
-              BACKEND_PORT: s.ports.BACKEND_PORT || 0,
-              WS_PORT: s.ports.WS_PORT || 0,
-              DEBUG_PORT: s.ports.DEBUG_PORT || 0,
-              PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
-            } : null,
+            ports:
+              s.ports && Object.keys(s.ports).length > 0
+                ? {
+                    FRONTEND_PORT: s.ports.FRONTEND_PORT || 0,
+                    BACKEND_PORT: s.ports.BACKEND_PORT || 0,
+                    WS_PORT: s.ports.WS_PORT || 0,
+                    DEBUG_PORT: s.ports.DEBUG_PORT || 0,
+                    PREVIEW_PORT: s.ports.PREVIEW_PORT || 0,
+                  }
+                : null,
             createdAt: new Date(s.createdAt).toISOString(),
             status: (isForeign ? "foreign" : "existing") as SessionRuntimeStatus,
             ownerClientId,
@@ -277,12 +289,9 @@ export function useV2ProjectSessions(projectId: string | null) {
       // Merge optimistic sessions (CreatingSession / DeletingSession) from
       // the React Query cache so the sidebar still shows loading spinners
       // during creation and deletion.
-      const cachedProject = oldQuery.data?.find(
-        (p) => p.id === projectId || p.path === projectId,
-      );
-      const optimisticSessions = cachedProject?.sessions.filter(
-        (s) => isCreatingSession(s) || isDeletingSession(s),
-      ) ?? [];
+      const cachedProject = oldQuery.data?.find((p) => p.id === projectId || p.path === projectId);
+      const optimisticSessions =
+        cachedProject?.sessions.filter((s) => isCreatingSession(s) || isDeletingSession(s)) ?? [];
 
       return [...activeSessions, ...optimisticSessions];
     }

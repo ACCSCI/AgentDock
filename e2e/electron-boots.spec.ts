@@ -12,7 +12,7 @@
  * To run in isolation mode (default):
  *   npx playwright test e2e/electron-boots.spec.ts
  */
-import { test, expect } from "./fixtures/electron-fixture";
+import { expect, test } from "./fixtures/electron-fixture";
 
 test.describe("electron boots @reuse", () => {
   test("main window has a title", async ({ window }) => {
@@ -29,10 +29,14 @@ test.describe("electron boots @reuse", () => {
     expect(hasApi).toBe(true);
   });
 
-  test("bootstrap.health returns daemon ok", async ({ window }) => {
+  test("bootstrap.health reports IPC readiness", async ({ window }) => {
     const health = await window.evaluate(async () => {
-      return await (window as unknown as { api: { bootstrap: { health: () => Promise<{ daemon: string }> } } }).api.bootstrap.health();
+      return await (
+        window as unknown as {
+          api: { bootstrap: { health: () => Promise<{ vite: string; ipc: number }> } };
+        }
+      ).api.bootstrap.health();
     });
-    expect(health.daemon).toBe("ok");
+    expect(health.ipc).toBeGreaterThan(0);
   });
 });

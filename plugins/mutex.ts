@@ -12,8 +12,14 @@ export class Mutex {
    */
   async runExclusive<T>(key: string, fn: () => T | Promise<T>): Promise<T> {
     const prev = this.queues.get(key) ?? Promise.resolve();
-    const task = prev.then(() => fn(), () => fn());
-    const noop = task.then(() => {}, () => {});
+    const task = prev.then(
+      () => fn(),
+      () => fn(),
+    );
+    const noop = task.then(
+      () => {},
+      () => {},
+    );
     this.queues.set(key, noop);
     noop.finally(() => {
       if (this.queues.get(key) === noop) this.queues.delete(key);

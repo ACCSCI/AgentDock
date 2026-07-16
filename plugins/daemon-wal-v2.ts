@@ -28,8 +28,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { CURRENT_SCHEMA_VERSION, DaemonStateV2 } from "./daemon-state-v2.js";
 import { migrateToCurrent, validateV2State } from "./daemon-migrate.js";
+import { CURRENT_SCHEMA_VERSION, DaemonStateV2 } from "./daemon-state-v2.js";
 
 const STATE_FILE = "daemon-state.json";
 const BACKUP_PREFIX = "daemon-state.json.bak.v";
@@ -96,15 +96,12 @@ export class DaemonWALV2 {
       );
     }
 
-    const fromVersion =
-      typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 1;
+    const fromVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 1;
 
     if (fromVersion === CURRENT_SCHEMA_VERSION) {
       const problems = validateV2State(parsed);
       if (problems.length > 0) {
-        throw new Error(
-          `WAL v${CURRENT_SCHEMA_VERSION} validation failed: ${problems.join("; ")}`,
-        );
+        throw new Error(`WAL v${CURRENT_SCHEMA_VERSION} validation failed: ${problems.join("; ")}`);
       }
       return DaemonStateV2.deserialize(JSON.stringify(parsed));
     }
@@ -117,9 +114,7 @@ export class DaemonWALV2 {
 
     const problems = validateV2State(migrated);
     if (problems.length > 0) {
-      throw new Error(
-        `Post-migration v2 validation failed: ${problems.join("; ")}`,
-      );
+      throw new Error(`Post-migration v2 validation failed: ${problems.join("; ")}`);
     }
 
     const state = DaemonStateV2.deserialize(JSON.stringify(migrated));
@@ -132,10 +127,7 @@ export class DaemonWALV2 {
   }
 
   private backupIfMissing(fromVersion: number): void {
-    const backupPath = path.join(
-      this.baseDir,
-      `${BACKUP_PREFIX}${fromVersion}`,
-    );
+    const backupPath = path.join(this.baseDir, `${BACKUP_PREFIX}${fromVersion}`);
     if (existsSync(backupPath)) return;
     try {
       copyFileSync(this.filePath, backupPath);

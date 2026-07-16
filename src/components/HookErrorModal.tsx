@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useHookErrors, useRetryHook, type HookError } from "../lib/queries";
+import { type HookError, useHookErrors, useRetryHook } from "../lib/queries";
 
 interface HookErrorModalProps {
   sessionId: string;
@@ -20,7 +20,11 @@ function ErrorCard({ error, index }: { error: HookError; index: number }) {
         <span className="hook-error-card-index">{index + 1}.</span>
         <code className="hook-error-card-command">{error.run}</code>
         <span className="hook-error-card-exit">
-          {error.timedOut ? "⏱ 超时" : error.exitCode !== null && error.exitCode !== undefined ? `exit ${error.exitCode}` : "失败"}
+          {error.timedOut
+            ? "⏱ 超时"
+            : error.exitCode !== null && error.exitCode !== undefined
+              ? `exit ${error.exitCode}`
+              : "失败"}
         </span>
       </button>
       {expanded && (
@@ -78,8 +82,13 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
   }, [sessionId, retryMutation, onClose]);
 
   return (
-    <div className="hook-error-overlay" onClick={onClose}>
-      <div className="hook-error-modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="hook-error-overlay"
+      role="presentation"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+      onKeyDown={(event) => event.key === "Escape" && onClose()}
+    >
+      <div className="hook-error-modal">
         <div className="hook-error-modal-header">
           <h3>⚠ 环境初始化失败</h3>
           <button type="button" className="hook-error-modal-close" onClick={onClose}>
@@ -90,14 +99,10 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
         <div className="hook-error-modal-body">
           {isLoading && <ErrorSkeleton />}
 
-          {isError && (
-            <div className="hook-error-status">加载失败，请重试</div>
-          )}
+          {isError && <div className="hook-error-status">加载失败，请重试</div>}
 
           {!isLoading && !isError && (!errors || errors.length === 0) && (
-            <div className="hook-error-status">
-              没有错误记录（可能在重试中）
-            </div>
+            <div className="hook-error-status">没有错误记录（可能在重试中）</div>
           )}
 
           {!isLoading && !isError && errors && errors.length > 0 && (
@@ -107,7 +112,12 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
               </p>
               <div className="hook-error-list">
                 {errors.map((err, i) => (
-                  <ErrorCard key={i} error={err} index={i} />
+                  <ErrorCard
+                    // biome-ignore lint/suspicious/noArrayIndexKey: hook error records have no persisted identity and duplicate commands are valid.
+                    key={i}
+                    error={err}
+                    index={i}
+                  />
                 ))}
               </div>
             </>

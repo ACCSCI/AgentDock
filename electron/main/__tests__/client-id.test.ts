@@ -22,18 +22,28 @@ describe("generateClientId (新架构 §6 clientId 唯一性)", () => {
 
   it("不同 randomBytes 产出不同 id (防同进程多次生成)", () => {
     const id1 = generateClientIdForTest({
-      hostname: "h", pid: 1, bootTimeMs: 1, randomBytes: () => Buffer.from("aaaa", "hex"),
+      hostname: "h",
+      pid: 1,
+      bootTimeMs: 1,
+      randomBytes: () => Buffer.from("aaaa", "hex"),
     });
     const id2 = generateClientIdForTest({
-      hostname: "h", pid: 1, bootTimeMs: 1, randomBytes: () => Buffer.from("bbbb", "hex"),
+      hostname: "h",
+      pid: 1,
+      bootTimeMs: 1,
+      randomBytes: () => Buffer.from("bbbb", "hex"),
     });
     expect(id1).not.toBe(id2);
   });
 
   it("不同 pid 产出不同 id (防跨进程撞)", () => {
-    const mk = (pid: number) => generateClientIdForTest({
-      hostname: "h", pid, bootTimeMs: 1, randomBytes: () => Buffer.from("aa", "hex"),
-    });
+    const mk = (pid: number) =>
+      generateClientIdForTest({
+        hostname: "h",
+        pid,
+        bootTimeMs: 1,
+        randomBytes: () => Buffer.from("aa", "hex"),
+      });
     expect(mk(1)).not.toBe(mk(2));
   });
 
