@@ -1,5 +1,8 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { ArrowLeft, Keyboard, Languages, Network, RotateCcw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import { useKeyCapture } from "../hooks/useKeyCapture";
 import { SUPPORTED_LANGUAGES, type SupportedLanguage, setLanguage } from "../i18n";
 import { useTranslation } from "../i18n/react";
@@ -14,6 +17,14 @@ import { useStore } from "../lib/store";
 interface UpdateInfo {
   version?: string;
 }
+
+type CheckForUpdatesResult =
+  | { status: "dev-mode" }
+  | { status: "checking" }
+  | { status: "available"; info: { version: string } }
+  | { status: "not-available"; info: { version: string } }
+  | { status: "downloaded"; info: { version: string } }
+  | { status: "error"; message: string };
 
 // window.api type is inferred from contextBridge in preload.ts
 
@@ -57,20 +68,23 @@ function ShortcutRow({ action, label }: ShortcutRowProps) {
               onClick={() => removeKey(key)}
               disabled={bindings.length <= 1}
               title={t("removeShortcut")}
+              aria-label={t("removeShortcut")}
             >
               ×
             </button>
           </span>
         ))}
         {bindings.length < MAX_BINDINGS_PER_ACTION && (
-          <button
+          <Button
             type="button"
-            className="settings-shortcut-add"
+            variant="outline"
+            size="sm"
+            className="border-dashed"
             onClick={startCapture}
             disabled={isCapturing}
           >
             {isCapturing ? t("capturePrompt") : t("addShortcut")}
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -223,24 +237,25 @@ function VersionSection() {
         <UpdateStatusText state={state} versionLabel={versionLabel} isPackaged={isPackaged} />
       </div>
       <div className="settings-version-actions">
-        <button
+        <Button
           type="button"
-          className="settings-version-check-btn"
+          variant="outline"
+          size="sm"
           onClick={triggerCheck}
           disabled={!isPackaged || state.kind === "checking"}
           data-testid="settings-version-check-btn"
         >
           {state.kind === "checking" ? t("checkingButton") : t("checkForUpdates")}
-        </button>
+        </Button>
         {state.kind === "downloaded" && isPackaged && (
-          <button
+          <Button
             type="button"
-            className="settings-version-install-btn"
+            size="sm"
             onClick={triggerInstall}
             data-testid="settings-version-install-btn"
           >
             {t("installNow")}
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -331,56 +346,73 @@ function SettingsPage() {
   };
 
   return (
-    <div className="settings-page" data-testid="settings-page">
-      <div className="settings-header">
-        <button
-          type="button"
-          className="settings-back-btn"
-          onClick={() => router.history.back()}
-          title={t("back", { ns: "common" })}
-        >
-          ← {t("back", { ns: "common" })}
-        </button>
-        <h2 className="settings-title">{t("language")}</h2>
-      </div>
+    <main className="settings-page bg-background text-foreground" data-testid="settings-page">
+      <header className="settings-header border-b border-border bg-card/80 backdrop-blur">
+        <Button type="button" variant="ghost" size="sm" onClick={() => router.history.back()}>
+          <ArrowLeft aria-hidden="true" />
+          {t("back", { ns: "common" })}
+        </Button>
+        <div>
+          <div className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">
+            AgentDock
+          </div>
+          <h1 className="settings-title">设置</h1>
+        </div>
+      </header>
 
-      <div className="settings-section">
-        <h3 className="settings-section-title">{t("language")}</h3>
+      <section className="settings-section border-border bg-card">
+        <h2 className="settings-section-title flex items-center gap-2">
+          <Languages aria-hidden="true" className="size-4 text-primary" />
+          {t("language")}
+        </h2>
         <div className="settings-language-options">
           {SUPPORTED_LANGUAGES.map((lang) => (
-            <button
+            <Button
               key={lang.value}
               type="button"
-              className={`settings-language-btn ${currentLang === lang.value ? "active" : ""}`}
+              variant={currentLang === lang.value ? "default" : "outline"}
+              size="sm"
               onClick={() => handleLanguageChange(lang.value)}
             >
               {lang.label}
-            </button>
+            </Button>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h3 className="settings-section-title">{t("version")}</h3>
+      <section className="settings-section border-border bg-card">
+        <h2 className="settings-section-title flex items-center gap-2">
+          <Sparkles aria-hidden="true" className="size-4 text-primary" />
+          {t("version")}
+        </h2>
         <VersionSection />
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h3 className="settings-section-title">{t("shortcuts", { ns: "settings" })}</h3>
+      <section className="settings-section border-border bg-card">
+        <h2 className="settings-section-title flex items-center gap-2">
+          <Keyboard aria-hidden="true" className="size-4 text-primary" />
+          {t("shortcuts", { ns: "settings" })}
+        </h2>
         <ShortcutRow action="dirSearchFocus" label={t("focusDirSearch", { ns: "settings" })} />
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h3 className="settings-section-title">端口池配置</h3>
+      <section className="settings-section border-border bg-card">
+        <h2 className="settings-section-title flex items-center gap-2">
+          <Network aria-hidden="true" className="size-4 text-primary" />
+          端口池配置
+        </h2>
         <div className="settings-port-pool">
-          <div className="settings-port-pool-row">
-            <label className="settings-port-pool-label" htmlFor="port-pool-start">
+          <div className="settings-port-pool-row flex items-center gap-2">
+            <label
+              className="shrink-0 text-sm text-muted-foreground"
+              htmlFor="port-pool-start"
+            >
               端口范围:
             </label>
-            <input
+            <Input
               id="port-pool-start"
               type="number"
-              className="settings-port-pool-input"
+              className="w-28"
               value={portPoolStart}
               min={1024}
               max={65535}
@@ -392,10 +424,11 @@ function SettingsPage() {
               }}
               onBlur={() => saveSettings(portPoolStart, portPoolEnd)}
             />
-            <span className="settings-port-pool-separator">-</span>
-            <input
+            <span className="shrink-0 text-muted-foreground" aria-hidden="true">–</span>
+            <Input
+              aria-label="端口范围结束"
               type="number"
-              className="settings-port-pool-input"
+              className="w-28"
               value={portPoolEnd}
               min={1024}
               max={65535}
@@ -408,17 +441,18 @@ function SettingsPage() {
               onBlur={() => saveSettings(portPoolStart, portPoolEnd)}
             />
           </div>
-          <p className="settings-port-pool-hint">
+          <p className="mt-2 text-xs text-muted-foreground">
             会话创建时将从该范围分配端口。每个会话需要 5 个端口。
           </p>
         </div>
-      </div>
+      </section>
 
       <div className="settings-footer">
-        <button type="button" className="settings-reset-btn" onClick={resetShortcuts}>
+        <Button type="button" variant="outline" onClick={resetShortcuts}>
+          <RotateCcw aria-hidden="true" />
           {t("resetDefault", { ns: "settings" })}
-        </button>
+        </Button>
       </div>
-    </div>
+    </main>
   );
 }

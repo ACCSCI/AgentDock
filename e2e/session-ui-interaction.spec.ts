@@ -113,6 +113,16 @@ test.describe("real user interaction sequence", () => {
     const terminalTabs = window.locator(`[data-testid="${TID.terminalTab}"]`);
     await expect.poll(() => terminalTabs.count(), { timeout: 10_000 }).toBe(2);
 
+    // Terminal tab context menu is keyboard accessible and dismissible.
+    await terminalTabs.nth(1).click({ button: "right" });
+    const terminalMenu = window.getByRole("menu");
+    await expect(terminalMenu).toBeVisible();
+    const terminalMenuItems = terminalMenu.getByRole("menuitem");
+    await expect(terminalMenuItems).toHaveCount(2);
+    await expect(terminalMenuItems.first()).toBeVisible();
+    await window.keyboard.press("Escape");
+    await expect(terminalMenu).toBeHidden();
+
     // 6. Switch to the first terminal (click its tab).
     const firstTab = terminalTabs.first();
     await firstTab.click();
@@ -146,14 +156,14 @@ test.describe("real user interaction sequence", () => {
     //     OR right after; either way it's the same code path).
     const deleteBtn1 = card1.locator(".session-close");
     await deleteBtn1.click();
-    await card1.locator(".session-delete-confirm-yes").click();
+    await window.getByTestId("confirm-delete-ok").click();
     await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
 
     // 11. Delete session #2.
     const remaining = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     const deleteBtn2 = remaining.locator(".session-close");
     await deleteBtn2.click();
-    await remaining.locator(".session-delete-confirm-yes").click();
+    await window.getByTestId("confirm-delete-ok").click();
     await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
 
     // Give React + queries one last beat to flush deferred state.

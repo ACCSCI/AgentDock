@@ -171,10 +171,23 @@ export function createPortPool(config: PortPoolConfig): PortPoolInternal {
   function release(sessionId: string): void {
     const ports = sessionPorts.get(sessionId);
     if (!ports) return;
-    for (const p of ports) {
-      allocated.delete(p);
-    }
     sessionPorts.delete(sessionId);
+    // Only free a port if NO other session still holds it. Two sessions can
+    // transiently share a port (e.g. after a duplicate-restore from a buggy
+    // DB row); releasing one must not free the port out from under the other,
+    // or reassign would hand the same port right back.
+    for (const p of ports) {
+      let stillUsed = false;
+      for (const others of sessionPorts.values()) {
+        if (others.has(p)) {
+          stillUsed = true;
+          break;
+        }
+      }
+      if (!stillUsed) {
+        allocated.delete(p);
+      }
+    }
   }
 
   /** Call after allocate to record the mapping. */

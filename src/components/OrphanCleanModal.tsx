@@ -1,7 +1,11 @@
+import { Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../i18n/react";
 import { type OrphanDir, useDeleteOrphans, useOrphans } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface OrphanCleanModalProps {
   open: boolean;
@@ -40,20 +44,9 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Reset selection when modal opens or data changes
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshed orphan data intentionally clears the previous selection.
   useEffect(() => {
     if (open) setSelected(new Set());
   }, [open, orphans]);
-
-  // Keyboard: Escape to close
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -122,28 +115,25 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
   };
 
   return (
-    <div
-      className="dir-modal-overlay"
-      role="presentation"
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-      onKeyDown={(event) => event.key === "Escape" && onClose()}
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
     >
-      <div className="dir-modal orphan-modal" data-testid="orphan-modal">
-        <div className="dir-modal-header">
-          <div className="dir-modal-header-left">
-            <h3>🧹 {t("orphanClean.title")}</h3>
-          </div>
-          <button type="button" className="dir-modal-close" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
-        <div className="orphan-description">{t("orphanClean.description")}</div>
+      <DialogContent className="max-w-2xl gap-0 p-0" data-testid="orphan-modal">
+        <DialogHeader className="border-b border-border p-5">
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles aria-hidden="true" className="size-4 text-primary" />
+            {t("orphanClean.title")}
+          </DialogTitle>
+          <DialogDescription>{t("orphanClean.description")}</DialogDescription>
+        </DialogHeader>
 
         {/* Select all — above the list */}
         {orphanList.length > 0 && (
-          <div className="orphan-toolbar">
-            <label className="orphan-select-all">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2 text-xs">
+            <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -152,18 +142,22 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
               />
               全选 ({orphanList.length})
             </label>
-            <span className="orphan-count" data-testid="orphan-selected-count">
+            <span className="text-[11px] text-muted-foreground" data-testid="orphan-selected-count">
               已选 {selected.size}
             </span>
           </div>
         )}
 
         {/* Orphan list */}
-        <div className="dir-modal-list orphan-list">
-          {isLoading && <div className="dir-modal-status">扫描中...</div>}
-          {error && <div className="dir-modal-status dir-modal-error">{error.message}</div>}
+        <div className="max-h-80 min-h-40 flex-1 overflow-y-auto py-1">
+          {isLoading && (
+            <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">扫描中...</div>
+          )}
+          {error && (
+            <div className="px-4 py-6 text-center text-[13px] text-destructive">{error.message}</div>
+          )}
           {!isLoading && !error && orphanList.length === 0 && (
-            <div className="dir-modal-status orphan-empty">✓ 没有孤儿目录</div>
+            <div className="px-4 py-6 text-center text-sm text-success">✓ 没有孤儿目录</div>
           )}
           {!isLoading &&
             !error &&
@@ -178,7 +172,10 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
               return (
                 <label
                   key={key}
-                  className={`orphan-item ${isSelected ? "orphan-item-selected" : ""}`}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 border border-transparent px-4 py-2 text-[13px] transition-colors hover:bg-secondary",
+                    isSelected && "border-primary bg-primary/5",
+                  )}
                   data-testid="orphan-item"
                   data-orphan-key={key}
                   data-orphan-reason={orphan.reason}
@@ -188,8 +185,8 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
                     checked={isSelected}
                     onChange={() => toggleSelect(orphan)}
                   />
-                  <span className="orphan-name">{displayName}</span>
-                  <span className={`orphan-reason orphan-reason-${orphan.reason}`}>
+                  <span className="flex-1 truncate">{displayName}</span>
+                  <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[11px] text-muted-foreground">
                     {REASON_LABELS[orphan.reason]}
                   </span>
                 </label>
@@ -198,13 +195,13 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
         </div>
 
         {/* Actions */}
-        <div className="dir-modal-actions">
-          <button type="button" className="dir-modal-btn dir-modal-btn-cancel" onClick={onClose}>
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-4 py-3">
+          <Button type="button" variant="outline" onClick={onClose}>
             {t("orphanClean.cancel")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="dir-modal-btn orphan-btn-delete"
+            variant="destructive"
             disabled={selected.size === 0 || deleteOrphans.isPending}
             onClick={handleDelete}
             data-testid="orphan-delete-selected"
@@ -212,9 +209,9 @@ export function OrphanCleanModal({ open, onClose }: OrphanCleanModalProps) {
             {deleteOrphans.isPending
               ? t("loading", { ns: "common" })
               : `${t("orphanClean.clean")} (${selected.size})`}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

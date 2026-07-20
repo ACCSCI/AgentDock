@@ -7,7 +7,6 @@ import i18n from "./i18n";
 import { I18nextProvider } from "./i18n/react";
 import { routeTree } from "./routeTree.gen";
 import "./styles/globals.css";
-import "./styles/toast.css";
 
 // Global error hooks — the React ErrorBoundary only catches render-phase
 // exceptions. window.onerror and unhandledrejection cover everything else

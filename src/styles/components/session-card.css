@@ -3,21 +3,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--color-session-bg);
-  border: 3px solid transparent;
-  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 
 .session-card:hover {
-  background: #ffe8ec;
+  background: var(--accent);
+  border-color: color-mix(in oklab, var(--foreground) 18%, var(--border));
 }
 
 .session-card-active {
-  background: #ffe8ec;
-  border-color: var(--color-primary);
+  background: color-mix(in oklab, var(--primary) 8%, var(--card));
+  border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 /* Drag-and-drop reordering styles */
@@ -84,7 +86,8 @@
 
 .session-name {
   font-size: 13px;
-  color: var(--color-primary);
+  color: var(--foreground);
+  font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,7 +103,7 @@
 .session-close {
   background: none;
   border: none;
-  color: var(--color-primary);
+  color: var(--muted-foreground);
   cursor: pointer;
   font-size: 12px;
   padding: 2px 4px;
@@ -108,7 +111,8 @@
 }
 
 .session-close:hover {
-  background: var(--color-bg-secondary);
+  background: var(--accent);
+  color: var(--foreground);
 }
 
 /* Session Card — Delete Confirmation */

@@ -10,20 +10,22 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "./fixtures/electron-fixture";
+import { test, expect } from "./fixtures/electron-fixture";
 import { HomePage } from "./pages/home";
 import { SidebarPage } from "./pages/sidebar";
 import { TerminalPage } from "./pages/terminal";
 import { TID } from "./pages/testids";
 
-const HAS_API_KEY = !!process.env.ANTHROPIC_API_KEY || !!process.env.OPENAI_API_KEY;
+const HAS_API_KEY =
+  !!process.env.ANTHROPIC_API_KEY || !!process.env.OPENAI_API_KEY;
 
 function prepareGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   execSync("git init -q -b main", { cwd: dir });
-  execSync("git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init", {
-    cwd: dir,
-  });
+  execSync(
+    'git -c user.email=e2e@local -c user.name=E2E commit --allow-empty -q -m init',
+    { cwd: dir },
+  );
 }
 
 function writeAgentConfig(dir: string): void {
@@ -51,6 +53,7 @@ test.describe("real AI agent flow", () => {
     window,
     dataDir,
     pageErrors,
+    dialogs,
     rendererLog,
     expectNoRendererErrors,
   }) => {
@@ -73,13 +76,14 @@ test.describe("real AI agent flow", () => {
 
     // 2. Create a session.
     await sidebar.clickNewSession();
-    await expect.poll(async () => sidebar.cardCount(), { timeout: 30_000 }).toBe(1);
+    await expect
+      .poll(async () => sidebar.cardCount(), { timeout: 30_000 })
+      .toBe(1);
 
     const card = window.locator(`[data-testid="${TID.sessionCard}"]`).first();
     await expect(card).toBeVisible();
     const sessionId = await card.getAttribute("data-session-id");
     expect(sessionId).toBeTruthy();
-    if (!sessionId) throw new Error("Created session card has no session id");
 
     // 3. Wait for lifecycle to complete (ports visible).
     await expect(card.locator(".session-ports")).toBeVisible({ timeout: 30_000 });
@@ -133,8 +137,10 @@ test.describe("real AI agent flow", () => {
     // 8. Delete session and clean up.
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
-    await card.locator(".session-delete-confirm-yes").click();
-    await expect.poll(() => sidebar.cardCount(), { timeout: 30_000 }).toBe(0);
+    await window.getByTestId("confirm-delete-ok").click();
+    await expect
+      .poll(() => sidebar.cardCount(), { timeout: 30_000 })
+      .toBe(0);
 
     // 9. No renderer errors.
     expect(pageErrors).toHaveLength(0);
@@ -142,11 +148,10 @@ test.describe("real AI agent flow", () => {
     // protocol may not resolve in test environments where fonts
     // haven't been downloaded yet. These are benign.
     const consoleErrors = rendererLog.filter(
-      (e) =>
-        e.type === "error" &&
-        !e.text.includes("agentdock-fonts://") &&
-        !(e.location?.url || "").includes("agentdock-fonts://") &&
-        !e.text.includes("net::ERR_FAILED"),
+      (e) => e.type === "error"
+        && !e.text.includes("agentdock-fonts://")
+        && !((e.location && e.location.url) || "").includes("agentdock-fonts://")
+        && !e.text.includes("net::ERR_FAILED"),
     );
     expect(consoleErrors).toHaveLength(0);
     expectNoRendererErrors();

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { GitPullRequest, Plus, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitPullRequest, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchSessionTerminals,
@@ -21,6 +21,8 @@ import { terminalCache } from "../lib/terminal-cache";
 import { toast } from "../lib/toast";
 import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 import { SessionCard } from "./SessionCard";
+import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function SessionSidebar() {
   const {
@@ -340,70 +342,105 @@ export function SessionSidebar() {
 
   if (sidebarCollapsed) {
     return (
-      <div className="session-sidebar session-sidebar-collapsed">
-        <button
+      <aside
+        className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-card py-2"
+        aria-label="Sessions"
+      >
+        <Button
           type="button"
-          className="session-sidebar-expand-btn"
+          variant="ghost"
+          size="icon-sm"
           onClick={toggleSidebar}
-          title="展开 Session 侧栏"
+          aria-label="展开 Session 侧栏"
         >
-          ▶
-        </button>
-      </div>
+          <ChevronRight aria-hidden="true" />
+        </Button>
+      </aside>
     );
   }
 
   return (
     <>
-      <div
-        className="session-sidebar"
+      <aside
+        className="relative flex shrink-0 flex-col border-r border-border bg-card"
         style={{ width: sidebarWidth }}
+        aria-label="Sessions"
         data-testid="session-sidebar"
       >
-        <div className="session-sidebar-header">
-          <span className="session-sidebar-title">Sessions</span>
-          <button
+        <div className="flex items-center border-b border-border px-3 py-2.5">
+          <span className="font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-muted-foreground">
+            Sessions
+          </span>
+          <div className="ml-auto flex items-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleRescanDisk}
+                disabled={rescan.isPending}
+                aria-label="扫描磁盘 worktree"
+                data-testid="rescan-disk"
+              >
+                {rescan.isPending ? (
+                  <span className="step-spinner" />
+                ) : (
+                  <RefreshCw aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>扫描磁盘 worktree</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleOpenPullRequests}
+                disabled={prLoading}
+                aria-label="查看 Pull Requests"
+                data-testid="open-pull-requests"
+              >
+                <GitPullRequest aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>查看 Pull Requests</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                onClick={handleNewSession}
+                disabled={createSession.isPending}
+                aria-label="新建 Session"
+                data-testid="new-session"
+              >
+                {createSession.isPending ? (
+                  <span className="step-spinner" />
+                ) : (
+                  <Plus aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>新建 Session</TooltipContent>
+          </Tooltip>
+          <Button
             type="button"
-            className="session-sidebar-rescan-btn"
-            onClick={handleRescanDisk}
-            disabled={rescan.isPending}
-            title="扫描磁盘 worktree"
-            data-testid="rescan-disk"
-          >
-            {rescan.isPending ? <span className="step-spinner" /> : <RefreshCw size={16} />}
-          </button>
-          <button
-            type="button"
-            className="session-sidebar-pr-btn"
-            onClick={handleOpenPullRequests}
-            disabled={prLoading}
-            title="查看 Pull Requests"
-            data-testid="open-pull-requests"
-          >
-            <GitPullRequest size={16} />
-          </button>
-          <button
-            type="button"
-            className="session-sidebar-new-btn"
-            onClick={handleNewSession}
-            disabled={createSession.isPending}
-            title="新建 Session"
-            data-testid="new-session"
-          >
-            {createSession.isPending ? <span className="step-spinner" /> : <Plus size={16} />}
-          </button>
-          <button
-            type="button"
-            className="session-sidebar-collapse-btn"
+            variant="ghost"
+            size="icon-sm"
             onClick={toggleSidebar}
-            title="收起侧栏"
+            aria-label="收起 Session 侧栏"
           >
-            ◀
-          </button>
+            <ChevronLeft aria-hidden="true" />
+          </Button>
+          </div>
         </div>
         <div
           ref={listRef}
-          className={`session-list ${dragOverSessionId ? "drag-active" : ""}`}
+          className={`flex flex-1 flex-col gap-1 overflow-y-auto p-2 ${dragOverSessionId ? "drag-active" : ""}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -446,13 +483,16 @@ export function SessionSidebar() {
         </div>
         <div
           ref={handleRef}
-          className="session-sidebar-resize-handle"
+          className="group absolute top-0 -right-1 z-10 flex h-full w-2.5 cursor-col-resize items-center justify-center"
           onPointerDown={onResizeStart}
           title="拖拽调整宽度"
+          aria-label="拖拽调整侧栏宽度"
+          role="separator"
+          aria-orientation="vertical"
         >
-          <span className="session-sidebar-resize-dots" />
+          <span className="block h-8 w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary" />
         </div>
-      </div>
+      </aside>
       <ConfirmDeleteModal
         open={deletingSessionId !== null}
         sessionName={sessions.find((s) => s.id === deletingSessionId)?.name ?? ""}

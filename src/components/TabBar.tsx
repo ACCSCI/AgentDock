@@ -1,8 +1,10 @@
+import { Plus, X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef } from "react";
 import { useOpenProject } from "../hooks/useOpenProject";
 import { useInitDb, useProjects } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { cn } from "../lib/utils";
 import { DirBrowserModal } from "./DirBrowserModal";
 import { GitInitConfirmModal } from "./GitInitConfirmModal";
 
@@ -37,7 +39,7 @@ export function TabBar() {
       // After closing a tab, switch to the next available tab if any remain.
       // Only navigate to home ("/") when the closed tab was the last one.
       const remaining = openProjects.filter((p) => p.id !== projectId);
-      const [next] = remaining;
+      const next = remaining[0];
       if (next) {
         setActiveProject(next.id);
         try {
@@ -136,37 +138,54 @@ export function TabBar() {
 
   return (
     <>
-      <div className="tab-bar" data-testid="tab-bar" ref={tabBarRef}>
+      <nav
+        className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-secondary px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label="打开的项目"
+        data-testid="tab-bar"
+        ref={tabBarRef}
+      >
         {openProjects.map((project) => (
           <div
             key={project.id}
-            className={`tab-item ${project.id === activeProjectId ? "active" : ""}`}
-            onClick={() => handleTabClick(project.id)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleTabClick(project.id);
-            }}
-            tabIndex={0}
-            role="tab"
-            aria-selected={project.id === activeProjectId}
+            className={cn(
+              "flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-sm border px-3 py-1.5 text-[13px] transition-colors select-none",
+              project.id === activeProjectId
+                ? "border-primary bg-card"
+                : "border-border bg-secondary hover:bg-muted",
+            )}
             data-testid="project-tab"
             data-project-id={project.id}
           >
-            <span className="tab-name">{project.name}</span>
             <button
               type="button"
-              className="tab-close"
+              className="tab-select flex min-w-0 flex-1 cursor-pointer items-center self-stretch border-0 bg-transparent text-start text-inherit"
+              aria-current={project.id === activeProjectId ? "page" : undefined}
+              onClick={() => handleTabClick(project.id)}
+            >
+              <span className="max-w-[120px] truncate">{project.name}</span>
+            </button>
+            <button
+              type="button"
+              className="cursor-pointer rounded border-0 bg-transparent px-0.5 leading-none text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
               onClick={(e) => {
                 e.stopPropagation();
                 handleRemoveProject(project.id);
               }}
               data-testid="project-tab-close"
+              aria-label={`关闭项目 ${project.name}`}
             >
-              ✕
+              <X aria-hidden="true" className="size-3.5" />
             </button>
           </div>
         ))}
-        <button type="button" className="tab-add" onClick={openProject} data-testid="new-project">
-          +
+        <button
+          type="button"
+          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-sm border border-dashed border-border bg-transparent text-primary transition-colors hover:border-primary hover:bg-secondary"
+          onClick={openProject}
+          aria-label="打开新项目"
+          data-testid="new-project"
+        >
+          <Plus aria-hidden="true" className="size-4" />
         </button>
         <DirBrowserModal open={modalOpen} onConfirm={onModalConfirm} onCancel={onModalCancel} />
         <GitInitConfirmModal
@@ -176,7 +195,7 @@ export function TabBar() {
           onCancel={onGitInitCancel}
           loading={gitInitLoading}
         />
-      </div>
+      </nav>
     </>
   );
 }

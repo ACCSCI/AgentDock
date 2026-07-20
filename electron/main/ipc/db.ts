@@ -207,6 +207,26 @@ export async function syncProject(
   const existingIds = new Set(existingRows.map((r) => r.id));
   const existingPaths = new Set(existingRows.map((r) => r.worktreePath));
 
+  // Re-register each existing session's ports into the in-memory pool. The
+  // pool is process-local and starts empty on every launch; without this a
+  // fresh pool would re-issue ports that a still-existing session (from a
+  // previous run) already owns — e.g. two sessions both showing :30000.
+  if (sessionManager?.restoreSession) {
+    for (const row of existingRows) {
+      if (!row.ports) continue;
+      try {
+        sessionManager.restoreSession({
+          sessionId: row.id,
+          projectPath,
+          displayName: row.name,
+          ports: JSON.parse(row.ports),
+        });
+      } catch (err) {
+        log.warn({ err, sessionId: row.id }, "syncProject: restoreSession ports failed");
+      }
+    }
+  }
+
   log.info(
     {
       projectPath,

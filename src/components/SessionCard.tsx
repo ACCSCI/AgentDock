@@ -16,7 +16,20 @@ import {
 } from "../lib/queries";
 
 // ── Session user-status definitions ────────────────────────────────
+import { cn } from "../lib/utils";
 import type { LucideIcon } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "./ui/context-menu";
 
 const USER_STATUS_OPTIONS: Array<{
   key: SessionUserStatus;
@@ -181,13 +194,9 @@ export function SessionCard({
     }),
     [t],
   );
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(session.name);
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const submenuRef = useRef<HTMLDivElement>(null);
 
   // Heat value — recomputed every 10s via interval + on session data change
   const lastActivatedAt =
@@ -216,53 +225,6 @@ export function SessionCard({
   // terminal status back into the projects cache itself.
   useBackgroundHookStatus(session.id, isBackgroundHookRunning(session));
 
-  // ── Context menu close on click-outside ──────────────────────────
-  useEffect(() => {
-    if (!menuPos) return;
-    const handleClick = (e: MouseEvent) => {
-      const menuEl = menuRef.current;
-      const subEl = submenuRef.current;
-      const clickedInMenu = menuEl?.contains(e.target as Node) ?? false;
-      const clickedInSub = subEl?.contains(e.target as Node) ?? false;
-      if (!clickedInMenu && !clickedInSub) {
-        setMenuPos(null);
-        setSubmenuPos(null);
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setMenuPos(null);
-        setSubmenuPos(null);
-      }
-    };
-    window.addEventListener("mousedown", handleClick);
-    window.addEventListener("keydown", handleKey);
-    return () => {
-      window.removeEventListener("mousedown", handleClick);
-      window.removeEventListener("keydown", handleKey);
-    };
-  }, [menuPos]);
-
-  // Clamp context menu position to viewport
-  useEffect(() => {
-    if (!menuPos || !menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
-    const x = Math.min(menuPos.x, window.innerWidth - rect.width - 4);
-    const y = Math.min(menuPos.y, window.innerHeight - rect.height - 4);
-    menuRef.current.style.left = `${Math.max(0, x)}px`;
-    menuRef.current.style.top = `${Math.max(0, y)}px`;
-  }, [menuPos]);
-
-  // Clamp submenu position to viewport
-  useEffect(() => {
-    if (!submenuPos || !submenuRef.current) return;
-    const rect = submenuRef.current.getBoundingClientRect();
-    const x = Math.min(submenuPos.x, window.innerWidth - rect.width - 4);
-    const y = Math.min(submenuPos.y, window.innerHeight - rect.height - 4);
-    submenuRef.current.style.left = `${Math.max(0, x)}px`;
-    submenuRef.current.style.top = `${Math.max(0, y)}px`;
-  }, [submenuPos]);
-
   // Sync editValue with session.name when not editing
   useEffect(() => {
     if (!editing) {
@@ -277,16 +239,7 @@ export function SessionCard({
     }
   }, [editing]);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-    setSubmenuPos(null);
-  }, []);
-
   const handleStartRename = useCallback(() => {
-    setMenuPos(null);
-    setSubmenuPos(null);
     setEditValue(session.name);
     setEditing(true);
   }, [session.name]);
@@ -311,34 +264,24 @@ export function SessionCard({
   );
 
   const handleOpenInExplorer = useCallback(() => {
-    setMenuPos(null);
-    setSubmenuPos(null);
     onOpenInExplorer(session.worktreePath);
   }, [session.worktreePath, onOpenInExplorer]);
 
   const handleOpenInTerminal = useCallback(() => {
-    setMenuPos(null);
-    setSubmenuPos(null);
     onOpenInTerminal(session.worktreePath);
   }, [session.worktreePath, onOpenInTerminal]);
 
   const handleDelete = useCallback(() => {
-    setMenuPos(null);
-    setSubmenuPos(null);
     setEditing(false);
     onRequestDelete(session.id);
   }, [session.id, onRequestDelete]);
 
   const handleReassignPorts = useCallback(() => {
-    setMenuPos(null);
-    setSubmenuPos(null);
     onReassignPorts(session.id);
   }, [session.id, onReassignPorts]);
 
   const handleSetUserStatus = useCallback(
     (status: SessionUserStatus | null) => {
-      setMenuPos(null);
-      setSubmenuPos(null);
       onSetUserStatus?.(session.id, status);
     },
     [session.id, onSetUserStatus],
@@ -349,15 +292,11 @@ export function SessionCard({
     onActivate?.(session.id);
   }, [session.id, onSelect, onActivate]);
 
-  // Submenu positioning: show to the right of the parent item
-  const handleSubmenuEnter = useCallback(
-    (itemEl: HTMLElement) => {
-      if (!menuPos) return;
-      const rect = itemEl.getBoundingClientRect();
-      setSubmenuPos({ x: rect.right + 2, y: rect.top });
-    },
-    [menuPos],
-  );
+  const isForeign = session.status === "foreign";
+  const statusLabel = session.status === "foreign" ? "Foreign" : null;
+  const foreignTitle = session.ownerClientId
+    ? `This session is currently managed by another AgentDock instance (${session.ownerClientId}).`
+    : "This session is currently managed by another AgentDock instance.";
 
   // ── Inline styles for heatmap overlay ──────────────────────────────
   const heatmapStyle = useMemo<React.CSSProperties>(() => {
@@ -368,9 +307,12 @@ export function SessionCard({
         "--session-heat": opacity,
       } as React.CSSProperties;
     }
-    // No status: white overlay to neutralize the pink base
+    // No status: neutral overlay to mute the pink-tinted base. Use the theme's
+    // own card color (NOT a hardcoded #fff) so it stays neutral in dark mode
+    // too — a literal white overlay is exactly what made cards look washed-out
+    // / white against the dark sidebar.
     return {
-      "--session-status-color": "#ffffff",
+      "--session-status-color": "var(--card)",
       "--session-heat": 0.7,
     } as React.CSSProperties;
   }, [statusColor, heat]);
@@ -430,7 +372,6 @@ export function SessionCard({
         onClick={() => handleSelect()}
         onKeyDown={(e) => e.key === "Enter" && handleSelect()}
         tabIndex={0}
-        // biome-ignore lint/a11y/useSemanticElements: the interactive card contains nested action buttons, so it cannot be a button element.
         role="button"
         aria-pressed={isActive}
       >
@@ -475,172 +416,148 @@ export function SessionCard({
     );
   }
 
-  return (
-    <>
-      <div
-        className={`session-card session-card-user-status${isActive ? " session-card-active" : ""}`}
-        style={heatmapStyle}
-        draggable={!!onDragStart}
-        onDragStart={(e) => {
-          e.dataTransfer.setData("text/plain", session.id);
-          e.dataTransfer.effectAllowed = "move";
-          onDragStart?.(session.id);
-        }}
-        onDragEnd={() => onDragEnd?.()}
-        onClick={handleSelect}
-        onMouseEnter={() => onHover?.(session.id)}
-        onContextMenu={handleContextMenu}
-        onDoubleClick={session.canRename === false ? undefined : handleStartRename}
-        onKeyDown={(e) => e.key === "Enter" && handleSelect()}
-        tabIndex={0}
-        // biome-ignore lint/a11y/useSemanticElements: the draggable interactive card contains nested controls, so it cannot be a button element.
-        role="button"
-        aria-pressed={isActive}
-      >
-        {/* Status icon — always visible, empty circle when no status */}
-        <span className="session-status-icon">
-          {StatusIconComp ? (
-            <StatusIconComp
-              size={14}
-              strokeWidth={2.2}
-              style={{ color: statusColor ?? undefined }}
-            />
-          ) : (
-            <span className="session-status-icon-empty" />
+  // Foreign state — visible but intentionally not interactive
+  if (isForeign) {
+    return (
+      <div className="session-card session-card-foreign" title={foreignTitle}>
+        <span className="session-name">{session.name}</span>
+        <div className="session-card-meta">
+          {session.ports && <span className="session-ports">:{session.ports.FRONTEND_PORT}</span>}
+          {statusLabel && (
+            <span className="session-status-badge session-status-badge-foreign">{statusLabel}</span>
           )}
-        </span>
-
-        {editing ? (
-          <input
-            ref={inputRef}
-            className="session-rename-input"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={handleConfirmRename}
-            onKeyDown={handleKeyDown}
-          />
-        ) : (
-          <span className="session-name">{session.name}</span>
-        )}
-        {session.ports && (
-          <span
-            className="session-ports"
-            title={`FRONTEND:${session.ports.FRONTEND_PORT} BACKEND:${session.ports.BACKEND_PORT} WS:${session.ports.WS_PORT} DEBUG:${session.ports.DEBUG_PORT} PREVIEW:${session.ports.PREVIEW_PORT}`}
-          >
-            :{session.ports.FRONTEND_PORT}
-          </span>
-        )}
-        <button
-          type="button"
-          className="session-close"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRequestDelete(session.id);
-          }}
-        >
-          ✕
-        </button>
+        </div>
       </div>
+    );
+  }
 
-      {menuPos && (
-        <div ref={menuRef} className="context-menu" style={{ left: menuPos.x, top: menuPos.y }}>
-          {session.canRename !== false && (
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={handleStartRename}
-              onMouseEnter={() => setSubmenuPos(null)}
-            >
-              重命名
-            </button>
-          )}
-          {/* ── Set Status submenu ── */}
-          {onSetUserStatus && (
-            <div
-              className="context-menu-item context-menu-submenu-trigger"
-              onMouseEnter={(e) => handleSubmenuEnter(e.currentTarget)}
-            >
-              <span>设置状态</span>
-              <span className="context-menu-submenu-arrow">▸</span>
-            </div>
-          )}
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={handleOpenInExplorer}
-            onMouseEnter={() => setSubmenuPos(null)}
-          >
-            在文件管理器中打开
-          </button>
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={handleOpenInTerminal}
-            onMouseEnter={() => setSubmenuPos(null)}
-          >
-            在终端中打开
-          </button>
-          {session.canReassign !== false && (
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={handleReassignPorts}
-              onMouseEnter={() => setSubmenuPos(null)}
-            >
-              重新分配端口
-            </button>
-          )}
-          {session.canDelete !== false && (
-            <>
-              <div className="context-menu-separator" />
-              <button
-                type="button"
-                className="context-menu-item context-menu-danger"
-                onClick={handleDelete}
-                onMouseEnter={() => setSubmenuPos(null)}
-              >
-                删除
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Status submenu ── */}
-      {menuPos && submenuPos && (
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
         <div
-          ref={submenuRef}
-          className="context-menu context-menu-submenu"
-          style={{ left: submenuPos.x, top: submenuPos.y }}
-        >
-          {USER_STATUS_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              className={`context-menu-item context-menu-status-item${userStatus === opt.key ? " context-menu-status-active" : ""}`}
-              onClick={() => handleSetUserStatus(opt.key)}
-            >
-              <span className="context-menu-status-icon">
-                <opt.Icon size={14} strokeWidth={2} style={{ color: opt.color }} />
-              </span>
-              <span>{opt.label}</span>
-              {userStatus === opt.key && <span className="context-menu-check">✓</span>}
-            </button>
-          ))}
-          {userStatus && (
-            <>
-              <div className="context-menu-separator" />
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => handleSetUserStatus(null)}
-              >
-                清除状态
-              </button>
-            </>
+          className={cn(
+            "session-card session-card-user-status",
+            isActive && "session-card-active",
           )}
+          style={heatmapStyle}
+          draggable={!!onDragStart}
+          onDragStart={(e) => {
+            e.dataTransfer.setData("text/plain", session.id);
+            e.dataTransfer.effectAllowed = "move";
+            onDragStart?.(session.id);
+          }}
+          onDragEnd={() => onDragEnd?.()}
+        >
+          {/* Main selectable area — single button for select/rename/double-click */}
+          <button
+            type="button"
+            className="session-card-main"
+            onClick={handleSelect}
+            onDoubleClick={session.canRename === false ? undefined : handleStartRename}
+            aria-pressed={isActive}
+          >
+            {/* Status icon */}
+            <span className="session-status-icon">
+              {StatusIconComp ? (
+                <StatusIconComp size={14} strokeWidth={2.2} style={{ color: statusColor ?? undefined }} />
+              ) : (
+                <span className="session-status-icon-empty" />
+              )}
+            </span>
+
+            {editing ? (
+              <input
+                ref={inputRef}
+                className="session-rename-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={handleConfirmRename}
+                onKeyDown={handleKeyDown}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="session-name">{session.name}</span>
+            )}
+            {session.ports && (
+              <span
+                className="session-ports"
+                title={`FRONTEND:${session.ports.FRONTEND_PORT} BACKEND:${session.ports.BACKEND_PORT} WS:${session.ports.WS_PORT} DEBUG:${session.ports.DEBUG_PORT} PREVIEW:${session.ports.PREVIEW_PORT}`}
+              >
+                :{session.ports.FRONTEND_PORT}
+              </span>
+            )}
+            {statusLabel && session.status !== "foreign" && (
+              <span className={`session-status-badge session-status-badge-${session.status}`}>
+                {statusLabel}
+              </span>
+            )}
+          </button>
+
+          {/* Sibling action buttons — no longer nested inside role=button */}
+          <button
+            type="button"
+            className="session-close"
+            aria-label={t("closeSession", { name: session.name })}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestDelete(session.id);
+            }}
+          >
+            ✕
+          </button>
         </div>
-      )}
-    </>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {session.canRename !== false && (
+          <ContextMenuItem onSelect={handleStartRename}>重命名</ContextMenuItem>
+        )}
+        {onSetUserStatus && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>设置状态</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuRadioGroup
+                value={userStatus ?? ""}
+                onValueChange={(value) =>
+                  handleSetUserStatus(value ? (value as SessionUserStatus) : null)
+                }
+              >
+                {USER_STATUS_OPTIONS.map((opt) => (
+                  <ContextMenuRadioItem key={opt.key} value={opt.key}>
+                    <opt.Icon
+                      aria-hidden="true"
+                      size={14}
+                      strokeWidth={2}
+                      style={{ color: opt.color }}
+                    />
+                    {opt.label}
+                  </ContextMenuRadioItem>
+                ))}
+              </ContextMenuRadioGroup>
+              {userStatus && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => handleSetUserStatus(null)}>
+                    清除状态
+                  </ContextMenuItem>
+                </>
+              )}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+        <ContextMenuItem onSelect={handleOpenInExplorer}>在文件管理器中打开</ContextMenuItem>
+        <ContextMenuItem onSelect={handleOpenInTerminal}>在终端中打开</ContextMenuItem>
+        {session.canReassign !== false && (
+          <ContextMenuItem onSelect={handleReassignPorts}>重新分配端口</ContextMenuItem>
+        )}
+        {session.canDelete !== false && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
+              删除
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

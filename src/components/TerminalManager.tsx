@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n/react";
 import {
@@ -13,16 +14,18 @@ import type { TerminalDefaultAction } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
 import { SessionTerminal } from "./SessionTerminal";
 import { TerminalSettingsBar } from "./TerminalSettingsBar";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "./ui/context-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 
 interface TerminalManagerProps {
   sessionId: string;
   worktreePath: string;
-}
-
-interface MenuState {
-  x: number;
-  y: number;
-  terminalId: string;
 }
 
 const ACTION_ITEMS: {
@@ -47,15 +50,6 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   const deleteTerminal = useDeleteTerminal();
   const renameTerminal = useRenameTerminal();
   const justCreatedRef = useRef<string | null>(null);
-
-  // Context menu state (right-click on tab)
-  const [menu, setMenu] = useState<MenuState | null>(null);
-
-  // Hover dropdown state for the "+" button
-  const [showAddMenu, setShowAddMenu] = useState(false);
-  const addMenuRef = useRef<HTMLDivElement>(null);
-  const addHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const addLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Rename state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -98,44 +92,20 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     }
   }, [editingId]);
 
-  // Close context menu on outside click / right-click elsewhere / Escape
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menu]);
+  // ── Add button (DropdownMenu — no hover timers needed) ──────────────────
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
-  // Close add menu on outside click
   useEffect(() => {
-    if (!showAddMenu) return;
+    if (!addMenuOpen) return;
     const close = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
-        setShowAddMenu(false);
+      if (!(e.target as HTMLElement)?.closest('[data-testid="new-terminal"]')) {
+        setAddMenuOpen(false);
       }
     };
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
-  }, [showAddMenu]);
+  }, [addMenuOpen]);
 
-  // Clean up hover timers on unmount
-  useEffect(() => {
-    return () => {
-      if (addHoverTimer.current) clearTimeout(addHoverTimer.current);
-      if (addLeaveTimer.current) clearTimeout(addLeaveTimer.current);
-    };
-  }, []);
-
-  // Single effect for terminal selection
   useEffect(() => {
     if (
       justCreatedRef.current &&
@@ -159,25 +129,17 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     }
   }, [activeTerminalId, terminals, setActiveTerminal, sessionId]);
 
-  // --- Add button hover handlers ---
+  // Create a new terminal
+  const handleAddTerminal = useCallback(
+    (action?: TerminalDefaultAction) => {
+      createTerminalWithAction(action ?? terminalDefaultAction);
+    },
+    [createTerminalWithAction, terminalDefaultAction],
+  );
 
-  const handleAddEnter = useCallback(() => {
-    if (addLeaveTimer.current) {
-      clearTimeout(addLeaveTimer.current);
-      addLeaveTimer.current = null;
-    }
-    addHoverTimer.current = setTimeout(() => setShowAddMenu(true), 250);
-  }, []);
+  const isDefault = (key: TerminalDefaultAction) => terminalDefaultAction === key;
 
-  const handleAddLeave = useCallback(() => {
-    if (addHoverTimer.current) {
-      clearTimeout(addHoverTimer.current);
-      addHoverTimer.current = null;
-    }
-    addLeaveTimer.current = setTimeout(() => setShowAddMenu(false), 200);
-  }, []);
-
-  // --- Terminal creation ---
+  // --- Tab actions ---
 
   const createTerminalWithAction = useCallback(
     async (action: TerminalDefaultAction) => {
@@ -204,37 +166,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         setLoading(false);
       }
     },
-    [createTerminal, sessionId, setActiveTerminal, renameTerminal, t],
-  );
-
-  const handleAddClick = useCallback(() => {
-    // Clean up any pending hover timers
-    if (addHoverTimer.current) {
-      clearTimeout(addHoverTimer.current);
-      addHoverTimer.current = null;
-    }
-    if (addLeaveTimer.current) {
-      clearTimeout(addLeaveTimer.current);
-      addLeaveTimer.current = null;
-    }
-    setShowAddMenu(false);
-    createTerminalWithAction(terminalDefaultAction);
-  }, [createTerminalWithAction, terminalDefaultAction]);
-
-  const handleMenuItemClick = useCallback(
-    (action: TerminalDefaultAction) => {
-      setShowAddMenu(false);
-      createTerminalWithAction(action);
-    },
-    [createTerminalWithAction],
-  );
-
-  const handlePin = useCallback(
-    (action: TerminalDefaultAction, e: React.MouseEvent) => {
-      e.stopPropagation();
-      setTerminalDefaultAction(action);
-    },
-    [setTerminalDefaultAction],
+    [createTerminal, sessionId, setActiveTerminal, renameTerminal],
   );
 
   // --- Tab actions ---
@@ -260,17 +192,10 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
     setActiveTerminal(sessionId, terminalId);
   };
 
-  const handleContextMenu = (e: React.MouseEvent, terminalId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, terminalId });
-  };
-
   const handleStartRename = useCallback(
     (terminalId: string) => {
       const terminal = terminals.find((term) => term.terminalId === terminalId);
       if (!terminal) return;
-      setMenu(null);
       setEditValue(terminal.name);
       setEditingId(terminalId);
     },
@@ -369,16 +294,15 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
   );
 
   const activeTerminal = terminals.find((term) => term.terminalId === activeTerminalId);
-  const isDefault = (key: TerminalDefaultAction) => terminalDefaultAction === key;
 
   return (
-    <div className="terminal-panel" data-testid="terminal-panel">
+    <div className="flex flex-1 flex-col overflow-hidden" data-testid="terminal-panel">
       {/* Terminal font settings bar */}
       <TerminalSettingsBar />
 
       {/* Terminal tab bar */}
       <div
-        className={`terminal-tab-bar ${dragActive ? "drag-active" : ""}`}
+        className={`flex h-9 shrink-0 items-center gap-0.5 border-b border-border bg-secondary px-1 ${dragActive ? "bg-muted" : ""}`}
         onDragOver={(e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
@@ -393,139 +317,124 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
         }}
       >
         {displayTerminals.map((term) => (
-          <div
-            key={term.terminalId}
-            className={[
-              "terminal-tab",
-              term.terminalId === activeTerminalId ? "terminal-tab-active" : "",
-              term.status === "exited" ? "terminal-tab-exited" : "",
-              draggedIdRef.current === term.terminalId ? "dragging" : "",
-              dragOverTerminalId === term.terminalId
-                ? dragPosition === "left"
-                  ? "drag-over-left"
-                  : "drag-over-right"
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            draggable={true}
-            onClick={() => handleTabClick(term.terminalId)}
-            onContextMenu={(e) => handleContextMenu(e, term.terminalId)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleTabClick(term.terminalId);
-            }}
-            onDragStart={() => handleDragStart(term.terminalId)}
-            onDragEnd={handleDragEnd}
-            onDragOver={(e) => handleTabDragOver(e, term.terminalId)}
-            onDragLeave={handleTabDragLeave}
-            onDrop={(e) => handleTabDrop(e, term.terminalId)}
-            tabIndex={0}
-            role="tab"
-            aria-selected={term.terminalId === activeTerminalId}
-            data-testid="terminal-tab"
-            data-terminal-id={term.terminalId}
-          >
-            <span className="terminal-tab-icon">{term.status === "exited" ? "○" : "●"}</span>
-            {editingId === term.terminalId ? (
-              <input
-                ref={inputRef}
-                className="terminal-rename-input"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={handleConfirmRename}
-                onKeyDown={handleRenameKeyDown}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span className="terminal-tab-name">{term.name}</span>
-            )}
-            <button
-              type="button"
-              className="terminal-tab-close"
-              onClick={(e) => handleCloseTerminal(term.terminalId, e)}
-              title={t("closeTerminal")}
-            >
-              x
-            </button>
-          </div>
-        ))}
-
-        {/* "+" button with hover dropdown */}
-        <div
-          ref={addMenuRef}
-          className="terminal-add-wrapper"
-          onMouseEnter={handleAddEnter}
-          onMouseLeave={handleAddLeave}
-        >
-          <button
-            type="button"
-            className="terminal-tab-add"
-            onClick={handleAddClick}
-            disabled={loading || createTerminal.isPending}
-            title={`New ${ACTION_ITEMS.find((a) => a.key === terminalDefaultAction)?.label ?? "Terminal"}`}
-            data-testid="new-terminal"
-          >
-            +
-          </button>
-
-          {showAddMenu && (
-            <div className="terminal-add-dropdown">
-              {ACTION_ITEMS.map((item) => (
-                <div
-                  key={item.key}
-                  className={`terminal-add-dropdown-item ${isDefault(item.key) ? "terminal-add-dropdown-item-default" : ""}`}
-                  onClick={() => handleMenuItemClick(item.key)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      handleMenuItemClick(item.key);
-                    }
-                  }}
-                  role="menuitem"
-                  tabIndex={0}
-                >
-                  <span className="terminal-add-dropdown-icon">{item.icon}</span>
-                  <span className="terminal-add-dropdown-label">{item.label}</span>
+          <ContextMenu key={term.terminalId}>
+            <ContextMenuTrigger asChild>
+              <div
+                className={[
+                  "flex h-7 min-w-[80px] max-w-[220px] items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs transition-colors select-none cursor-pointer",
+                  term.terminalId === activeTerminalId
+                    ? "border-primary bg-card"
+                    : "border-border bg-secondary hover:bg-muted",
+                  term.status === "exited" ? "opacity-50" : "",
+                  draggedIdRef.current === term.terminalId ? "opacity-40" : "",
+                  dragOverTerminalId === term.terminalId
+                    ? dragPosition === "left"
+                      ? "border-l-2 border-l-primary pl-2"
+                      : "border-r-2 border-r-primary pr-2"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                draggable={true}
+                onDragStart={() => handleDragStart(term.terminalId)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleTabDragOver(e, term.terminalId)}
+                onDragLeave={handleTabDragLeave}
+                onDrop={(e) => handleTabDrop(e, term.terminalId)}
+                data-testid="terminal-tab"
+                data-terminal-id={term.terminalId}
+              >
+                {editingId === term.terminalId ? (
+                  <input
+                    ref={inputRef}
+                    className="w-20 rounded-sm border border-primary bg-background px-1 py-0.5 text-xs text-primary outline-none"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={handleConfirmRename}
+                    onKeyDown={handleRenameKeyDown}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
                   <button
                     type="button"
-                    className={`terminal-add-dropdown-pin ${isDefault(item.key) ? "terminal-add-dropdown-pin-active" : ""}`}
-                    onClick={(e) => handlePin(item.key, e)}
-                    title={isDefault(item.key) ? t("defaultAction") : t("setAsDefault")}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 self-stretch border-0 bg-transparent text-inherit"
+                    aria-current={term.terminalId === activeTerminalId ? "page" : undefined}
+                    onClick={() => handleTabClick(term.terminalId)}
                   >
-                    <span className="pin-icon" />
+                    <span
+                      className={`shrink-0 text-[8px] ${term.status === "exited" ? "text-muted-foreground" : "text-success"}`}
+                      aria-hidden="true"
+                    >
+                      {term.status === "exited" ? "○" : "●"}
+                    </span>
+                    <span className="truncate">{term.name}</span>
                   </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                )}
+                <button
+                  type="button"
+                  className="terminal-tab-close shrink-0 cursor-pointer rounded border-0 bg-transparent px-0.5 text-[10px] leading-none text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+                  onClick={(e) => handleCloseTerminal(term.terminalId, e)}
+                  title={t("closeTerminal")}
+                  aria-label={`${t("closeTerminal")} ${term.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => handleStartRename(term.terminalId)}>
+                {t("rename")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={() => handleCloseTerminal(term.terminalId)}
+              >
+                {t("closeTerminal")}
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        ))}
+
+        {/* "+" button — DropdownMenu for keyboard-accessible menu */}
+        <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex size-6.5 shrink-0 cursor-pointer items-center justify-center rounded-sm border border-dashed border-border bg-transparent text-sm text-primary transition-colors hover:border-primary hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading || createTerminal.isPending}
+              title={`New ${ACTION_ITEMS.find((a) => a.key === terminalDefaultAction)?.label ?? "Terminal"}`}
+              data-testid="new-terminal"
+            >
+              +
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={4} className="min-w-[160px]">
+            {ACTION_ITEMS.map((item) => (
+              <DropdownMenuItem
+                key={item.key}
+                className="cursor-pointer"
+                onClick={() => handleAddTerminal(item.key)}
+              >
+                <span className="w-4 shrink-0 text-center text-xs text-muted-foreground">
+                  {item.key === "terminal" ? (
+                    <ChevronRight aria-hidden="true" className="inline size-3" />
+                  ) : (
+                    item.icon
+                  )}
+                </span>
+                <span className="flex-1">{item.label}</span>
+                {isDefault(item.key) && (
+                  <span className="ml-2 text-[10px] text-muted-foreground opacity-60">默认</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {/* Context menu (right-click on tab) */}
-      {menu && (
-        <div className="terminal-context-menu" style={{ left: menu.x, top: menu.y }}>
-          <button
-            type="button"
-            className="terminal-context-menu-item"
-            onClick={() => handleStartRename(menu.terminalId)}
-          >
-            {t("rename")}
-          </button>
-          <button
-            type="button"
-            className="terminal-context-menu-item terminal-context-menu-item-danger"
-            onClick={() => {
-              setMenu(null);
-              handleCloseTerminal(menu.terminalId);
-            }}
-          >
-            {t("closeTerminal")}
-          </button>
-        </div>
-      )}
-
       {/* Terminal content */}
-      <div className="terminal-content">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {activeTerminal ? (
           <SessionTerminal
             terminalId={activeTerminal.terminalId}
@@ -533,7 +442,7 @@ export function TerminalManager({ sessionId, worktreePath }: TerminalManagerProp
             worktreePath={worktreePath}
           />
         ) : (
-          <div className="terminal-empty">
+          <div className="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
             <p>No terminal active.</p>
             <p>
               Click <strong>+</strong> to create a new terminal.

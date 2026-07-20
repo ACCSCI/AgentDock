@@ -99,7 +99,7 @@ test.describe("concurrent sessions", () => {
       const deleteBtn = card.locator(".session-close");
       await deleteBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
       await deleteBtn.click();
-      const confirmYes = card.locator(".session-delete-confirm-yes");
+      const confirmYes = window.getByTestId("confirm-delete-ok");
       await confirmYes.waitFor({ state: "visible", timeout: 5_000 });
       await confirmYes.click();
     }

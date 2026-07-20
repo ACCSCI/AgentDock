@@ -1,5 +1,14 @@
-import { useEffect } from "react";
-import { useTranslation } from "react-i18next";
+import { GitBranch } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 
 interface GitInitConfirmModalProps {
   open: boolean;
@@ -23,69 +32,45 @@ export function GitInitConfirmModal({
   onCancel,
   loading = false,
 }: GitInitConfirmModalProps) {
-  const { t } = useTranslation("home");
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !loading) onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onCancel, loading]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="dir-modal-overlay"
-      onMouseDown={(event) => {
-        if (!loading && event.target === event.currentTarget) onCancel();
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !loading) onCancel();
       }}
     >
-      <div className="dir-modal git-init-modal" data-testid="git-init-modal">
-        <div className="dir-modal-header">
-          <div className="dir-modal-header-left">
-            <h3>{t("notGitRepository")}</h3>
+      <AlertDialogContent
+        data-testid="git-init-modal"
+        onEscapeKeyDown={(event) => {
+          if (loading) event.preventDefault();
+        }}
+      >
+        <AlertDialogHeader>
+          <div className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <GitBranch aria-hidden="true" className="size-4" />
           </div>
-          <button
-            type="button"
-            className="dir-modal-close"
-            onClick={onCancel}
-            disabled={loading}
-            aria-label={t("close")}
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="git-init-description">
-          <p>{t("notGitRepositoryDescription", { path: dirPath })}</p>
-          <p>
-            {t("gitRequiredDescription")} <code>git init</code>?
-          </p>
-        </div>
-
-        <div className="dir-modal-actions">
-          <button
-            type="button"
-            className="dir-modal-btn dir-modal-btn-cancel"
-            onClick={onCancel}
-            disabled={loading}
-            data-testid="git-init-cancel"
-          >
-            {t("cancel")}
-          </button>
-          <button
-            type="button"
-            className="dir-modal-btn dir-modal-btn-confirm"
-            onClick={onConfirm}
-            disabled={loading}
-            data-testid="git-init-confirm"
-          >
-            {loading ? t("initializingGit") : "git init"}
-          </button>
-        </div>
-      </div>
-    </div>
+          <AlertDialogTitle>初始化 Git 仓库</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2">
+              <p>选择的目录不是 Git 仓库。AgentDock 需要 Git 管理隔离的工作会话。</p>
+              <code className="block max-h-20 overflow-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
+                {dirPath}
+              </code>
+              <p>
+                继续后将自动执行 <code className="font-mono text-foreground">git init</code>。
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={loading} data-testid="git-init-cancel">
+            取消
+          </AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} disabled={loading} data-testid="git-init-confirm">
+            {loading ? "正在初始化…" : "初始化仓库"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

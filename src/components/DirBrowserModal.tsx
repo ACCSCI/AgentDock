@@ -1,6 +1,11 @@
+import { ChevronLeft, ChevronRight, Folder, FolderUp } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShortcutAction } from "../hooks/useShortcuts";
 import { useTranslation } from "../i18n/react";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
 
 export interface DirEntry {
   name: string;
@@ -11,9 +16,11 @@ interface DirBrowserModalProps {
   open: boolean;
   onConfirm: (path: string) => void;
   onCancel: () => void;
+  /** Element that opened the modal — used for focus restoration. */
+  triggerRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalProps) {
+export function DirBrowserModal({ open, onConfirm, onCancel, triggerRef }: DirBrowserModalProps) {
   const { t } = useTranslation("modals");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<DirEntry[]>([]);
@@ -23,8 +30,10 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
-  /** Stores the scrollTop for each directory path we've visited. */
   const scrollPositions = useRef<Map<string, number>>(new Map());
+  // Capture the trigger when dialog opens, so we can restore focus on close.
+  const capturedTriggerRef = useRef<HTMLElement | null>(null);
+  const effectiveTriggerRef = (triggerRef as React.RefObject<HTMLElement | null> | undefined) ?? capturedTriggerRef;
 
   // Register the shortcut so Alt+D (or whatever the user configured) focuses the search input.
   useShortcutAction(
@@ -34,6 +43,30 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
     }, []),
     open,
   );
+
+  // Capture the currently focused element when the modal opens (the trigger).
+  // Only needed when no external triggerRef is supplied.
+  useEffect(() => {
+    if (open && !triggerRef) {
+      capturedTriggerRef.current = document.activeElement as HTMLElement | null;
+    }
+  }, [open, triggerRef]);
+
+  // Restore focus to the trigger when modal closes — use the effective ref so an
+  // externally-supplied triggerRef actually receives focus (not just the
+  // internally captured one).
+  useEffect(() => {
+    if (!open) {
+      const trigger = effectiveTriggerRef.current;
+      if (trigger && typeof trigger.focus === "function") {
+        // Small tick so the DOM has removed the modal content first.
+        setTimeout(() => {
+          try { trigger.focus(); } catch {}
+        }, 0);
+      }
+      capturedTriggerRef.current = null;
+    }
+  }, [open, effectiveTriggerRef]);
 
   // Filter entries by search keyword
   const displayEntries = search.trim()
@@ -69,7 +102,6 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   }, [currentPath]);
 
   // Restore scroll position when data for the new directory is ready
-  // biome-ignore lint/correctness/useExhaustiveDependencies: entries changing means the directory listing has finished refreshing and its scroll position can be restored.
   useLayoutEffect(() => {
     if (!loading && listRef.current) {
       const saved = scrollPositions.current.get(currentPath);
@@ -77,7 +109,7 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
         listRef.current.scrollTop = saved;
       }
     }
-  }, [currentPath, entries, loading]);
+  }, [currentPath, loading]);
 
   // Load root directories when modal opens
   useLayoutEffect(() => {
@@ -86,16 +118,6 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
       fetchDirs();
     }
   }, [open, fetchDirs]);
-
-  // Keyboard navigation
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onCancel]);
 
   if (!open) return null;
 
@@ -164,60 +186,81 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
   }
 
   return (
-    <div
-      className="dir-modal-overlay"
-      role="presentation"
-      onClick={(event) => event.target === event.currentTarget && onCancel()}
-      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
+      modal={true}
     >
-      <div className="dir-modal" data-testid="dir-modal">
+      <DialogContent
+        className="max-w-3xl gap-0 p-0"
+        data-testid="dir-modal"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+        }}
+      >
         <div className="dir-modal-header">
           <div className="dir-modal-header-left">
-            <button
+            <Button
               type="button"
-              className="dir-modal-back"
+              variant="ghost"
+              size="icon-sm"
               onClick={goToParent}
               disabled={!currentPath}
-              title={t("dirBrowser.goUp")}
+              aria-label={t("dirBrowser.goUp")}
             >
-              ←
-            </button>
-            <h3>{t("dirBrowser.title")}</h3>
+              <ChevronLeft aria-hidden="true" />
+            </Button>
+            <DialogTitle>{t("dirBrowser.title")}</DialogTitle>
           </div>
-          <button type="button" className="dir-modal-close" onClick={onCancel}>
-            ✕
-          </button>
         </div>
 
-        {/* Breadcrumb */}
-        <div className="dir-modal-breadcrumb">
-          <button type="button" className="dir-breadcrumb-item" onClick={() => fetchDirs()}>
-            /
-          </button>
-          {breadcrumbs.map((seg) => (
-            <span key={seg.path}>
-              <span className="dir-breadcrumb-sep">/</span>
-              <button
-                type="button"
-                className="dir-breadcrumb-item"
-                onClick={() => fetchDirs(seg.path)}
-              >
-                {seg.label}
-              </button>
-            </span>
-          ))}
+        {/* Breadcrumb — a single continuous, uniform-height path bar instead of
+            a row of independent variable-width buttons (which read as
+            "/ / C:" fragments and wrapped). Root "/" is merged into the first
+            segment; long paths collapse with an ellipsis on the left. */}
+        <div className="dir-modal-breadcrumb" data-testid="dir-breadcrumb">
+          <nav className="dir-breadcrumb-trail" aria-label={t("dirBrowser.title")}>
+            {breadcrumbs.length === 0 ? (
+              <span className="dir-breadcrumb-current">/</span>
+            ) : (
+              breadcrumbs.map((seg, i) => {
+                const isLast = i === breadcrumbs.length - 1;
+                return (
+                  <span key={seg.path} className="dir-breadcrumb-seg">
+                    {i > 0 && <span className="dir-breadcrumb-sep" aria-hidden="true">›</span>}
+                    <button
+                      type="button"
+                      className={`dir-breadcrumb-item ${isLast ? "dir-breadcrumb-current" : ""}`}
+                      onClick={() => fetchDirs(seg.path)}
+                      title={seg.path}
+                    >
+                      {seg.label}
+                    </button>
+                  </span>
+                );
+              })
+            )}
+          </nav>
         </div>
 
         {/* Search */}
         <div className="dir-modal-search">
-          <input
-            type="text"
+          <label htmlFor="dir-search-input" className="sr-only">
+            {t("dirBrowser.searchPlaceholder")}
+          </label>
+          <Input
+            id="dir-search-input"
+            type="search"
             className="dir-search-input"
             placeholder={t("dirBrowser.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             data-testid="dir-search-input"
             ref={searchInputRef}
+            aria-label={t("dirBrowser.searchPlaceholder")}
           />
         </div>
 
@@ -236,28 +279,25 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
               <button
                 type="button"
                 key={entry.path}
-                className={`dir-entry ${selected === entry.path ? "dir-entry-selected" : ""}`}
+                className={cn(
+                  "flex w-full items-center gap-2 px-4 py-1.5 text-left text-[13px] transition-colors select-none hover:bg-secondary",
+                  selected === entry.path && "bg-accent text-accent-foreground",
+                )}
                 onClick={() => handleEntryClick(entry)}
                 onDoubleClick={() => handleEntryDoubleClick(entry)}
                 data-testid="dir-entry"
                 data-dir-path={entry.path}
               >
-                <span className="dir-entry-icon">
-                  {entry.name === ".. (上级目录)" ? "⬆" : "📁"}
+                <span className="w-5 shrink-0 text-center text-sm">
+                  {entry.name === ".. (上级目录)" ? (
+                    <FolderUp aria-hidden="true" />
+                  ) : (
+                    <Folder aria-hidden="true" />
+                  )}
                 </span>
-                <span className="dir-entry-name">{entry.name}</span>
+                <span className="dir-entry-name min-w-0 flex-1 truncate">{entry.name}</span>
                 {entry.name !== ".. (上级目录)" && (
-                  <button
-                    type="button"
-                    className="dir-entry-open"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fetchDirs(entry.path);
-                    }}
-                    title={t("dirBrowser.enterDirectory")}
-                  >
-                    ▶
-                  </button>
+                  <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
                 )}
               </button>
             ))}
@@ -275,25 +315,19 @@ export function DirBrowserModal({ open, onConfirm, onCancel }: DirBrowserModalPr
 
         {/* Actions */}
         <div className="dir-modal-actions">
-          <button
-            type="button"
-            className="dir-modal-btn dir-modal-btn-cancel"
-            onClick={onCancel}
-            data-testid="dir-cancel"
-          >
+          <Button type="button" variant="outline" onClick={onCancel} data-testid="dir-cancel">
             {t("dirBrowser.cancel")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="dir-modal-btn dir-modal-btn-confirm"
             disabled={!selected}
             onClick={handleConfirm}
             data-testid="dir-confirm"
           >
             {t("dirBrowser.select")}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
