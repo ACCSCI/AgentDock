@@ -98,7 +98,7 @@ test.describe("session UI flow with long-running hook (repro)", () => {
     // each poll triggers a `useProjects` setQueryData re-render.
     const deleteBtn = card.locator(".session-close");
     await deleteBtn.click();
-    const confirmYes = card.locator(".session-delete-confirm-yes");
+    const confirmYes = window.getByTestId("confirm-delete-ok");
     await confirmYes.click();
 
     // Wait for the card to vanish (worst case ~10 s on Windows when

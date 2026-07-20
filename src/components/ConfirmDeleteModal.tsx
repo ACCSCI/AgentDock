@@ -1,5 +1,15 @@
-import { useEffect } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useTranslation } from "../i18n/react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 
 interface ConfirmDeleteModalProps {
   open: boolean;
@@ -15,58 +25,38 @@ export function ConfirmDeleteModal({
   onCancel,
 }: ConfirmDeleteModalProps) {
   const { t } = useTranslation("modals");
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="dir-modal-overlay"
-      role="presentation"
-      onClick={(event) => event.target === event.currentTarget && onCancel()}
-      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
     >
-      <div className="dir-modal git-init-modal" data-testid="confirm-delete-modal">
-        <div className="dir-modal-header">
-          <div className="dir-modal-header-left">
-            <h3>{t("confirmDelete.title")}</h3>
+      <AlertDialogContent data-testid="confirm-delete-modal">
+        <AlertDialogHeader>
+          <div className="flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <AlertTriangle aria-hidden="true" className="size-4" />
           </div>
-          <button type="button" className="dir-modal-close" onClick={onCancel}>
-            ✕
-          </button>
-        </div>
-
-        <div className="git-init-description">
-          <p>{t("confirmDelete.message", { name: sessionName })}</p>
-          <p>{t("confirmDelete.consequence")}</p>
-        </div>
-
-        <div className="dir-modal-actions">
-          <button
-            type="button"
-            className="dir-modal-btn dir-modal-btn-cancel"
-            onClick={onCancel}
-            data-testid="confirm-delete-cancel"
-          >
+          <AlertDialogTitle>{t("confirmDelete.title")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("confirmDelete.message", { name: sessionName })}
+            <br />
+            {t("confirmDelete.consequence")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="confirm-delete-cancel">
             {t("confirmDelete.cancel")}
-          </button>
-          <button
-            type="button"
-            className="dir-modal-btn dir-modal-btn-confirm dir-modal-btn-danger"
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-white hover:bg-destructive/90"
             onClick={onConfirm}
             data-testid="confirm-delete-ok"
           >
             {t("confirmDelete.delete")}
-          </button>
-        </div>
-      </div>
-    </div>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

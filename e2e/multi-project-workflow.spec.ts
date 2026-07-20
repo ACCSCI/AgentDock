@@ -108,12 +108,12 @@ test.describe("multi-project workflow", () => {
     await tabBar.switchTo(projectIdA!);
     await expect(sidebar.sidebar).toBeVisible({ timeout: 10_000 });
     const tabAEl = tabBar.tab(projectIdA!);
-    await expect(tabAEl).toHaveAttribute("aria-selected", "true");
+    await expect(tabAEl.locator(".tab-select")).toHaveAttribute("aria-current", "page");
 
     // 9. Switch to project B, verify tab is active.
     await tabBar.switchTo(projectIdB!);
     const tabBEl = tabBar.tab(projectIdB!);
-    await expect(tabBEl).toHaveAttribute("aria-selected", "true");
+    await expect(tabBEl.locator(".tab-select")).toHaveAttribute("aria-current", "page");
 
     // 10. Both tabs still exist.
     await expect.poll(() => allTabs.count()).toBeGreaterThanOrEqual(2);

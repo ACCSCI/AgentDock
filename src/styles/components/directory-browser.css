@@ -85,14 +85,31 @@
 .dir-modal-breadcrumb {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   padding: 8px 16px;
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border-light);
   font-size: 12px;
-  gap: 2px;
   flex-shrink: 0;
   min-height: 36px;
+}
+
+/* Continuous, uniform-height path bar. Segments share one rhythm; long
+ * paths scroll/ellipsis instead of wrapping into a ragged second line. */
+.dir-breadcrumb-trail {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+
+.dir-breadcrumb-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 }
 
 .dir-breadcrumb-item {
@@ -100,18 +117,39 @@
   border: none;
   cursor: pointer;
   font-size: 12px;
-  color: var(--color-primary);
+  font-family: inherit;
+  color: var(--color-text-secondary);
   padding: 2px 4px;
   border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+  transition: background 0.12s, color 0.12s;
 }
 
 .dir-breadcrumb-item:hover {
   background: var(--color-bg-tertiary);
+  color: var(--color-primary);
+}
+
+/* The final (current) segment is not a link — it's the location label. */
+.dir-breadcrumb-current,
+.dir-breadcrumb-item.dir-breadcrumb-current {
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.dir-breadcrumb-item.dir-breadcrumb-current:hover {
+  background: none;
+  color: var(--color-text);
 }
 
 .dir-breadcrumb-sep {
   color: var(--color-text-secondary);
-  opacity: 0.5;
+  opacity: 0.45;
+  flex-shrink: 0;
 }
 
 /* Search */
@@ -243,7 +281,6 @@
 
 .dir-modal-selected-empty {
   color: var(--color-text-secondary);
-  opacity: 0.6;
   font-size: 12px;
 }
 

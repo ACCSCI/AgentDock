@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>AgentDock 色彩方案预览</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #888;
+    padding: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .row { display: flex; gap: 20px; margin-bottom: 20px; }
+  .panel {
+    flex: 1;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.25);
+  }
+  .panel h1 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .panel .sub { font-size: 11px; opacity: .65; margin-bottom: 16px; }
+  .scheme-label { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 10px; }
+
+  /* swatches */
+  .swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+  .sw { border-radius: 8px; padding: 8px; font-size: 10px; }
+  .sw .chip { height: 34px; border-radius: 5px; margin-bottom: 5px; border: 1px solid rgba(0,0,0,.08); }
+  .sw .nm { font-weight: 600; }
+  .sw .hex { opacity: .6; font-family: ui-monospace, monospace; font-size: 9px; }
+
+  /* component demos */
+  .demo-title { font-size: 11px; font-weight: 700; opacity: .6; margin: 14px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; cursor: pointer; border-radius: 7px; font-size: 12.5px; font-weight: 500; padding: 7px 14px; border: 1px solid transparent; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid; font-family: ui-monospace, monospace; }
+  .card { border-radius: 9px; padding: 11px 12px; margin-bottom: 7px; display: flex; align-items: center; gap: 9px; border: 1px solid; font-size: 12.5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .statusrow { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; align-items: center; }
+  .statusrow span { display: inline-flex; align-items: center; gap: 5px; }
+
+  /* ============ SCHEME 1 (保守: 保留玫红 + 独立危险红 + 信息蓝) ============ */
+  .s1-light { --bg:#FAFAFB; --card:#FFFFFF; --fg:#1B1B22; --muted:#5A5A66; --border:#DDDDE3;
+    --primary:#C62A45; --primary-fg:#FFFFFF; --destructive:#D92D20; --info:#356AE6; --success:#16A34A; --warning:#D97706;
+    background: var(--bg); color: var(--fg); }
+  .s1-dark { --bg:#16171B; --card:#1E2025; --fg:#EDEDF0; --muted:#9A9CA6; --border:#33363E;
+    --primary:#F0566E; --primary-fg:#1A0E12; --destructive:#F04438; --info:#5B8DEF; --success:#4ADE80; --warning:#FBBF24;
+    background: var(--bg); color: var(--fg); }
+
+  /* ============ SCHEME 2 (review 清单六角色) ============ */
+  .s2-light { --bg:#F6F7F9; --card:#FFFFFF; --fg:#17181D; --muted:#5C6068; --border:#E2E4E8;
+    --primary:#D43853; --primary-fg:#FFFFFF; --destructive:#D9462F; --info:#356AE6; --success:#15803D; --warning:#B45309;
+    background: var(--bg); color: var(--fg); }
+  .s2-dark { --bg:#141519; --card:#1C1E23; --fg:#ECEDEF; --muted:#9698A0; --border:#31343C;
+    --primary:#F0566E; --primary-fg:#1A0E12; --destructive:#F0654A; --info:#5B8DEF; --success:#4ADE80; --warning:#FBBF24;
+    background: var(--bg); color: var(--fg); }
+
+  .btn-primary { background: var(--primary); color: var(--primary-fg); }
+  .btn-danger { background: var(--destructive); color: #fff; }
+  .btn-outline { background: transparent; color: var(--fg); border-color: var(--border); }
+  .btn-info { background: var(--info); color: #fff; }
+  .b-port { color: var(--muted); border-color: var(--primary); background: transparent; }
+  .b-ok { color: var(--success); border-color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); }
+  .b-err { color: var(--destructive); border-color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, transparent); }
+  .card { background: var(--card); border-color: var(--border); color: var(--fg); }
+  .card .path { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+  .card-active { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+  .d-ok { background: var(--success); } .d-err { background: var(--destructive); }
+  .d-info { background: var(--info); } .d-warn { background: var(--warning); }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="row" id="row1">
+  <!-- FINAL LIGHT: primary #C62A45 + destructive #D92D20 + bg #F6F7F9 + info #356AE6 -->
+  <div class="panel s1-light" data-scheme="1" data-mode="light" style="--bg:#F6F7F9">
+    <div class="scheme-label" style="color:var(--primary)">最终方案 · 浅色</div>
+    <h1>收敛玫瑰 + 正红 + 信息蓝 + Canvas 灰</h1>
+    <div class="sub">背景 #F6F7F9 ／ 主色 #C62A45 ／ 危险 #D92D20 ／ 信息 #356AE6</div>
+    <div class="swatches"></div>
+    <div class="demo-title">按钮</div>
+    <div class="btnrow">
+      <button class="btn-primary">打开项目</button>
+      <button class="btn-danger">删除</button>
+      <button class="btn-info">查看日志</button>
+      <button class="btn-outline">取消</button>
+    </div>
+    <div class="demo-title">端口 / 状态徽章</div>
+    <div class="badges">
+      <span class="badge b-port">FRONTEND:30000</span>
+      <span class="badge b-ok">ready</span>
+      <span class="badge b-err">failed</span>
+    </div>
+    <div class="demo-title">Session 卡片</div>
+    <div class="card card-active"><span class="dot d-ok"></span><div>feat/login-retry<div class="path">…\worktrees\528fb9fe</div></div></div>
+    <div class="card"><span class="dot d-info"></span><div>hotfix/webhook<div class="path">…\worktrees\a1c2d3e4</div></div></div>
+    <div class="demo-title">状态</div>
+    <div class="statusrow">
+      <span><span class="dot d-ok"></span>运行中</span>
+      <span><span class="dot d-warn"></span>重连中</span>
+      <span><span class="dot d-err"></span>失败</span>
+      <span><span class="dot d-info"></span>信息</span>
+    </div>
+  </div>
+
+  <!-- FINAL DARK -->
+  <div class="panel s1-dark" data-scheme="1" data-mode="dark">
+    <div class="scheme-label" style="color:var(--primary)">最终方案 · 深色</div>
+    <h1>收敛玫瑰 + 正红 + 信息蓝（深色提亮）</h1>
+    <div class="sub">主色 #F0566E ／ 危险 #F04438 ／ 信息 #5B8DEF</div>
+    <div class="swatches"></div>
+    <div class="demo-title">按钮</div>
+    <div class="btnrow">
+      <button class="btn-primary">打开项目</button>
+      <button class="btn-danger">删除</button>
+      <button class="btn-info">查看日志</button>
+      <button class="btn-outline">取消</button>
+    </div>
+    <div class="demo-title">端口 / 状态徽章</div>
+    <div class="badges">
+      <span class="badge b-port">FRONTEND:30000</span>
+      <span class="badge b-ok">ready</span>
+      <span class="badge b-err">failed</span>
+    </div>
+    <div class="demo-title">Session 卡片</div>
+    <div class="card card-active"><span class="dot d-ok"></span><div>feat/login-retry<div class="path">…\worktrees\528fb9fe</div></div></div>
+    <div class="card"><span class="dot d-info"></span><div>hotfix/webhook<div class="path">…\worktrees\a1c2d3e4</div></div></div>
+    <div class="demo-title">状态</div>
+    <div class="statusrow">
+      <span><span class="dot d-ok"></span>运行中</span>
+      <span><span class="dot d-warn"></span>重连中</span>
+      <span><span class="dot d-err"></span>失败</span>
+      <span><span class="dot d-info"></span>信息</span>
+    </div>
+  </div>
+</div>
+
+<div class="row" id="row2" style="display:none">
+  <!-- SCHEME 2 LIGHT -->
+  <div class="panel s2-light" data-scheme="2" data-mode="light">
+    <div class="scheme-label" style="color:var(--primary)">方案 2 · 浅色（review 六角色）</div>
+    <h1>Signal Rose + Process Blue + Danger</h1>
+    <div class="sub">Canvas #F6F7F9 ／ Rose #D43853 ／ Blue #356AE6 ／ Danger #D9462F</div>
+    <div class="swatches"></div>
+    <div class="demo-title">按钮</div>
+    <div class="btnrow">
+      <button class="btn-primary">打开项目</button>
+      <button class="btn-danger">删除</button>
+      <button class="btn-info">查看日志</button>
+      <button class="btn-outline">取消</button>
+    </div>
+    <div class="demo-title">端口 / 状态徽章</div>
+    <div class="badges">
+      <span class="badge b-port">FRONTEND:30000</span>
+      <span class="badge b-ok">ready</span>
+      <span class="badge b-err">failed</span>
+    </div>
+    <div class="demo-title">Session 卡片</div>
+    <div class="card card-active"><span class="dot d-ok"></span><div>feat/login-retry<div class="path">…\worktrees\528fb9fe</div></div></div>
+    <div class="card"><span class="dot d-info"></span><div>hotfix/webhook<div class="path">…\worktrees\a1c2d3e4</div></div></div>
+    <div class="demo-title">状态</div>
+    <div class="statusrow">
+      <span><span class="dot d-ok"></span>运行中</span>
+      <span><span class="dot d-warn"></span>重连中</span>
+      <span><span class="dot d-err"></span>失败</span>
+      <span><span class="dot d-info"></span>信息</span>
+    </div>
+  </div>
+
+  <!-- SCHEME 2 DARK -->
+  <div class="panel s2-dark" data-scheme="2" data-mode="dark">
+    <div class="scheme-label" style="color:var(--primary)">方案 2 · 深色</div>
+    <h1>Signal Rose + Process Blue + Danger</h1>
+    <div class="sub">Rose #F0566E ／ Blue #5B8DEF ／ Danger #F0654A</div>
+    <div class="swatches"></div>
+    <div class="demo-title">按钮</div>
+    <div class="btnrow">
+      <button class="btn-primary">打开项目</button>
+      <button class="btn-danger">删除</button>
+      <button class="btn-info">查看日志</button>
+      <button class="btn-outline">取消</button>
+    </div>
+    <div class="demo-title">端口 / 状态徽章</div>
+    <div class="badges">
+      <span class="badge b-port">FRONTEND:30000</span>
+      <span class="badge b-ok">ready</span>
+      <span class="badge b-err">failed</span>
+    </div>
+    <div class="demo-title">Session 卡片</div>
+    <div class="card card-active"><span class="dot d-ok"></span><div>feat/login-retry<div class="path">…\worktrees\528fb9fe</div></div></div>
+    <div class="card"><span class="dot d-info"></span><div>hotfix/webhook<div class="path">…\worktrees\a1c2d3e4</div></div></div>
+    <div class="demo-title">状态</div>
+    <div class="statusrow">
+      <span><span class="dot d-ok"></span>运行中</span>
+      <span><span class="dot d-warn"></span>重连中</span>
+      <span><span class="dot d-err"></span>失败</span>
+      <span><span class="dot d-info"></span>信息</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Populate swatches for each panel from its own computed tokens.
+  const NAMES = [
+    ["--bg","背景"],["--card","表面"],["--fg","文字"],["--muted","次要"],
+    ["--border","边框"],["--primary","主色"],["--destructive","危险"],
+    ["--info","信息"],["--success","成功"],["--warning","警告"],
+  ];
+  document.querySelectorAll(".panel").forEach(panel => {
+    const cs = getComputedStyle(panel);
+    const box = panel.querySelector(".swatches");
+    NAMES.forEach(([v, label]) => {
+      const val = cs.getPropertyValue(v).trim();
+      const cell = document.createElement("div");
+      cell.className = "sw";
+      cell.style.background = "color-mix(in srgb, " + val + " 8%, transparent)";
+      cell.innerHTML = `<div class="chip" style="background:${val}"></div><div class="nm">${label}</div><div class="hex">${v}</div>`;
+      box.appendChild(cell);
+    });
+  });
+</script>
+</body>
+</html>

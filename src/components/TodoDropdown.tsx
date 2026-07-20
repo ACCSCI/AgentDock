@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "../i18n/react";
@@ -9,6 +11,8 @@ import {
   useTodos,
   useUpdateTodo,
 } from "../lib/queries";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 interface TodoDropdownProps {
   projectId: string | null;
@@ -223,21 +227,25 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
 
   return (
     <>
-      <div ref={dropdownRef} className="todo-dropdown" data-testid="todo-dropdown">
-        <div className="todo-dropdown-header">
-          <span className="todo-dropdown-title">{t("todo")}</span>
+      <div
+        ref={dropdownRef}
+        className="fixed top-9 right-3 z-50 flex max-h-[400px] w-[280px] flex-col overflow-hidden rounded-md border border-border bg-background shadow-[0_8px_32px_rgba(0,0,0,0.15)] animate-in fade-in duration-100"
+        data-testid="todo-dropdown"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
+          <span className="text-[13px] font-semibold text-foreground">{t("todo")}</span>
           {todos.length > 0 && (
-            <span className="todo-dropdown-count">
+            <span className="rounded-lg bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">
               {doneCount}/{todos.length}
             </span>
           )}
         </div>
 
-        <div className="todo-dropdown-input-row">
-          <input
+        <div className="flex shrink-0 gap-1 border-b border-border px-3 py-2">
+          <Input
             ref={inputRef}
             type="text"
-            className="todo-dropdown-input"
+            className="h-7 flex-1 rounded-sm px-2 text-xs"
             placeholder={projectId ? t("addTask") : t("openProjectFirst")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -245,37 +253,38 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
             disabled={!projectId}
             data-testid="todo-input"
           />
-          <button
+          <Button
             type="button"
-            className="todo-dropdown-add-btn"
+            size="icon-sm"
             onClick={handleCreate}
             disabled={!projectId || !input.trim()}
             data-testid="todo-add-btn"
+            aria-label={t("addTask")}
           >
-            +
-          </button>
+            <Plus aria-hidden="true" />
+          </Button>
         </div>
 
-        <div ref={listRef} className="todo-dropdown-list" data-testid="todo-list">
+        <div
+          ref={listRef}
+          className="max-h-[300px] min-h-[60px] flex-1 overflow-y-auto"
+          data-testid="todo-list"
+        >
           {todos.length === 0 && (
-            <div className="todo-dropdown-empty">
+            <div className="px-3 py-5 text-center text-xs text-muted-foreground">
               {projectId ? t("noTasks") : t("openProjectToAddTasks")}
             </div>
           )}
           {todos.map((todo) => (
             <div
               key={todo.id}
-              className={[
-                "todo-dropdown-item",
-                todo.status === "done" ? "todo-dropdown-item--done" : "",
-                todo.status === "in_progress" ? "todo-dropdown-item--in-progress" : "",
-                todo.status === "pending" ? "todo-dropdown-item--pending" : "",
-                dragId === todo.id ? "todo-dropdown-item--dragging" : "",
-                dragOverId === todo.id ? "todo-dropdown-item--drag-over" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+              className={cn(
+                "group flex items-center gap-2 px-3 py-1.5 transition-colors hover:bg-secondary",
+                dragId === todo.id && "opacity-40",
+                dragOverId === todo.id && "border-t-2 border-primary",
+              )}
               data-testid="todo-item"
+              data-dragging={dragId === todo.id || undefined}
               draggable={false}
               onDragOver={(e) => handleDragOver(e, todo.id)}
               onDragLeave={handleDragLeave}
@@ -283,17 +292,22 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               onDragEnd={handleDragEnd}
             >
               <span
-                className="todo-dropdown-drag-handle"
+                className="w-3.5 shrink-0 cursor-grab select-none text-center text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:text-primary group-data-[dragging]:cursor-grabbing"
                 title={t("dragToReorder")}
                 draggable
                 onDragStart={(e) => handleDragStart(e, todo.id)}
               >
-                ⠿
+                <GripVertical aria-hidden="true" />
               </span>
 
               <button
                 type="button"
-                className={`todo-dropdown-checkbox todo-dropdown-checkbox--${todo.status}`}
+                className={cn(
+                  "w-5 shrink-0 cursor-pointer border-none bg-transparent p-0 text-center text-sm leading-none transition-colors",
+                  todo.status === "pending" && "text-muted-foreground",
+                  todo.status === "in_progress" && "text-success",
+                  todo.status === "done" && "text-destructive",
+                )}
                 onClick={() => handleCycleStatus(todo.id)}
                 title={
                   todo.status === "pending"
@@ -310,10 +324,10 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
               </button>
 
               {editingId === todo.id ? (
-                <input
+                <Input
                   ref={editInputRef}
                   type="text"
-                  className="todo-dropdown-edit-input"
+                  className="h-[22px] flex-1 rounded-sm border-primary px-1.5 text-xs"
                   value={editingContent}
                   onChange={(e) => setEditingContent(e.target.value)}
                   onBlur={handleEditSave}
@@ -322,7 +336,11 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
                 />
               ) : (
                 <span
-                  className="todo-dropdown-item-text"
+                  className={cn(
+                    "todo-dropdown-item-text flex-1 cursor-default select-none overflow-hidden text-ellipsis whitespace-nowrap text-xs text-foreground transition-colors [scrollbar-width:none] group-hover:overflow-x-auto group-hover:text-clip group-hover:[scrollbar-width:thin]",
+                    todo.status === "done" && "line-through opacity-50",
+                    todo.status === "in_progress" && "text-success",
+                  )}
                   onDoubleClick={() => handleDoubleClick(todo.id, todo.content)}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -335,20 +353,29 @@ export function TodoDropdown({ projectId, onClose }: TodoDropdownProps) {
                 </span>
               )}
 
-              <button
+              <Button
                 type="button"
-                className="todo-dropdown-delete-btn"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 px-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-transparent hover:text-destructive"
                 onClick={() => handleDelete(todo.id)}
                 title={t("delete")}
                 data-testid="todo-delete-btn"
+                aria-label={t("delete")}
               >
-                ×
-              </button>
+                <Trash2 aria-hidden="true" />
+              </Button>
             </div>
           ))}
         </div>
       </div>
-      {toast && createPortal(<div className="todo-toast">{toast}</div>, document.body)}
+      {toast &&
+        createPortal(
+          <div className="pointer-events-none fixed top-10 right-4 z-[9999] rounded-md bg-popover px-4 py-1.5 text-xs text-popover-foreground shadow-[0_4px_12px_rgba(0,0,0,0.2)] animate-in slide-in-from-right-1.5 fade-in duration-150">
+            {toast}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

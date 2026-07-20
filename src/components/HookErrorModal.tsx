@@ -1,5 +1,9 @@
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useState } from "react";
 import { type HookError, useHookErrors, useRetryHook } from "../lib/queries";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface HookErrorModalProps {
   sessionId: string;
@@ -10,45 +14,65 @@ function ErrorCard({ error, index }: { error: HookError; index: number }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className={`hook-error-card ${expanded ? "hook-error-card-expanded" : ""}`}>
+    <div className="overflow-hidden rounded-sm border border-border">
       <button
         type="button"
-        className="hook-error-card-header"
+        className="flex w-full cursor-pointer items-center gap-2 bg-secondary px-3 py-2.5 text-left text-[13px] text-foreground transition-colors hover:bg-muted"
         onClick={() => setExpanded((v) => !v)}
       >
-        <span className="hook-error-card-arrow">{expanded ? "▼" : "▶"}</span>
-        <span className="hook-error-card-index">{index + 1}.</span>
-        <code className="hook-error-card-command">{error.run}</code>
-        <span className="hook-error-card-exit">
+        <span className="w-3 shrink-0 text-center text-muted-foreground">
+          {expanded ? (
+            <ChevronDown aria-hidden="true" className="size-3" />
+          ) : (
+            <ChevronRight aria-hidden="true" className="size-3" />
+          )}
+        </span>
+        <span className="shrink-0 text-muted-foreground">{index + 1}.</span>
+        <code className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[13px] text-foreground">
+          {error.run}
+        </code>
+        <Badge variant="destructive" className="shrink-0">
           {error.timedOut
             ? "⏱ 超时"
             : error.exitCode !== null && error.exitCode !== undefined
               ? `exit ${error.exitCode}`
               : "失败"}
-        </span>
+        </Badge>
       </button>
       {expanded && (
-        <div className="hook-error-card-body">
+        <div className="flex flex-col gap-2 border-t border-border bg-background p-3">
           {error.error && (
-            <div className="hook-error-section">
-              <div className="hook-error-section-label">Error</div>
-              <pre className="hook-error-pre">{error.error}</pre>
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Error
+              </div>
+              <pre className="m-0 max-h-[200px] overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-popover p-2.5 font-mono text-xs leading-normal text-popover-foreground">
+                {error.error}
+              </pre>
             </div>
           )}
           {error.stderr && (
-            <div className="hook-error-section">
-              <div className="hook-error-section-label">stderr</div>
-              <pre className="hook-error-pre hook-error-pre-stderr">{error.stderr}</pre>
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                stderr
+              </div>
+              <pre className="m-0 max-h-[200px] overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-destructive-bg p-2.5 font-mono text-xs leading-normal text-destructive-text">
+                {error.stderr}
+              </pre>
             </div>
           )}
           {error.stdout && (
-            <div className="hook-error-section">
-              <div className="hook-error-section-label">stdout</div>
-              <pre className="hook-error-pre">{error.stdout}</pre>
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                stdout
+              </div>
+              <pre className="m-0 max-h-[200px] overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-popover p-2.5 font-mono text-xs leading-normal text-popover-foreground">
+                {error.stdout}
+              </pre>
             </div>
           )}
           {!error.stderr && !error.stdout && !error.error && (
-            <div className="hook-error-empty">（无输出）</div>
+            <div className="py-2 text-[13px] italic text-muted-foreground">（无输出）</div>
           )}
         </div>
       )}
@@ -82,19 +106,20 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
   }, [sessionId, retryMutation, onClose]);
 
   return (
-    <div
-      className="hook-error-overlay"
-      role="presentation"
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-      onKeyDown={(event) => event.key === "Escape" && onClose()}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
     >
-      <div className="hook-error-modal">
-        <div className="hook-error-modal-header">
-          <h3>⚠ 环境初始化失败</h3>
-          <button type="button" className="hook-error-modal-close" onClick={onClose}>
-            ✕
-          </button>
-        </div>
+      <DialogContent className="max-w-3xl gap-0 p-0">
+        <DialogHeader className="border-b border-border p-5">
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle aria-hidden="true" className="size-4 text-destructive" />
+            环境初始化失败
+          </DialogTitle>
+          <DialogDescription>查看失败钩子的输出，修复后可以重新运行。</DialogDescription>
+        </DialogHeader>
 
         <div className="hook-error-modal-body">
           {isLoading && <ErrorSkeleton />}
@@ -112,12 +137,7 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
               </p>
               <div className="hook-error-list">
                 {errors.map((err, i) => (
-                  <ErrorCard
-                    // biome-ignore lint/suspicious/noArrayIndexKey: hook error records have no persisted identity and duplicate commands are valid.
-                    key={i}
-                    error={err}
-                    index={i}
-                  />
+                  <ErrorCard key={`${err.run}-${err.exitCode}-${i}`} error={err} index={i} />
                 ))}
               </div>
             </>
@@ -125,19 +145,19 @@ export function HookErrorModal({ sessionId, onClose }: HookErrorModalProps) {
         </div>
 
         <div className="hook-error-modal-footer">
-          <button type="button" className="hook-error-btn hook-error-btn-close" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             关闭
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             className="hook-error-btn hook-error-btn-retry"
             onClick={handleRetry}
             disabled={retrying}
           >
             {retrying ? "重试中..." : "重试所有失败钩子"}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

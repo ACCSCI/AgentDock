@@ -98,12 +98,12 @@ test.describe("tab management", () => {
     await expect(sidebar.sidebar).toBeVisible({ timeout: 5_000 });
     // Verify A tab is now active.
     const tabAEl = tabBar.tab(projectIdA!);
-    await expect(tabAEl).toHaveAttribute("aria-selected", "true");
+    await expect(tabAEl.locator(".tab-select")).toHaveAttribute("aria-current", "page");
 
     // 5. Switch back to B.
     await tabBar.switchTo(projectIdB!);
     const tabBEl = tabBar.tab(projectIdB!);
-    await expect(tabBEl).toHaveAttribute("aria-selected", "true");
+    await expect(tabBEl.locator(".tab-select")).toHaveAttribute("aria-current", "page");
 
     // 6. Close tab B.
     await tabBar.closeTabFor(projectIdB!);
@@ -114,7 +114,7 @@ test.describe("tab management", () => {
 
     // A's tab should still be visible and active.
     await expect(tabA).toBeVisible();
-    await expect(tabA).toHaveAttribute("aria-selected", "true");
+    await expect(tabA.locator(".tab-select")).toHaveAttribute("aria-current", "page");
 
     // 7. Re-open project B via "+".
     await tabBar.openProjectViaPlusButton();

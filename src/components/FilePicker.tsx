@@ -1,6 +1,12 @@
+import { ChevronLeft, Folder, FolderOpen } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useProjectFiles, type FileEntry } from "../lib/queries";
 import { useTranslation } from "../i18n/react";
-import { type FileEntry, useProjectFiles } from "../lib/queries";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
 
 interface FilePickerProps {
   open: boolean;
@@ -80,7 +86,6 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   }, []);
 
   // Restore scroll position when data for the new directory is ready
-  // biome-ignore lint/correctness/useExhaustiveDependencies: entries changing means the directory listing has finished refreshing and its scroll position can be restored.
   useLayoutEffect(() => {
     if (!isLoading && listRef.current) {
       const saved = scrollPositions.current.get(currentPath);
@@ -93,40 +98,37 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
   // Breadcrumb segments
   const breadcrumbs = currentPath ? currentPath.split("/").filter(Boolean) : [];
 
-  if (!open) return null;
-
   return (
-    <div
-      className="file-picker-overlay"
-      role="presentation"
-      onClick={(event) => event.target === event.currentTarget && onCancel()}
-      onKeyDown={(event) => event.key === "Escape" && onCancel()}
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
+      modal={true}
     >
-      <div className="file-picker-modal">
-        <div className="file-picker-header">
-          <h3>{t("filePicker.title")}</h3>
-          <button type="button" className="file-picker-close" onClick={onCancel}>
-            ×
-          </button>
+      <DialogContent className="max-w-xl gap-0 p-0">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3 pr-12">
+          <DialogTitle>{t("filePicker.title")}</DialogTitle>
         </div>
 
         {/* Breadcrumb navigation */}
-        <div className="file-picker-breadcrumb">
+        <div className="flex flex-wrap items-center gap-0.5 border-b border-border px-4 py-2 text-[13px]">
           <button
             type="button"
-            className="file-picker-breadcrumb-item"
+            className="rounded-sm px-1 py-0.5 text-[13px] text-primary hover:bg-accent"
             onClick={() => goToPath("")}
           >
-            📁 项目根目录
+            <Folder className="mr-1 inline size-3.5" aria-hidden="true" />
+            项目根目录
           </button>
           {breadcrumbs.map((seg, i) => {
             const segPath = breadcrumbs.slice(0, i + 1).join("/");
             return (
               <span key={segPath}>
-                <span className="file-picker-breadcrumb-sep">/</span>
+                <span className="text-xs text-muted-foreground">/</span>
                 <button
                   type="button"
-                  className="file-picker-breadcrumb-item"
+                  className="rounded-sm px-1 py-0.5 text-[13px] text-primary hover:bg-accent"
                   onClick={() => goToPath(segPath)}
                 >
                   {seg}
@@ -137,78 +139,91 @@ export function FilePicker({ open, projectId, onConfirm, onCancel }: FilePickerP
         </div>
 
         {/* Search */}
-        <div className="file-picker-search">
-          <input
+        <div className="border-b border-border px-4 py-2">
+          <Input
             type="text"
             placeholder={t("filePicker.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label={t("filePicker.searchPlaceholder")}
           />
         </div>
 
         {/* File list */}
-        <div className="file-picker-list" ref={listRef} onScroll={handleScroll}>
+        <div
+          className="max-h-[400px] min-h-[200px] flex-1 overflow-y-auto"
+          ref={listRef}
+          onScroll={handleScroll}
+        >
           {isLoading ? (
-            <div className="file-picker-loading">{t("loading", { ns: "common" })}</div>
+            <div className="flex h-[120px] items-center justify-center text-[13px] text-muted-foreground">
+              {t("loading", { ns: "common" })}
+            </div>
           ) : displayEntries.length === 0 ? (
-            <div className="file-picker-empty">{t("noMatch", { ns: "common" })}</div>
+            <div className="flex h-[120px] items-center justify-center text-[13px] text-muted-foreground">
+              {t("noMatch", { ns: "common" })}
+            </div>
           ) : (
             displayEntries.map((entry) => (
-              <button
-                type="button"
+              <div
                 key={entry.path}
-                className={`file-picker-entry ${selected === entry.path ? "file-picker-entry-selected" : ""}`}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 px-4 py-2 transition-colors hover:bg-secondary",
+                  selected === entry.path && "bg-accent hover:bg-accent",
+                )}
                 onClick={() => handleNavigate(entry)}
                 onDoubleClick={() => {
                   if (!entry.isDir) onConfirm(entry.path);
                 }}
               >
-                <span className="file-picker-entry-icon">{entry.isDir ? "📁" : "📄"}</span>
-                <span className="file-picker-entry-name">{entry.name}</span>
-              </button>
+                <span className="shrink-0 text-base">
+                  {entry.isDir ? "📁" : "📄"}
+                </span>
+                <span className="flex-1 truncate text-[13px]">{entry.name}</span>
+                {entry.status !== "untracked" ? (
+                  <Badge variant="success" className="shrink-0">
+                    已跟踪
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="shrink-0">
+                    未跟踪
+                  </Badge>
+                )}
+              </div>
             ))
           )}
         </div>
 
         {/* Footer */}
-        <div className="file-picker-footer">
+        <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
           {currentPath && (
             <>
-              <button
-                type="button"
-                className="file-picker-btn file-picker-btn-back"
-                onClick={handleBack}
-              >
-                ← 返回上级
-              </button>
-              <button
-                type="button"
-                className="file-picker-btn file-picker-btn-select-dir"
-                onClick={handleSelectDir}
-              >
-                📁 选择此目录
-              </button>
+              <Button type="button" variant="secondary" size="sm" onClick={handleBack}>
+                <ChevronLeft aria-hidden="true" />
+                返回上级
+              </Button>
+              <Button type="button" variant="default" size="sm" onClick={handleSelectDir}>
+                <FolderOpen aria-hidden="true" />
+                选择此目录
+              </Button>
             </>
           )}
-          <div className="file-picker-footer-right">
-            <button
-              type="button"
-              className="file-picker-btn file-picker-btn-cancel"
-              onClick={onCancel}
-            >
+          <div className="ml-auto flex gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
               {t("filePicker.cancel")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="file-picker-btn file-picker-btn-confirm"
+              variant="default"
+              size="sm"
               disabled={!selected}
               onClick={handleConfirm}
             >
               {t("filePicker.select")}
-            </button>
+            </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -105,7 +105,11 @@ function getMainEntry(): Promise<string> {
   if (buildOnce) return buildOnce;
   buildOnce = (async () => {
     try {
-      execSync("bunx electron-vite build", { cwd: ROOT, stdio: "pipe" });
+      execSync("bunx electron-vite build", {
+        cwd: ROOT,
+        stdio: "pipe",
+        env: { ...process.env, FRONTEND_PORT: "5173" },
+      });
     } catch (err) {
       const out = err instanceof Error ? err.message : String(err);
       throw new Error(`electron-vite build failed: ${out}`);

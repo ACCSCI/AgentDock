@@ -3,10 +3,11 @@ resources:
   sync: []
 hooks:
   afterCreateSession:
-    - run: "bun i --ignore-scripts"
+    - run: bun i --ignore-scripts
       required: false
       timeout: 60000
       cwd: worktree
+      async: false
 env:
   ports:
     - FRONTEND_PORT

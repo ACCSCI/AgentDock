@@ -1,8 +1,10 @@
-import { useTranslation } from "../i18n/react";
+import { Minus, Plus } from "lucide-react";
 import { useStore } from "../lib/store";
-import { TERMINAL_FONT_FAMILIES, TERMINAL_FONT_SIZES } from "../lib/store";
+import { TERMINAL_FONT_SIZES, TERMINAL_FONT_FAMILIES } from "../lib/store";
 import type { TerminalPreferences } from "../lib/store";
 import { terminalCache } from "../lib/terminal-cache";
+import { useTranslation } from "../i18n/react";
+import { Button } from "./ui/button";
 
 export function TerminalSettingsBar() {
   const { t } = useTranslation("terminal");
@@ -26,40 +28,47 @@ export function TerminalSettingsBar() {
     update({ fontFamily: e.target.value });
   };
 
+  const atMin = terminalPrefs.fontSize <= TERMINAL_FONT_SIZES[0];
+  const atMax = terminalPrefs.fontSize >= TERMINAL_FONT_SIZES[TERMINAL_FONT_SIZES.length - 1];
+
   return (
-    <div className="terminal-settings-bar">
-      <div className="terminal-settings-group">
-        <span className="terminal-settings-label">{t("fontSize")}</span>
-        <button
+    <div className="flex h-9 shrink-0 items-center gap-4 border-b border-border bg-background px-2.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">{t("fontSize")}</span>
+        <Button
           type="button"
-          className="terminal-settings-stepper"
+          variant="outline"
+          size="icon-sm"
           onClick={() => cycleFontSize(-1)}
-          disabled={terminalPrefs.fontSize <= TERMINAL_FONT_SIZES[0]}
+          disabled={atMin}
           title={t("decreaseFontSize")}
+          aria-label={t("decreaseFontSize")}
         >
-          −
-        </button>
-        <span className="terminal-settings-value">{terminalPrefs.fontSize}</span>
-        <button
+          <Minus aria-hidden="true" />
+        </Button>
+        <span className="min-w-6 text-center font-mono text-xs tabular-nums text-foreground">
+          {terminalPrefs.fontSize}
+        </span>
+        <Button
           type="button"
-          className="terminal-settings-stepper"
+          variant="outline"
+          size="icon-sm"
           onClick={() => cycleFontSize(1)}
-          disabled={terminalPrefs.fontSize >= TERMINAL_FONT_SIZES[TERMINAL_FONT_SIZES.length - 1]}
+          disabled={atMax}
           title={t("increaseFontSize")}
+          aria-label={t("increaseFontSize")}
         >
-          +
-        </button>
+          <Plus aria-hidden="true" />
+        </Button>
       </div>
 
-      <div className="terminal-settings-group">
-        <label className="terminal-settings-label" htmlFor="terminal-font-family">
-          Font
-        </label>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Font</span>
         <select
-          id="terminal-font-family"
-          className="terminal-settings-select"
+          className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
           value={terminalPrefs.fontFamily}
           onChange={handleFontFamilyChange}
+          aria-label="Terminal font family"
         >
           {TERMINAL_FONT_FAMILIES.map((f) => (
             <option key={f.value} value={f.value}>

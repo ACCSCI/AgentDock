@@ -36,6 +36,18 @@ export interface SessionManager {
   getSession(sessionId: string): SessionInfo | null;
   listSessions(): SessionInfo[];
   reassignPorts(sessionId: string): Promise<SessionPorts>;
+  /**
+   * Re-register an existing session's ports (read back from the DB) into the
+   * pool + in-memory map. Called on startup / project sync so the in-memory
+   * pool knows which ports are already taken — otherwise a fresh pool would
+   * hand out the same ports again (the "two sessions share :30000" bug).
+   */
+  restoreSession(params: {
+    sessionId: string;
+    projectPath: string;
+    displayName: string;
+    ports: SessionPorts;
+  }): void;
   dispose(): void;
 }
 
@@ -165,6 +177,31 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
     log.info("session-manager: disposed all sessions");
   }
 
+  function restoreSession(params: {
+    sessionId: string;
+    projectPath: string;
+    displayName: string;
+    ports: SessionPorts;
+  }): void {
+    const { sessionId, projectPath, displayName, ports } = params;
+    if (!ports || Object.keys(ports).length === 0) return;
+    // Idempotent: if we already track this session (e.g. it was created this
+    // run), don't double-record. The pool's Set makes duplicate adds harmless
+    // anyway, but skipping keeps the local map authoritative.
+    if (!sessions.has(sessionId)) {
+      sessions.set(sessionId, {
+        sessionId,
+        projectPath,
+        displayName,
+        ports,
+        status: "active",
+        createdAt: Date.now(),
+      });
+    }
+    // Mark these ports as allocated so future createSession() skips them.
+    portPool.recordSessionPorts(sessionId, ports);
+  }
+
   return {
     createSession,
     restoreSession,
@@ -174,6 +211,7 @@ export function createSessionManager(portPool: PortPoolInternal): SessionManager
     getSession,
     listSessions,
     reassignPorts,
+    restoreSession,
     dispose,
   };
 }

@@ -14,10 +14,10 @@ function AppLayout() {
   const project = projects?.find((p) => p.id === activeProjectId);
 
   return (
-    <div className="app-layout">
+    <div className="flex h-full">
       <IconSidebar />
       {project && <SessionSidebar />}
-      <div className="app-workspace">
+      <div className="flex flex-1 flex-col overflow-hidden">
         <Outlet />
       </div>
     </div>

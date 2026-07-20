@@ -1,5 +1,6 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ReactNode, type ErrorInfo } from "react";
 import i18n from "../i18n";
+import { Button } from "./ui/button";
 
 interface Props {
   children: ReactNode;
@@ -17,10 +18,9 @@ export class ErrorBoundary extends Component<Props, State> {
   static getDerivedStateFromError(error: unknown): Partial<State> {
     // React allows `throw "string"` or `throw { custom }`.
     // Normalize to Error so .message and .stack are always available.
-    const normalized =
-      error instanceof Error
-        ? error
-        : new Error(typeof error === "string" ? error : JSON.stringify(error));
+    const normalized = error instanceof Error
+      ? error
+      : new Error(typeof error === "string" ? error : JSON.stringify(error));
     return { hasError: true, error: normalized };
   }
 
@@ -37,7 +37,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleCopy = () => {
     const { error, errorInfo } = this.state;
-    const text = [error?.message, error?.stack, errorInfo?.componentStack]
+    const text = [
+      error?.message,
+      error?.stack,
+      errorInfo?.componentStack,
+    ]
       .filter(Boolean)
       .join("\n\n");
     navigator.clipboard.writeText(text).catch(() => {});
@@ -50,28 +54,22 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="error-boundary">
-          <div className="error-boundary-box">
-            <p className="error-boundary-title">
-              {i18n.t("somethingWentWrong", { ns: "error-boundary" })}
-            </p>
-            <p className="error-boundary-message">
+        <div className="flex h-screen w-full items-center justify-center bg-background p-6">
+          <div className="w-full max-w-[600px] rounded-lg border border-destructive-border bg-destructive-bg p-8">
+            <p className="mb-2 text-lg font-semibold text-destructive-text">{i18n.t("somethingWentWrong", { ns: "error-boundary" })}</p>
+            <p className="mb-4 break-words text-sm text-foreground">
               {this.state.error?.message ?? i18n.t("unknownError", { ns: "error-boundary" })}
             </p>
             {import.meta.env.DEV && this.state.error?.stack && (
-              <pre className="error-boundary-stack">{this.state.error.stack}</pre>
+              <pre className="mb-4 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-secondary p-3 font-mono text-xs leading-normal text-muted-foreground">{this.state.error.stack}</pre>
             )}
-            <div className="error-boundary-actions">
-              <button type="button" onClick={this.handleCopy} className="error-boundary-btn">
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={this.handleCopy}>
                 {i18n.t("copyStack", { ns: "error-boundary" })}
-              </button>
-              <button
-                type="button"
-                onClick={this.handleReload}
-                className="error-boundary-btn error-boundary-btn-primary"
-              >
+              </Button>
+              <Button type="button" variant="default" size="sm" onClick={this.handleReload}>
                 {i18n.t("reload", { ns: "error-boundary" })}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

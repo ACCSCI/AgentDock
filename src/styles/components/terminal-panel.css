@@ -108,6 +108,20 @@
   min-width: 80px;
 }
 
+.terminal-tab-select {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
 .terminal-tab:hover {
   background: var(--color-bg-tertiary);
 }

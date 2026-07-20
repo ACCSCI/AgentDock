@@ -1,9 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Check, Clipboard, Settings, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AGENTDOCK_COMPAT_PROMPT } from "../constants/agentdock-compat-prompt";
 import { useTranslation } from "../i18n/react";
 import { OrphanCleanModal } from "./OrphanCleanModal";
+import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function IconSidebar() {
   const { t } = useTranslation("sidebar");
@@ -41,39 +44,67 @@ export function IconSidebar() {
 
   return (
     <>
-      <div className="icon-sidebar" data-testid="icon-sidebar">
-        <div className="icon-sidebar-top">
-          <button
-            type="button"
-            className="icon-sidebar-btn"
-            title={t("cleanOrphans")}
-            onClick={openOrphanModal}
-            data-testid="open-orphan-modal"
-          >
-            🧹
-          </button>
-          <button
-            type="button"
-            className="icon-sidebar-btn"
-            title={t("copyCompatPrompt")}
-            onClick={handleCopyPrompt}
-            data-testid="copy-compat-prompt"
-          >
-            {copied ? "✅" : "📋"}
-          </button>
+      <aside
+        className="flex w-12 shrink-0 flex-col items-center border-r border-border bg-secondary py-2"
+        aria-label="应用工具"
+        data-testid="icon-sidebar"
+      >
+        <div className="flex flex-1 flex-col items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("cleanOrphans")}
+                onClick={openOrphanModal}
+                data-testid="open-orphan-modal"
+              >
+                <Sparkles aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t("cleanOrphans")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("copyCompatPrompt")}
+                onClick={handleCopyPrompt}
+                data-testid="copy-compat-prompt"
+              >
+                {copied ? (
+                  <Check aria-hidden="true" className="text-success" />
+                ) : (
+                  <Clipboard aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {copied ? "已复制" : t("copyCompatPrompt")}
+            </TooltipContent>
+          </Tooltip>
         </div>
-        <div className="icon-sidebar-bottom">
-          <button
-            type="button"
-            className="icon-sidebar-btn"
-            title={t("settings")}
-            onClick={() => navigate({ to: "/settings" })}
-            data-testid="open-settings"
-          >
-            ⚙
-          </button>
+        <div className="mt-auto flex flex-col items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("settings")}
+                onClick={() => navigate({ to: "/settings" })}
+                data-testid="open-settings"
+              >
+                <Settings aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t("settings")}</TooltipContent>
+          </Tooltip>
         </div>
-      </div>
+      </aside>
       <OrphanCleanModal open={orphanModalOpen} onClose={() => setOrphanModalOpen(false)} />
     </>
   );

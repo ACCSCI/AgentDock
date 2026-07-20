@@ -1,3 +1,6 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
 /* Global styles for AgentDock */
 
 /* ── Component modules ─────────────────────────────────────────────── */
@@ -81,57 +84,224 @@
   font-display: swap;
 }
 
+/* box-sizing only — do NOT reset margin/padding here. This stylesheet is
+ * imported as plain (unlayered) CSS, which beats every Tailwind @layer. A
+ * `* { margin:0; padding:0 }` here would override utility paddings like
+ * .px-4/.py-2 and silently collapse all button padding (the global
+ * "buttons have no padding" bug). Tailwind's preflight already resets
+ * margins/padding inside @layer base, where utilities correctly win. */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
+/* ── AgentDock design system: Operator Console ───────────────────────
+ * Single source of truth for all color/spacing/motion tokens.
+ * Every component — shadcn utility class or legacy .css — reads from these.
+ * Final palette (see docs/color-schemes-preview.png):
+ *   primary #C62A45 · destructive #D92D20 · info #356AE6 · canvas #F6F7F9
+ */
 :root {
-  --color-bg: #ffffff;
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f5f5f5;
-  --color-bg-tertiary: #e8e8e8;
-  --color-text: #1a1a1a;
-  --color-text-secondary: #666666;
-  --color-border: #d43853;
-  --color-border-light: #e0e0e0;
-  --color-primary: #d43853;
-  --color-primary-hover: #b82e47;
-  --color-primary-bg: #fff0f2;
-  --color-tab-active: #ffffff;
-  --color-tab-bg: #f0f0f0;
-  --color-session-bg: #fff3f5;
-  --color-session-border: #d43853;
-  --radius: 12px;
+  color-scheme: light;
+
+  /* Surfaces & text */
+  --background: oklch(0.972 0.002 260);       /* canvas #F6F7F9 */
+  --foreground: oklch(0.19 0.012 275);
+  --card: oklch(1 0 0);                        /* surface #FFFFFF */
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --secondary: oklch(0.955 0.006 275);
+  --secondary-foreground: oklch(0.26 0.012 275);
+  --muted: oklch(0.96 0.005 275);
+  --muted-foreground: oklch(0.5 0.015 275);
+  --accent: oklch(0.95 0.012 275);
+  --accent-foreground: oklch(0.22 0.012 275);
+
+  /* Brand + actions */
+  --primary: oklch(0.539 0.174 16.5);          /* #C62A45 */
+  --primary-foreground: oklch(0.99 0.005 15);
+  --destructive: oklch(0.547 0.202 25.5);      /* #D92D20 — visually distinct from primary */
+  --destructive-foreground: oklch(0.99 0.005 15);
+  --info: oklch(0.52 0.185 258);               /* #356AE6 */
+  --info-foreground: oklch(0.99 0.005 15);
+  --success: oklch(0.55 0.14 150);
+  --warning: oklch(0.64 0.15 70);
+
+  /* Lines & focus */
+  --border: oklch(0.89 0.008 275);
+  --input: oklch(0.86 0.009 275);
+  --ring: oklch(0.539 0.174 16.5);
+
+  /* Status variants (bg / text / border) — used by badges, banners, state rows */
+  --success-bg: oklch(0.962 0.044 156);
+  --success-text: oklch(0.527 0.154 150);
+  --success-border: oklch(0.87 0.075 158);
+  --warning-bg: oklch(0.973 0.071 103);
+  --warning-text: oklch(0.444 0.115 78);
+  --warning-border: oklch(0.901 0.113 93);
+  --destructive-bg: oklch(0.962 0.024 22);
+  --destructive-text: oklch(0.547 0.202 25.5);
+  --destructive-border: oklch(0.889 0.055 24);
+  --info-bg: oklch(0.951 0.034 258);
+  --info-text: oklch(0.52 0.185 258);
+  --info-border: oklch(0.868 0.062 258);
+
+  /* Radius & motion */
+  --radius: 0.5rem;
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Layout constants (non-color) */
   --radius-sm: 6px;
   --radius-md: 8px;
   --font-mono: "Maple Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
   --tab-height: 40px;
   --sidebar-width: 240px;
 
-  /* Daemon status bar */
-  --daemon-ready-dot: #22c55e;
-  --daemon-ready-bg: #f0fdf4;
-  --daemon-ready-text: #15803d;
-  --daemon-ready-border: #bbf7d0;
+  /* Daemon status bar — delegate to the status variants above. */
+  --daemon-ready-dot: var(--success);
+  --daemon-ready-bg: var(--success-bg);
+  --daemon-ready-text: var(--success-text);
+  --daemon-ready-border: var(--success-border);
+  --daemon-recovering-dot: var(--warning);
+  --daemon-recovering-bg: var(--warning-bg);
+  --daemon-recovering-text: var(--warning-text);
+  --daemon-recovering-border: var(--warning-border);
+  --daemon-error-dot: var(--destructive);
+  --daemon-error-bg: var(--destructive-bg);
+  --daemon-error-text: var(--destructive-text);
+  --daemon-error-border: var(--destructive-border);
+  --daemon-connecting-dot: oklch(0.65 0.02 260);
+  --daemon-connecting-bg: var(--muted);
+  --daemon-connecting-text: var(--muted-foreground);
+  --daemon-connecting-border: var(--border);
 
-  --daemon-recovering-dot: #f59e0b;
-  --daemon-recovering-bg: #fffbeb;
-  --daemon-recovering-text: #92400e;
-  --daemon-recovering-border: #fde68a;
+  /* ── Legacy compatibility aliases ───────────────────────────────────
+   * Map the old --color-* names onto the canonical tokens so the 17 legacy
+   * component stylesheets keep working until they are rewritten (Phase 2),
+   * at which point this block is deleted. Single theme-aware source: dark
+   * only overrides the canonical tokens above, these aliases follow for free.
+   */
+  --color-bg: var(--background);
+  --color-bg-primary: var(--card);
+  --color-bg-secondary: var(--secondary);
+  --color-bg-tertiary: var(--muted);
+  --color-text: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-light: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary);
+  --color-primary-bg: var(--accent);
+  --color-accent: var(--info);
+  --color-tab-active: var(--card);
+  --color-tab-bg: var(--secondary);
+  --color-session-bg: var(--card);
+  --color-session-border: var(--primary);
+}
 
-  --daemon-error-dot: #ef4444;
-  --daemon-error-bg: #fef2f2;
-  --daemon-error-text: #dc2626;
-  --daemon-error-border: #fecaca;
+@theme {
+  /* NOTE: use @theme (NOT @theme inline). `inline` resolves var(--card) to its
+   * light literal and emits a static --color-card that wins over the dark
+   * @media override — that's what made cards render white in dark mode.
+   * Plain @theme keeps the var() reference, so these utilities follow the
+   * :root → @media dark cascade correctly. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-success-bg: var(--success-bg);
+  --color-success-text: var(--success-text);
+  --color-success-border: var(--success-border);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-text: var(--warning-text);
+  --color-warning-border: var(--warning-border);
+  --color-destructive-bg: var(--destructive-bg);
+  --color-destructive-text: var(--destructive-text);
+  --color-destructive-border: var(--destructive-border);
+  --color-info-bg: var(--info-bg);
+  --color-info-text: var(--info-text);
+  --color-info-border: var(--info-border);
+  --radius-sm: calc(var(--radius) - 0.125rem);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 0.125rem);
+  --font-mono: "Maple Mono", "JetBrains Mono", monospace;
+}
 
-  --daemon-connecting-dot: #94a3b8;
-  --daemon-connecting-bg: #f1f5f9;
-  --daemon-connecting-text: #475569;
-  --daemon-connecting-border: #e2e8f0;
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    /* Surfaces & text */
+    --background: oklch(0.17 0.012 275);
+    --foreground: oklch(0.94 0.006 275);
+    --card: oklch(0.205 0.012 275);
+    --card-foreground: var(--foreground);
+    --popover: oklch(0.225 0.014 275);
+    --popover-foreground: var(--foreground);
+    --secondary: oklch(0.255 0.013 275);
+    --secondary-foreground: oklch(0.92 0.006 275);
+    --muted: oklch(0.245 0.012 275);
+    --muted-foreground: oklch(0.67 0.013 275);
+    --accent: oklch(0.28 0.018 275);
+    --accent-foreground: oklch(0.95 0.006 275);
+
+    /* Brand + actions (brightened for dark surfaces) */
+    --primary: oklch(0.714 0.176 14.5);        /* #F0566E */
+    --primary-foreground: oklch(0.16 0.015 15);
+    --destructive: oklch(0.68 0.19 25);        /* #F04438 */
+    --destructive-foreground: oklch(0.99 0.005 15);
+    --info: oklch(0.72 0.14 256);              /* #5B8DEF */
+    --info-foreground: oklch(0.16 0.015 15);
+    --success: oklch(0.7 0.14 150);
+    --warning: oklch(0.76 0.14 75);
+
+    /* Lines & focus */
+    --border: oklch(0.31 0.013 275);
+    --input: oklch(0.34 0.014 275);
+    --ring: oklch(0.714 0.176 14.5);
+
+    /* Status variants — darker, saturated backgrounds for dark mode */
+    --success-bg: oklch(0.27 0.05 155);
+    --success-text: oklch(0.8 0.15 152);
+    --success-border: oklch(0.45 0.09 155);
+    --warning-bg: oklch(0.3 0.05 80);
+    --warning-text: oklch(0.83 0.13 82);
+    --warning-border: oklch(0.48 0.09 80);
+    --destructive-bg: oklch(0.29 0.06 24);
+    --destructive-text: oklch(0.78 0.16 24);
+    --destructive-border: oklch(0.5 0.11 24);
+    --info-bg: oklch(0.28 0.05 258);
+    --info-text: oklch(0.8 0.13 257);
+    --info-border: oklch(0.46 0.09 258);
+
+    --daemon-connecting-dot: oklch(0.7 0.02 260);
+  }
 }
 
 html,
@@ -149,4 +319,30 @@ body {
   background-color: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+:where(button, [role="button"], input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0ms;
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+[data-test-motion="off"] {
+  --motion-instant: 0ms;
+  --motion-fast: 0ms;
+  --motion-normal: 0ms;
+  --motion-slow: 0ms;
 }
